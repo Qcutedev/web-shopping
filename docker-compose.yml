@@ -12,10 +12,18 @@
 
 name: marketplace
 
+# One image for both services, pinned by digest so that a later pull cannot
+# silently bring a different image than the one exercised (SEC-008). The tag is
+# kept for readability only; Docker resolves the digest. This is the multi-
+# platform index digest of `postgres:18-trixie` as pulled on 2026-10-11
+# (PostgreSQL 18.6). To update it, follow "Updating the database image" in
+# docs/DEPLOYMENT.md; never edit the digest by hand without pulling and testing.
+x-postgres-image: &postgres-image postgres:18-trixie@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336
+
 services:
   # Development database. Data persists in a named volume across restarts.
   db-dev:
-    image: postgres:18-trixie
+    image: *postgres-image
     environment:
       POSTGRES_USER: ${POSTGRES_DEV_USER:-marketplace}
       POSTGRES_PASSWORD: ${POSTGRES_DEV_PASSWORD:-local_dev_only_not_a_secret}
@@ -46,7 +54,7 @@ services:
   # Test database. The data directory is in memory (tmpfs): it is discarded
   # whenever the container stops, so every start is a new, empty database.
   db-test:
-    image: postgres:18-trixie
+    image: *postgres-image
     environment:
       POSTGRES_USER: ${POSTGRES_TEST_USER:-marketplace}
       POSTGRES_PASSWORD: ${POSTGRES_TEST_PASSWORD:-local_test_only_not_a_secret}
