@@ -35,7 +35,7 @@ graph TD
 | Data | `src/server/db`, `prisma` | Prisma | Client, transaction helper, schema |
 | Platform | `src/server` (logger, env, rate limit, errors) | none of the above | Cross-cutting utilities |
 
-Dependencies point downward only. Lint rules (import restrictions) enforce the hard edges: only `src/server/db` imports the Prisma client; pages, route handlers, and components never import `src/server/db`; client components never import server modules. The full list of code allowed to import `src/server/db` is D-021.
+Dependencies point downward only. Lint rules (import restrictions) enforce the hard edges: only `src/server/db` imports the Prisma client; nothing outside `src/modules` imports `src/server/db` (`scripts/check-import-guards.mjs` proves the rules on every `pnpm lint`). Keeping client components from importing server modules is not lint-enforced yet; it relies on the framework's build error for server-only APIs until a `server-only` marker is added with the first database-backed module. The full list of code allowed to import `src/server/db` is D-021.
 
 ## Directory layout
 
