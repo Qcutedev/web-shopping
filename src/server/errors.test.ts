@@ -8,12 +8,15 @@ import {
   ERROR_STATUS,
   type ErrorCode,
   forbidden,
+  formatFieldPath,
   fromZodError,
   insufficientStock,
   internalError,
   invalidStateTransition,
   isAppError,
   MAX_FIELD_ERRORS,
+  MAX_FIELD_MESSAGE_LENGTH,
+  MAX_FIELD_PATH_LENGTH,
   notFound,
   orderLimitExceeded,
   payloadTooLarge,
@@ -107,6 +110,20 @@ describe("AppError serialisation", () => {
     expect(JSON.stringify(error)).not.toContain("SELECT");
   });
 
+  it("INTERNAL_ERROR always has the fixed public message, whatever the caller passes", () => {
+    const custom = 'relation "User" does not exist; postgresql://app:pw@db:5432/shop';
+    const error = new AppError("INTERNAL_ERROR", { message: custom, cause: new Error(custom) });
+    expect(error.message).toBe("An unexpected error occurred.");
+    expect(error.toPublic().message).toBe("An unexpected error occurred.");
+    expect(JSON.stringify(error)).not.toContain("User");
+    expect(JSON.stringify(error)).not.toContain("postgresql");
+
+    // Other codes keep the caller's public message.
+    expect(new AppError("CONFLICT", { message: "SKU already exists." }).message).toBe(
+      "SKU already exists.",
+    );
+  });
+
   it("isAppError rejects other values", () => {
     expect(isAppError(new Error("x"))).toBe(false);
     expect(isAppError({ code: "NOT_FOUND", status: 404 })).toBe(false);
@@ -136,6 +153,44 @@ describe("specific helpers", () => {
     }));
     const fields = validationError(many).details.fields;
     expect(Array.isArray(fields) && fields.length).toBe(MAX_FIELD_ERRORS);
+  });
+
+  it("validationError caps the length of every path and message", () => {
+    const error = validationError([
+      { path: "p".repeat(5_000), code: "c".repeat(5_000), message: "m".repeat(5_000) },
+      { path: "quantity", code: "too_small", message: "Too small." },
+    ]);
+    const fields = error.details.fields as { path: string; code: string; message: string }[];
+    expect(fields[0]?.path).toHaveLength(MAX_FIELD_PATH_LENGTH);
+    expect(fields[0]?.path.endsWith("...")).toBe(true);
+    expect(fields[0]?.message).toHaveLength(MAX_FIELD_MESSAGE_LENGTH);
+    expect(fields[0]?.message.endsWith("...")).toBe(true);
+    expect(fields[0]?.code.length).toBeLessThanOrEqual(64);
+    // Short values are passed through untouched.
+    expect(fields[1]).toEqual({ path: "quantity", code: "too_small", message: "Too small." });
+  });
+});
+
+describe("formatFieldPath", () => {
+  it("joins segments with dots and uses the empty string for the root", () => {
+    expect(formatFieldPath([])).toBe("");
+    expect(formatFieldPath(["address", "postalCode"])).toBe("address.postalCode");
+    expect(formatFieldPath(["items", 3, "quantity"])).toBe("items.3.quantity");
+  });
+
+  it("tells a key that contains a dot apart from nesting", () => {
+    expect(formatFieldPath(["a.b"])).toBe("a\\.b");
+    expect(formatFieldPath(["a", "b"])).toBe("a.b");
+    expect(formatFieldPath(["a.b"])).not.toBe(formatFieldPath(["a", "b"]));
+    // The escape character is escaped too, so an escaped-looking key cannot collide either.
+    expect(formatFieldPath(["a\\", "b"])).toBe("a\\\\.b");
+    expect(formatFieldPath(["a\\.b"])).toBe("a\\\\\\.b");
+    expect(formatFieldPath(["a\\", "b"])).not.toBe(formatFieldPath(["a\\.b"]));
+  });
+
+  it("stays bounded for a very deep path", () => {
+    const deep = Array.from({ length: 100_000 }, () => "segment");
+    expect(formatFieldPath(deep).length).toBeLessThan(MAX_FIELD_PATH_LENGTH + 20);
   });
 });
 
@@ -179,6 +234,51 @@ describe("fromZodError", () => {
     expect(error.details.fields).toEqual([
       { path: "", code: "unrecognized_keys", message: expect.stringContaining("role") },
     ]);
+  });
+
+  it("distinguishes the key a.b from nested a then b in details.fields", () => {
+    const dotted = z.object({ "a.b": z.string(), a: z.object({ b: z.string() }) });
+    const result = dotted.safeParse({ "a.b": 1, a: { b: 2 } });
+    if (result.success) throw new Error("expected the input to be rejected");
+    const fields = fromZodError(result.error).details.fields as { path: string }[];
+    expect(fields.map((field) => field.path).sort()).toEqual(["a.b", "a\\.b"]);
+  });
+
+  it("keeps the response small for a body with 5,000 unknown keys", () => {
+    const hostile: Record<string, unknown> = {
+      quantity: 1,
+      address: { postalCode: "10110" },
+      tags: [],
+    };
+    for (let index = 0; index < 5_000; index += 1) hostile[`unknownKey${index}`] = index;
+
+    const error = fromZodError(parseFailure(hostile));
+    const fields = error.details.fields as { path: string; code: string; message: string }[];
+    expect(fields).toHaveLength(1);
+    expect(fields[0]?.code).toBe("unrecognized_keys");
+    expect(fields[0]?.message.length).toBeLessThanOrEqual(MAX_FIELD_MESSAGE_LENGTH);
+    // Without the cap this body is about 44 kB, because Zod names every unknown key.
+    expect(JSON.stringify(error).length).toBeLessThan(500);
+  });
+
+  it("keeps the response bounded for thousands of invalid values under long keys", () => {
+    const longKey = "k".repeat(2_000);
+    const wide = z.record(z.string(), z.number());
+    const input: Record<string, unknown> = {};
+    for (let index = 0; index < 5_000; index += 1) input[`${longKey}${index}`] = "not a number";
+    const result = wide.safeParse(input);
+    if (result.success) throw new Error("expected the input to be rejected");
+
+    const error = fromZodError(result.error);
+    const fields = error.details.fields as { path: string; message: string }[];
+    expect(fields).toHaveLength(MAX_FIELD_ERRORS);
+    for (const field of fields) {
+      expect(field.path.length).toBeLessThanOrEqual(MAX_FIELD_PATH_LENGTH);
+      expect(field.message.length).toBeLessThanOrEqual(MAX_FIELD_MESSAGE_LENGTH);
+    }
+    expect(JSON.stringify(error).length).toBeLessThan(
+      MAX_FIELD_ERRORS * (MAX_FIELD_PATH_LENGTH + MAX_FIELD_MESSAGE_LENGTH + 120),
+    );
   });
 
   it("does not copy the rejected value into the error", () => {

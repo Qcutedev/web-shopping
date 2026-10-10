@@ -1,8 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import { AppError, conflict, ERROR_CODES, ERROR_STATUS, notFound, rateLimited } from "./errors";
-import { created, errorResponse, ok, paginated, paginationMeta, toAppError } from "./http";
+import {
+  AppError,
+  conflict,
+  ERROR_CODES,
+  ERROR_STATUS,
+  fromZodError,
+  notFound,
+  rateLimited,
+} from "./errors";
+import {
+  created,
+  errorResponse,
+  ok,
+  paginated,
+  paginationMeta,
+  parseInput,
+  toAppError,
+} from "./http";
 import { createLogger } from "./logger";
 import { REQUEST_ID_HEADER } from "./request-id";
 
@@ -11,6 +27,23 @@ const requestId = "req-test-0001";
 async function read(response: Response): Promise<unknown> {
   return JSON.parse(await response.text());
 }
+
+/** A logger that collects its lines, parsed. */
+function captureLog() {
+  const lines: string[] = [];
+  const logger = createLogger({ write: (line) => lines.push(line), requestId });
+  return {
+    logger,
+    lines,
+    entry(index: number): Record<string, unknown> {
+      const line = lines[index];
+      if (line === undefined) throw new Error(`expected a log line at index ${index}`);
+      return JSON.parse(line) as Record<string, unknown>;
+    },
+  };
+}
+
+const cartSchema = z.strictObject({ quantity: z.number().int().min(1) });
 
 describe("success envelope", () => {
   it("ok wraps the payload in { data } with status 200 and the request id header", async () => {
@@ -30,10 +63,37 @@ describe("success envelope", () => {
   it("keeps extra headers but never lets them replace the request id", () => {
     const response = ok(null, {
       requestId,
-      headers: { "Cache-Control": "no-store", "X-Request-Id": "spoofed-value" },
+      headers: { "Cache-Control": "no-store", "X-Request-Id": "spoofed-value", Vary: "Cookie" },
     });
     expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("vary")).toBe("Cookie");
     expect(response.headers.get(REQUEST_ID_HEADER)).toBe(requestId);
+  });
+
+  it("marks ok, created, and paginated responses as no-store by default", () => {
+    const page = { page: 1, pageSize: 20, total: 0 };
+    for (const response of [
+      ok({ id: "a1" }, { requestId }),
+      created({ id: "o1" }, { requestId }),
+      paginated([], page, { requestId }),
+    ]) {
+      expect(response.headers.get("cache-control")).toBe("no-store");
+    }
+  });
+
+  it("lets a success response opt in to caching only through the cacheControl option", () => {
+    const publicValue = "public, max-age=60";
+    const page = { page: 1, pageSize: 20, total: 0 };
+    expect(ok([], { requestId, cacheControl: publicValue }).headers.get("cache-control")).toBe(
+      publicValue,
+    );
+    expect(
+      paginated([], page, { requestId, cacheControl: publicValue }).headers.get("cache-control"),
+    ).toBe(publicValue);
+
+    // A Cache-Control smuggled in through the generic headers bag does not count as opting in.
+    const viaHeaders = ok([], { requestId, headers: { "cache-control": publicValue } });
+    expect(viaHeaders.headers.get("cache-control")).toBe("no-store");
   });
 
   it("paginated returns { data, meta } exactly as the contract shows", async () => {
@@ -114,14 +174,37 @@ describe("error envelope", () => {
     expect(errorResponse(notFound(), { requestId }).headers.has("Retry-After")).toBe(false);
   });
 
-  it("maps a ZodError to VALIDATION_ERROR with details.fields", async () => {
-    const result = z.strictObject({ quantity: z.number().int().min(1) }).safeParse({
-      quantity: "two",
-      priceSatang: 1,
+  it("error responses are always no-store, even when a caller passes another directive", () => {
+    expect(errorResponse(notFound(), { requestId }).headers.get("cache-control")).toBe("no-store");
+    expect(errorResponse(new Error("x"), { requestId }).headers.get("cache-control")).toBe(
+      "no-store",
+    );
+    const sneaky = errorResponse(notFound(), {
+      requestId,
+      headers: { "Cache-Control": "public, max-age=60" },
     });
-    if (result.success) throw new Error("expected the input to be rejected");
+    expect(sneaky.headers.get("cache-control")).toBe("no-store");
+  });
+});
 
-    const response = errorResponse(result.error, { requestId });
+describe("validation errors", () => {
+  const badInput = { quantity: "two", priceSatang: 1 };
+
+  it("parseInput returns the parsed value for valid request input", () => {
+    expect(parseInput(cartSchema, { quantity: 2 })).toEqual({ quantity: 2 });
+  });
+
+  it("parseInput turns invalid request input into 400 VALIDATION_ERROR with details.fields", async () => {
+    let thrown: unknown;
+    try {
+      parseInput(cartSchema, badInput);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(AppError);
+
+    const { logger, lines } = captureLog();
+    const response = errorResponse(thrown, { requestId, logger });
     expect(response.status).toBe(400);
     const body = (await read(response)) as {
       error: { code: string; details: { fields: { path: string }[] }; requestId: string };
@@ -129,6 +212,47 @@ describe("error envelope", () => {
     expect(body.error.code).toBe("VALIDATION_ERROR");
     expect(body.error.requestId).toBe(requestId);
     expect(body.error.details.fields.map((field) => field.path).sort()).toEqual(["", "quantity"]);
+    expect(lines).toHaveLength(0);
+  });
+
+  it("safeParse followed by throw fromZodError is the same explicit conversion", () => {
+    const result = cartSchema.safeParse(badInput);
+    if (result.success) throw new Error("expected the input to be rejected");
+    const response = errorResponse(fromZodError(result.error), { requestId });
+    expect(response.status).toBe(400);
+  });
+
+  it("a ZodError that was not converted by the handler is a 500 with nothing about it in the response", async () => {
+    // What a service gets when a database JSON column, a provider response, or settings do not
+    // match their schema: the client did nothing wrong and must learn nothing about the shape.
+    const settingsSchema = z.object({ commissionBasisPoints: z.number().int() });
+    const result = settingsSchema.safeParse({ commissionBasisPoints: "MARKER-FROM-DATABASE" });
+    if (result.success) throw new Error("expected the stored value to be rejected");
+
+    const { logger, lines, entry } = captureLog();
+    const response = errorResponse(result.error, { requestId, logger });
+    const text = await response.text();
+
+    expect(response.status).toBe(500);
+    expect(JSON.parse(text)).toEqual({
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "An unexpected error occurred.",
+        details: {},
+        requestId,
+      },
+    });
+    for (const leaked of ["commissionBasisPoints", "fields", "invalid_type", "received"]) {
+      expect(text).not.toContain(leaked);
+    }
+
+    // The original ZodError is the cause and is what the server logs.
+    expect(toAppError(result.error).code).toBe("INTERNAL_ERROR");
+    expect(toAppError(result.error).cause).toBe(result.error);
+    expect(lines).toHaveLength(1);
+    const logged = entry(0);
+    expect(logged).toMatchObject({ level: "error", code: "INTERNAL_ERROR", requestId });
+    expect(JSON.stringify(logged.err)).toContain("commissionBasisPoints");
   });
 });
 
@@ -179,23 +303,53 @@ describe("unknown errors", () => {
     expect(toAppError(domain)).toBe(domain);
   });
 
-  it("logs the original error on the server for 5xx, and nothing for 4xx", () => {
-    const lines: string[] = [];
-    const logger = createLogger({ write: (line) => lines.push(line), requestId });
+  it("logs the original error on the server for 5xx, and nothing for a 4xx without a cause", () => {
+    const { logger, lines, entry } = captureLog();
 
     errorResponse(notFound(), { requestId, logger });
     expect(lines).toHaveLength(0);
 
     errorResponse(new Error("database exploded"), { requestId, logger });
     expect(lines).toHaveLength(1);
-    const entry = JSON.parse(lines[0]) as {
-      level: string;
-      requestId: string;
-      code: string;
-      err: { message: string; stack: string };
-    };
-    expect(entry).toMatchObject({ level: "error", requestId, code: "INTERNAL_ERROR" });
-    expect(entry.err.message).toBe("database exploded");
-    expect(typeof entry.err.stack).toBe("string");
+    const logged = entry(0);
+    expect(logged).toMatchObject({ level: "error", requestId, code: "INTERNAL_ERROR" });
+    const err = logged.err as { message?: unknown; stack?: unknown };
+    expect(err.message).toBe("database exploded");
+    expect(typeof err.stack).toBe("string");
+  });
+
+  it("logs the cause of a 4xx at warn level, through the redacting logger", async () => {
+    const { logger, lines, entry } = captureLog();
+    const cause = new Error(
+      'Unique constraint failed on "Product_storeId_sku_key"; seller somchai@example.com; password=hunter2',
+    );
+    const response = errorResponse(conflict({ message: "SKU already exists.", cause }), {
+      requestId,
+      logger,
+    });
+
+    expect(response.status).toBe(409);
+    expect(await response.text()).not.toContain("Product_storeId_sku_key");
+
+    expect(lines).toHaveLength(1);
+    const logged = entry(0);
+    expect(logged).toMatchObject({ level: "warn", requestId, code: "CONFLICT", status: 409 });
+    const err = logged.err as { name?: unknown; message?: unknown };
+    expect(err.name).toBe("Error");
+    expect(String(err.message)).toContain("Product_storeId_sku_key");
+    expect(lines.join("\n")).not.toContain("somchai@example.com");
+    expect(lines.join("\n")).not.toContain("hunter2");
+  });
+
+  it("the 5xx log line does not carry secrets or personal data from the error message", () => {
+    const { logger, lines } = captureLog();
+    errorResponse(new Error(`${secretMessage}; contact somchai@example.com`), {
+      requestId,
+      logger,
+    });
+    expect(lines).toHaveLength(1);
+    for (const leaked of ["hunter2", "app:pw", "somchai@example.com"]) {
+      expect(lines.join("\n")).not.toContain(leaked);
+    }
   });
 });

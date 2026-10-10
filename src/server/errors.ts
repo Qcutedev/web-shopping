@@ -6,10 +6,15 @@
  * place where a code is tied to an HTTP status.
  *
  * What reaches a client is exactly `code`, `message`, and `details`. Anything
- * attached as `cause` stays on the server and is only ever written to the log.
- * Therefore `message` and `details` must be written as public, developer-facing
- * English text and data: never a database message, a stack, SQL, a secret, or an
- * id the caller has no right to see.
+ * attached as `cause` stays on the server. `errorResponse` in src/server/http.ts
+ * writes it to the log through the redacting logger: at error level for a 5xx,
+ * at warn level for a 4xx that carries a cause. Therefore `message` and `details`
+ * must be written as public, developer-facing English text and data: never a
+ * database message, a stack, SQL, a secret, or an id the caller has no right to
+ * see.
+ *
+ * INTERNAL_ERROR is the exception to "the caller writes the message": its public
+ * text is fixed in the AppError constructor, whatever the caller passes.
  */
 import type { ZodError } from "zod";
 
@@ -47,7 +52,7 @@ const DEFAULT_MESSAGE: Record<ErrorCode, string> = {
   INVALID_STATE_TRANSITION: "This status change is not allowed.",
   CONFLICT: "The request conflicts with existing data.",
   PAYLOAD_TOO_LARGE: "The upload is too large.",
-  UNSUPPORTED_MEDIA_TYPE: "The upload type is not allowed.",
+  UNSUPPORTED_MEDIA_TYPE: "The media type is not supported.",
   ORDER_LIMIT_EXCEEDED: "The order total exceeds the allowed maximum.",
   RATE_LIMITED: "Too many requests. Try again later.",
   INTERNAL_ERROR: "An unexpected error occurred.",
@@ -67,7 +72,7 @@ export interface PublicError {
 }
 
 export interface AppErrorOptions {
-  /** Public message. Defaults to a fixed message per code. */
+  /** Public message. Defaults to a fixed message per code. Ignored for INTERNAL_ERROR. */
   message?: string;
   /** Public details. */
   details?: ErrorDetails;
@@ -81,7 +86,13 @@ export class AppError extends Error {
   readonly details: ErrorDetails;
 
   constructor(code: ErrorCode, options: AppErrorOptions = {}) {
-    super(options.message ?? DEFAULT_MESSAGE[code], { cause: options.cause });
+    // The one place that fixes the public text of a 500: a custom message is dropped so that
+    // nothing a service wrote about an unexpected failure can reach a client.
+    const message =
+      code === "INTERNAL_ERROR"
+        ? DEFAULT_MESSAGE[code]
+        : (options.message ?? DEFAULT_MESSAGE[code]);
+    super(message, { cause: options.cause });
     this.name = "AppError";
     this.code = code;
     this.status = ERROR_STATUS[code];
@@ -118,7 +129,10 @@ export function isAppError(value: unknown): value is AppError {
 
 /** One entry of `details.fields` on a VALIDATION_ERROR. */
 export interface FieldError {
-  /** Dotted path to the offending value; empty string for the root. */
+  /**
+   * Dotted path to the offending value; empty string for the root. A `.` or `\` inside a key is
+   * escaped with a backslash, so the key `a.b` is `a\.b` and nested `a` then `b` is `a.b`.
+   */
   path: string;
   /** Zod issue code, for example `invalid_type` or `unrecognized_keys`. */
   code: string;
@@ -128,25 +142,64 @@ export interface FieldError {
 
 /** Upper bound on reported field errors so a hostile body cannot inflate the response. */
 export const MAX_FIELD_ERRORS = 50;
+/** Upper bound, in characters, on each `path` and each `message` of a field error. */
+export const MAX_FIELD_PATH_LENGTH = 200;
+export const MAX_FIELD_MESSAGE_LENGTH = 200;
+/** Upper bound on a field error `code`. Zod issue codes are far shorter. */
+const MAX_FIELD_CODE_LENGTH = 64;
+const CLIPPED_SUFFIX = "...";
+
+/** Cuts `value` to at most `max` characters, the last three being `...` when it was cut. */
+function clip(value: string, max: number): string {
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - CLIPPED_SUFFIX.length)}${CLIPPED_SUFFIX}`;
+}
+
+/**
+ * Joins path segments with `.`. A `.` or `\` inside a segment is escaped with a backslash so a
+ * key that contains a dot cannot be mistaken for nesting. An array index and an object key made
+ * of the same digits are not distinguished (documented in docs/API_CONTRACTS.md).
+ */
+export function formatFieldPath(segments: readonly PropertyKey[]): string {
+  const parts: string[] = [];
+  let length = 0;
+  for (const segment of segments) {
+    // Stop once the result is certain to be clipped, so a very deep path costs nothing more.
+    if (length > MAX_FIELD_PATH_LENGTH) break;
+    const text = String(segment).slice(0, MAX_FIELD_PATH_LENGTH + 1);
+    const escaped = text.replace(/[\\.]/g, (character) => `\\${character}`);
+    parts.push(escaped);
+    length += escaped.length + 1;
+  }
+  return parts.join(".");
+}
 
 export function validationError(
   fields: readonly FieldError[],
   options: Omit<AppErrorOptions, "details"> = {},
 ): AppError {
-  const listed = fields
-    .slice(0, MAX_FIELD_ERRORS)
-    .map((field) => ({ path: field.path, code: field.code, message: field.message }));
+  const listed = fields.slice(0, MAX_FIELD_ERRORS).map((field) => ({
+    path: clip(field.path, MAX_FIELD_PATH_LENGTH),
+    code: clip(field.code, MAX_FIELD_CODE_LENGTH),
+    message: clip(field.message, MAX_FIELD_MESSAGE_LENGTH),
+  }));
   return new AppError("VALIDATION_ERROR", { ...options, details: { fields: listed } });
 }
 
 /**
  * Maps a ZodError to VALIDATION_ERROR with `details.fields`.
  * Only the path, the issue code, and Zod's message are copied; the rejected input is not.
+ * The number of issues and the length of every string are capped (Zod names every unknown key
+ * in one message, so a body with thousands of unknown keys would otherwise inflate the response).
+ *
+ * Call this only for request input (body, query, path parameters, headers). A ZodError from
+ * parsing anything else is a server fault and must reach `errorResponse` as it is, which turns
+ * it into INTERNAL_ERROR. `parseInput` in src/server/http.ts is the usual way to get here.
  */
 export function fromZodError(error: ZodError): AppError {
   return validationError(
-    error.issues.map((issue) => ({
-      path: issue.path.map((segment) => String(segment)).join("."),
+    error.issues.slice(0, MAX_FIELD_ERRORS).map((issue) => ({
+      path: formatFieldPath(issue.path),
       code: String(issue.code),
       message: issue.message,
     })),
@@ -194,6 +247,7 @@ export function payloadTooLarge(options?: AppErrorOptions): AppError {
   return new AppError("PAYLOAD_TOO_LARGE", options);
 }
 
+/** 415: a mutation sent with a content type the endpoint does not accept, or an upload of a disallowed type. */
 export function unsupportedMediaType(options?: AppErrorOptions): AppError {
   return new AppError("UNSUPPORTED_MEDIA_TYPE", options);
 }
@@ -209,7 +263,7 @@ export function rateLimited(
   return new RateLimitedError(retryAfterSeconds, options);
 }
 
-/** The message is fixed on purpose: nothing about the cause may reach the client. */
+/** The message is fixed (by the AppError constructor): nothing about the cause may reach the client. */
 export function internalError(cause?: unknown): AppError {
   return new AppError("INTERNAL_ERROR", { cause });
 }

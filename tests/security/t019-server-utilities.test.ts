@@ -91,7 +91,7 @@ describe("controls that hold (regression guards)", () => {
     log.info("second");
     expect(lines).toHaveLength(2);
     expect(lines[0]).not.toMatch(/[\r\n\u0000\u001b]/);
-    expect(JSON.parse(lines[0]).level).toBe("info");
+    expect(JSON.parse(lines[0] ?? "").level).toBe("info");
   });
 
   it("request id: values that could break a header or a log line are never reused", () => {
@@ -112,17 +112,17 @@ describe("controls that hold (regression guards)", () => {
     let now = 1_000_000;
     const limiter = createRateLimiter({ now: () => now });
     for (let i = 0; i < 5; i += 1)
-      await limiter.consume("signin:ip:203.0.113.7", RATE_LIMITS.SIGN_IN);
-    const blocked = await limiter.consume("signin:ip:203.0.113.7", RATE_LIMITS.SIGN_IN);
+      await limiter.consume("signin:ip:203.0.113.7", RATE_LIMITS.SIGN_IN_ADDRESS);
+    const blocked = await limiter.consume("signin:ip:203.0.113.7", RATE_LIMITS.SIGN_IN_ADDRESS);
     expect(blocked.allowed).toBe(false);
     now += 59_999;
-    expect((await limiter.consume("signin:ip:203.0.113.7", RATE_LIMITS.SIGN_IN)).allowed).toBe(
-      false,
-    );
+    expect(
+      (await limiter.consume("signin:ip:203.0.113.7", RATE_LIMITS.SIGN_IN_ADDRESS)).allowed,
+    ).toBe(false);
     now += 1;
-    expect((await limiter.consume("signin:ip:203.0.113.7", RATE_LIMITS.SIGN_IN)).allowed).toBe(
-      true,
-    );
+    expect(
+      (await limiter.consume("signin:ip:203.0.113.7", RATE_LIMITS.SIGN_IN_ADDRESS)).allowed,
+    ).toBe(true);
   });
 
   it("rate limiter: flooding a full store with new keys cannot reset an existing counter", async () => {
@@ -130,11 +130,13 @@ describe("controls that hold (regression guards)", () => {
     const store = new MemoryRateLimitStore({ maxKeys: 50 });
     const limiter = createRateLimiter({ store, now: () => now });
     for (let i = 0; i < 5; i += 1)
-      await limiter.consume("signin:email:victim", RATE_LIMITS.SIGN_IN);
+      await limiter.consume("signin:email:victim", RATE_LIMITS.SIGN_IN_ADDRESS);
     for (let i = 0; i < 5_000; i += 1)
-      await limiter.consume(`signin:ip:flood-${i}`, RATE_LIMITS.SIGN_IN);
+      await limiter.consume(`signin:ip:flood-${i}`, RATE_LIMITS.SIGN_IN_ADDRESS);
     expect(store.size).toBeLessThanOrEqual(50);
-    expect((await limiter.consume("signin:email:victim", RATE_LIMITS.SIGN_IN)).allowed).toBe(false);
+    expect(
+      (await limiter.consume("signin:email:victim", RATE_LIMITS.SIGN_IN_ADDRESS)).allowed,
+    ).toBe(false);
   });
 
   it("rate limiter: the default store holds 100 000 keys and refuses the next new one", async () => {
@@ -167,14 +169,14 @@ describe("SEC-001 personal data is written to logs in clear text", () => {
   };
 
   for (const [key, value] of Object.entries(personal)) {
-    it.fails(`redacts the value under the key "${key}"`, () => {
+    it(`redacts the value under the key "${key}"`, () => {
       const { lines, log } = capture();
       log.info("order placed", { order: { [key]: value } });
       expect(lines[0]).not.toContain(value);
     });
   }
 
-  it.fails("masks an email address inside free text such as an error message", () => {
+  it("masks an email address inside free text such as an error message", () => {
     const { lines, log } = capture();
     log.error("Unhandled error", {
       err: new Error("Invalid `prisma.user.create()` invocation: email: 'somchai@example.com'"),
@@ -208,7 +210,7 @@ describe("SEC-001 personal data is written to logs in clear text", () => {
 });
 
 describe("SEC-002 secrets survive logger redaction", () => {
-  it.fails("masks a URL password that contains an unencoded @", () => {
+  it("masks a URL password that contains an unencoded @", () => {
     const { lines, log } = capture();
     log.error("db down", {
       err: new Error("connect failed postgresql://app:Pa@ssTAIL99@db:5432/shop"),
@@ -216,26 +218,26 @@ describe("SEC-002 secrets survive logger redaction", () => {
     expect(lines[0]).not.toContain("ssTAIL99");
   });
 
-  it.fails("masks key=value secrets inside free text", () => {
+  it("masks key=value secrets inside free text", () => {
     const { lines, log } = capture();
     log.error("Unhandled error", { err: new Error("auth failed; password=hunter2VALUE") });
     expect(lines[0]).not.toContain("hunter2VALUE");
   });
 
-  it.fails("masks secret query parameters in a logged URL", () => {
+  it("masks secret query parameters in a logged URL", () => {
     const { lines, log } = capture();
     log.info("request", { url: "https://shop.example/reset?token=QUERYTOKEN123&next=/" });
     expect(lines[0]).not.toContain("QUERYTOKEN123");
   });
 
-  it.fails("masks a raw Cookie header line held in a string", () => {
+  it("masks a raw Cookie header line held in a string", () => {
     const { lines, log } = capture();
     log.info("request", { rawHeaders: ["Cookie: better-auth.session_token=COOKIEVALUE123"] });
     expect(lines[0]).not.toContain("COOKIEVALUE123");
   });
 
   for (const key of ["pwd", "pass", "passphrase", "otp", "pin", "signature", "jwt", "hash"]) {
-    it.fails(`redacts the value under the key "${key}"`, () => {
+    it(`redacts the value under the key "${key}"`, () => {
       const { lines, log } = capture();
       log.info("x", { [key]: "SENSITIVE-VALUE-42" });
       expect(lines[0]).not.toContain("SENSITIVE-VALUE-42");
@@ -244,7 +246,7 @@ describe("SEC-002 secrets survive logger redaction", () => {
 });
 
 describe("SEC-003 a client chooses the request id written to logs and responses", () => {
-  it.fails("ignores a well-formed X-Request-Id from an untrusted client by default", () => {
+  it("ignores a well-formed X-Request-Id from an untrusted client by default", () => {
     const request = new Request("http://localhost/api/v1/cart", {
       headers: { [REQUEST_ID_HEADER]: "attacker-chosen-id-0001" },
     });
@@ -253,7 +255,7 @@ describe("SEC-003 a client chooses the request id written to logs and responses"
 });
 
 describe("SEC-004 one flood of new keys refuses every other rate-limited action", () => {
-  it.fails("keeps serving checkout keys while the sign-up keys fill their capacity", async () => {
+  it("keeps serving checkout keys while the sign-up keys fill their capacity", async () => {
     const now = 1_000_000;
     const limiter = createRateLimiter({ now: () => now });
     // 100 000 distinct sign-up keys (one per IPv6 /64, or per spoofed X-Forwarded-For value).
@@ -264,7 +266,7 @@ describe("SEC-004 one flood of new keys refuses every other rate-limited action"
     expect(checkout.allowed).toBe(true);
   });
 
-  it.fails("tells a refused client to retry soon, not after the full window", async () => {
+  it("tells a refused client to retry soon, not after the full window", async () => {
     const now = 1_000_000;
     const store = new MemoryRateLimitStore({ maxKeys: 1 });
     const limiter = createRateLimiter({ store, now: () => now });
@@ -276,7 +278,7 @@ describe("SEC-004 one flood of new keys refuses every other rate-limited action"
 });
 
 describe("SEC-005 two rules that share a key share one counter and one window", () => {
-  it.fails("counts the same subject separately per rule", async () => {
+  it("counts the same subject separately per rule", async () => {
     const now = 1_000_000;
     const limiter = createRateLimiter({ now: () => now });
     // Same caller-built key used for two rules, as nothing in the API prevents.
@@ -287,7 +289,7 @@ describe("SEC-005 two rules that share a key share one counter and one window", 
 });
 
 describe("SEC-006 API responses carry no cache directive", () => {
-  it.fails("marks success and error envelopes as not storable", () => {
+  it("marks success and error envelopes as not storable", () => {
     const success = ok({ email: "x" }, { requestId: REQUEST_ID });
     const failure = errorResponse(new Error("x"), { requestId: REQUEST_ID });
     expect(success.headers.get("cache-control")).toContain("no-store");
