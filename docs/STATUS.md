@@ -59,8 +59,14 @@ Parked questions per D-019. Work that depends on an open question waits; everyth
 | OQ-18 | If a store renames itself, do old orders show the old name (frozen at purchase, like product details) or the new one? | T-004 | T-013 |
 | OQ-19 | Approve changing CLAUDE.md rule 7 as proposed in D-021 (list of code allowed to reach the database layer). | T-004, B1 | T-011 database check, T-015, T-014, T-016, T-023 |
 | OQ-20 | Design details to confirm on real pages at milestone 1, each currently a marked placeholder: text size in input boxes (15 px as approved, or 16 px so iPhones do not zoom in when typing); chip height on desktop; search box height (52 px used); how required or optional form fields are marked; whether the quantity selector is hidden or greyed out for sold-out products; how negative amounts are written; whether forms show an error summary at the top | ui-ux-design, T-017 | none now; T-018, T-021, T-034 visuals |
+| OQ-21 | How long should server logs be kept, and who may read them? They will contain visitors' IP addresses for security events. | security | T-071 runbook; not blocking the MVP build |
+| OQ-22 | May the system store the IP address and browser details of each login with the session, and for how long? | security | T-015 |
 
 The full review register is [reviews/T-004-findings.md](reviews/T-004-findings.md).
+
+## Security findings
+
+Registered in [SECURITY.md](SECURITY.md). After the 2026-10-11 review of T-019 and T-012: 0 Critical, 0 High, 4 Medium (SEC-001, SEC-002, SEC-004 open, backend-api), 7 Low (SEC-003, SEC-005 to SEC-009 open; SEC-011 fixed in `.gitignore`; SEC-010 is a dev-only `pnpm audit` advisory in `eslint-config-next` with no patched version, production tree clean). The secret scan was a manual pattern search; no dedicated scanner is installed. 34 `it.fails` tests in `tests/security` demonstrate the open findings.
 
 ## Tasks
 
@@ -131,6 +137,8 @@ The full review register is [reviews/T-004-findings.md](reviews/T-004-findings.m
 | --- | --- | --- |
 | 2026-10-11 | `pnpm verify` (scaffold only) | exit 0; unit tests 2 passed, 0 failed; build succeeded |
 | 2026-10-11 | `pnpm verify` (after T-017, T-019) | exit 0; 13 test files, 257 passed, 0 failed; build succeeded |
+| 2026-10-11 | `pnpm test` (security project added) | exit 0; 14 files, 267 passed, 34 expected failures (open security findings), 0 unexpected |
+| 2026-10-11 | `pnpm audit` / `pnpm audit --prod` (run by security agent) | 1 high in a dev-only dependency (SEC-010) / no known vulnerabilities |
 
 No integration, E2E, or security scan has been run yet.
 

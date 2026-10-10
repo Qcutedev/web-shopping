@@ -41,7 +41,7 @@ Register of what the 2026-10-11 planning review found (product-requirements and 
 | S17 | T-040 acceptance referred to endpoints built later; unclear who owns the approve and reject service | orchestrator | T-040 | FIXED (PROJECT_PLAN.md) |
 | S18 | Security review ran before security headers existed | orchestrator | T-062, T-072 | FIXED (PROJECT_PLAN.md) |
 | S19 | Auth section of the data model omits the auth library's required user columns; id format for library-created rows; `role`, `isActive`, `phone` must not be client-settable; D-004 says sessions are revoked on suspension while BR-14 implies a suspended seller stays logged in | database, auth | T-013, T-015 | OPEN |
-| S20 | Rate-limit key unspecified: "per IP" behind a proxy needs a trusted-proxy rule; "per email" needs the body before the auth handler | security, backend-api | T-015, T-019 | OPEN |
+| S20 | Rate-limit key unspecified: "per IP" behind a proxy needs a trusted-proxy rule; "per email" needs the body before the auth handler | security, backend-api | T-015, T-019 | "Per IP" decided (SECURITY.md SR-01), code pending; "per email" OPEN for T-015 |
 
 ## Minor
 
@@ -50,7 +50,7 @@ Register of what the 2026-10-11 planning review found (product-requirements and 
 | M1 | Checkout response has `payment.isSimulated` and `paymentMethod`; the model has `provider` and no such column. State that they are derived | backend-api | OPEN |
 | M2 | Payment status is on both `Order` and `Payment` with no sync rule | database | OPEN |
 | M3 | `/api/files/{key}` missing from the architecture directory layout | orchestrator | FIXED |
-| M4 | SECURITY.md TM-16 says "JSON bodies only" but uploads are multipart | security | OPEN |
+| M4 | SECURITY.md TM-16 says "JSON bodies only" but uploads are multipart | security | FIXED |
 | M5 | REQ-N-06 says every list is paginated; five list endpoints are not marked so | backend-api | OPEN |
 | M6 | No bounds on shipping fee, commission, or stock upper limit; no CHECK for the BR-04 cap; archived products keep their SKU and slug forever | database | WAITING OQ-16 (bounds), rest OPEN |
 | M7 | Stale statements in STATUS.md, TEST_STRATEGY.md, DEPLOYMENT.md about missing tools and commits | orchestrator, qa, devops | STATUS FIXED; others OPEN |
