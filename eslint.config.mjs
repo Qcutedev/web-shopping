@@ -21,8 +21,17 @@ const driverPattern = {
 };
 const layerPattern = {
   regex: DB_LAYER,
-  message: "Only src/modules may import src/server/db. Call a module service instead.",
+  message:
+    "Only src/modules, src/server/auth, src/server/health.ts, prisma/seed.ts, scripts, and tests may import src/server/db. Call a module service instead.",
 };
+// Rule 7 allow-list (D-021, owner approved in D-025). prisma/seed.ts is handled in the prisma block.
+const DB_LAYER_IMPORTERS = [
+  "src/modules/**",
+  "src/server/auth/**",
+  "src/server/health.ts",
+  "scripts/**",
+  "tests/**",
+];
 const siblingPattern = { ...layerPattern, regex: SIBLING_DB };
 const normalPattern = {
   regex: NOT_NORMAL,
@@ -65,22 +74,21 @@ const eslintConfig = defineConfig([
     ignores: ["src/server/db/**", "prisma/**"],
     rules: importGuard([driverPattern], driverPattern.message),
   },
-  // Everything except src/modules and the database layer: no src/server/db either.
-  // The list of further allowed importers (auth, health, seed, scripts, tests) is proposed in
-  // D-021 and is not allowed here until the owner approves it.
+  // Everything except the allowed importers and the database layer: no src/server/db either.
   {
     files: ALL_CODE,
-    ignores: ["src/modules/**", "src/server/db/**", "prisma/**"],
+    ignores: [...DB_LAYER_IMPORTERS, "src/server/db/**", "prisma/**"],
     rules: importGuard([driverPattern, layerPattern], layerPattern.message),
   },
   {
     files: ["prisma/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"],
+    ignores: ["prisma/seed.ts"],
     rules: importGuard([layerPattern], layerPattern.message),
   },
   // Inside src/server the database layer is a sibling, so short relative paths reach it too.
   {
     files: ["src/server/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"],
-    ignores: ["src/server/db/**"],
+    ignores: ["src/server/db/**", "src/server/auth/**", "src/server/health.ts"],
     rules: importGuard([driverPattern, layerPattern, siblingPattern], layerPattern.message),
   },
   // Override default ignores of eslint-config-next.

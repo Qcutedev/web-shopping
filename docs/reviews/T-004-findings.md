@@ -8,7 +8,7 @@ Register of what the 2026-10-11 planning review found (product-requirements and 
 
 | Id | Finding | Owner | Affects | Status |
 | --- | --- | --- | --- | --- |
-| B1 | CLAUDE.md rule 7 (only `src/modules` imports `src/server/db`) cannot hold: the auth layer, health check, seed, admin bootstrap script, and test factories all need the database | orchestrator | T-011, T-013 to T-016 | Rule approved (D-021, D-025), CLAUDE.md updated; lint allow-list still to update |
+| B1 | CLAUDE.md rule 7 (only `src/modules` imports `src/server/db`) cannot hold: the auth layer, health check, seed, admin bootstrap script, and test factories all need the database | orchestrator | T-011, T-013 to T-016 | FIXED (D-021, D-025; CLAUDE.md and the lint allow-list updated, probes 55 of 55) |
 | B2 | Layering table contradicts the auth design: services need the `Actor` type and role helpers; pages need guards; no stated home for them, risk of a modules/auth import cycle | orchestrator | T-015 | FIXED (D-022) |
 | B3 | `StoreStatus` has `PENDING` and `REJECTED` but a Store is created only on approval, so they are unreachable; "seller (any status)" endpoints describe users whose role is still `CUSTOMER` | database, backend-api, product-requirements | T-013 | OPEN |
 | B4 | API requires an approved store on `/seller/orders*`, which blocks what BR-14 requires (a suspended store still fulfils existing orders) | backend-api | T-043 | OPEN |

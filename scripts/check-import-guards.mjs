@@ -24,9 +24,11 @@ const probes = [
   ["src/app/probe.js", 'const db = require("../server/db");', true],
   ["src/components/probe.tsx", 'import { db } from "@/server/db";', true],
   ["src/server/probe.ts", 'import { db } from "./db";', true],
-  ["src/server/auth/probe.ts", 'import { db } from "../db";', true],
+  ["src/server/health/probe.ts", 'import { db } from "../db";', true],
+  ["src/server/logger.ts", 'import { db } from "./db";', true],
+  ["src/app/api/health/route.ts", 'import { db } from "@/server/db";', true],
+  ["src/app/probe.test.ts", 'import { db } from "@/server/db";', true],
   ["src/proxy.ts", 'import { db } from "@/server/db";', true],
-  ["scripts/probe.ts", 'import { db } from "../src/server/db";', true],
   // Paths that are not in normal form would slip past text matching, so they are rejected.
   ["src/app/probe.ts", 'import { db } from "@/server/./db";', true],
   ["src/app/probe.ts", 'import { db } from "@/server//db";', true],
@@ -39,9 +41,13 @@ const probes = [
   ["src/app/probe.ts", 'const m = await import("@/server/DB");', true],
   ["src/app/probe.ts", 'const m = await import("@/server/./db");', true],
   ["src/app/probe.js", "const n = '../server/db'; const db = require(n);", true],
-  // The seed is not an allowed importer until D-021 is approved.
-  ["prisma/seed.ts", 'import { db } from "../src/server/db";', true],
-  // Nobody outside the db layer may import the client or a driver.
+  // In prisma/ only the seed is an allowed importer.
+  ["prisma/probe.ts", 'import { db } from "../src/server/db";', true],
+  // Nobody outside the db layer may import the client or a driver, allowed importers included.
+  ["src/server/auth/probe.ts", 'import { PrismaClient } from "@prisma/client";', true],
+  ["src/server/health.ts", 'import { Pool } from "pg";', true],
+  ["scripts/probe.ts", 'import { PrismaClient } from "@prisma/client";', true],
+  ["tests/helpers/probe.ts", 'const m = await import("@prisma/client");', true],
   ["src/app/probe.ts", 'import { PrismaClient } from "@prisma/client";', true],
   ["src/modules/catalog/probe.ts", 'import { PrismaClient } from "@prisma/client";', true],
   ["src/modules/catalog/probe.js", 'import { PrismaClient } from "@prisma/client";', true],
@@ -51,6 +57,14 @@ const probes = [
   // Allowed.
   ["src/modules/catalog/probe.ts", 'import { db } from "@/server/db";', false],
   ["src/modules/catalog/probe.ts", 'import { db } from "../../server/db";', false],
+  // Allowed importers of the db layer (rule 7 list, D-021).
+  ["src/server/auth/probe.ts", 'import { db } from "../db";', false],
+  ["src/server/auth/probe.ts", 'import { db } from "@/server/db";', false],
+  ["src/server/health.ts", 'import { db } from "./db";', false],
+  ["prisma/seed.ts", 'import { db } from "../src/server/db";', false],
+  ["scripts/probe.ts", 'import { db } from "../src/server/db";', false],
+  ["tests/helpers/probe.ts", 'import { db } from "@/server/db";', false],
+  ["tests/security/probe.test.ts", 'const m = await import("@/server/db");', false],
   ["src/server/db/probe.ts", 'import { PrismaClient } from "@prisma/client";', false],
   ["src/app/probe.ts", 'import { listProducts } from "@/modules/catalog";', false],
   ["src/app/probe.ts", 'const m = await import("@/components/ui/button");', false],
