@@ -1,6 +1,17 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
-import { buildPaginationItems, Pagination } from "./pagination";
+import { describe, expect, it, vi } from "vitest";
+import { buildPaginationItems, normalisePage, normaliseTotalPages, Pagination } from "./pagination";
+
+/** Values that are not a page count. `totalPages` 0 is covered separately. */
+const INVALID_TOTALS = [
+  Number.NaN,
+  Number.POSITIVE_INFINITY,
+  Number.NEGATIVE_INFINITY,
+  -3,
+  2.5,
+  0.5,
+  Number.MAX_SAFE_INTEGER + 1,
+];
 
 const labels = {
   label: "การแบ่งหน้า",
@@ -96,5 +107,102 @@ describe("Pagination", () => {
   it("renders nothing when there is a single page", () => {
     const { container } = render(<Pagination {...labels} page={1} totalPages={1} />);
     expect(container.innerHTML).toBe("");
+  });
+
+  it("renders nothing when there are no pages", () => {
+    const { container } = render(<Pagination {...labels} page={1} totalPages={0} />);
+    expect(container.innerHTML).toBe("");
+  });
+
+  it.each(INVALID_TOTALS)("renders nothing when totalPages is %s", (totalPages) => {
+    const hrefForPage = vi.fn(labels.hrefForPage);
+    const pageLabel = vi.fn(labels.pageLabel);
+    const { container } = render(
+      <Pagination
+        {...labels}
+        hrefForPage={hrefForPage}
+        pageLabel={pageLabel}
+        page={1}
+        totalPages={totalPages}
+      />,
+    );
+    expect(container.innerHTML).toBe("");
+    expect(hrefForPage).not.toHaveBeenCalled();
+    expect(pageLabel).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [Number.NaN, "1"],
+    [Number.POSITIVE_INFINITY, "1"],
+    [Number.NEGATIVE_INFINITY, "1"],
+    [2.7, "2"],
+    [-4, "1"],
+    [0, "1"],
+    [99, "5"],
+  ])("normalises the current page %s to page %s", (page, expected) => {
+    const hrefForPage = vi.fn(labels.hrefForPage);
+    const pageLabel = vi.fn(labels.pageLabel);
+    const { container } = render(
+      <Pagination
+        {...labels}
+        hrefForPage={hrefForPage}
+        pageLabel={pageLabel}
+        page={page}
+        totalPages={5}
+      />,
+    );
+
+    const current = container.querySelectorAll("[aria-current]");
+    expect(current).toHaveLength(1);
+    expect(current[0]?.textContent).toBe(expected);
+
+    // Nothing that reaches the screen, a label, or an href is built from the raw input.
+    const links = [...container.querySelectorAll("a")];
+    const shown = [
+      container.textContent,
+      ...links.map((link) => link.getAttribute("href")),
+      ...links.map((link) => link.getAttribute("aria-label")),
+    ].join(" ");
+    expect(shown).not.toMatch(/NaN|Infinity|\d\.\d|-\d/);
+    const pageTexts = links.map((link) => link.textContent).filter((text) => text !== "");
+    expect(pageTexts.length).toBeGreaterThan(0);
+    for (const text of pageTexts) expect(text).toMatch(/^[1-5]$/);
+    expect(hrefForPage).toHaveBeenCalled();
+    for (const call of [...hrefForPage.mock.calls, ...pageLabel.mock.calls]) {
+      expect(Number.isInteger(call[0])).toBe(true);
+      expect(call[0]).toBeGreaterThanOrEqual(1);
+      expect(call[0]).toBeLessThanOrEqual(5);
+    }
+  });
+});
+
+describe("normaliseTotalPages and normalisePage", () => {
+  it("accepts only a whole page count of at least 1", () => {
+    expect(normaliseTotalPages(1)).toBe(1);
+    expect(normaliseTotalPages(250)).toBe(250);
+    for (const totalPages of [0, ...INVALID_TOTALS]) {
+      expect(normaliseTotalPages(totalPages)).toBe(0);
+    }
+  });
+
+  it("brings the current page into 1 to total", () => {
+    expect(normalisePage(3, 5)).toBe(3);
+    expect(normalisePage(Number.NaN, 5)).toBe(1);
+    expect(normalisePage(Number.POSITIVE_INFINITY, 5)).toBe(1);
+    expect(normalisePage(Number.NEGATIVE_INFINITY, 5)).toBe(1);
+    expect(normalisePage(2.7, 5)).toBe(2);
+    expect(normalisePage(-4, 5)).toBe(1);
+    expect(normalisePage(99, 5)).toBe(5);
+  });
+
+  it("builds no items for an invalid page count and never an invalid page number", () => {
+    for (const totalPages of [0, ...INVALID_TOTALS]) {
+      expect(buildPaginationItems(1, totalPages)).toEqual([]);
+    }
+    for (const page of [Number.NaN, Number.POSITIVE_INFINITY, 2.7, -4]) {
+      for (const item of buildPaginationItems(page, 10)) {
+        if (item.type === "page") expect(Number.isSafeInteger(item.page)).toBe(true);
+      }
+    }
   });
 });

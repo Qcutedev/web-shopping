@@ -24,13 +24,34 @@ function windowPages(page: number, totalPages: number, siblings: number): number
 }
 
 /**
+ * Page count that may be shown, or 0 when `totalPages` is not one. Only a whole number from 1 up
+ * to `Number.MAX_SAFE_INTEGER` is a page count. Anything else (`NaN`, `Infinity`, a fraction, 0,
+ * a negative number) gives 0: the count is not guessed, and pagination renders nothing.
+ */
+export function normaliseTotalPages(totalPages: number): number {
+  return Number.isSafeInteger(totalPages) && totalPages >= 1 ? totalPages : 0;
+}
+
+/**
+ * Current page that may be shown, always a whole number from 1 to `total` (a valid page count).
+ * A page that is not a finite number (`NaN`, `Infinity`, `-Infinity`) becomes 1. A fraction is
+ * truncated. A page under 1 becomes 1 and a page above `total` becomes `total`.
+ */
+export function normalisePage(page: number, total: number): number {
+  if (!Number.isFinite(page)) return 1;
+  return Math.min(total, Math.max(1, Math.trunc(page)));
+}
+
+/**
  * Items of the page list. From `sm` up: first, last, and the current page with one neighbour on
  * each side. Below `sm`: first, last, and the current page only, so the row fits a 360px screen.
  * Both layouts come from one list; items carry the flag that hides or shows them below `sm`.
+ * Inputs go through `normaliseTotalPages` and `normalisePage`; an invalid page count gives no items.
  */
 export function buildPaginationItems(page: number, totalPages: number): PaginationItem[] {
-  const total = Math.max(1, Math.trunc(totalPages));
-  const current = Math.min(total, Math.max(1, Math.trunc(page)));
+  const total = normaliseTotalPages(totalPages);
+  if (total === 0) return [];
+  const current = normalisePage(page, total);
   const wide = windowPages(current, total, 1);
   const narrow = new Set(windowPages(current, total, 0));
 
@@ -59,8 +80,9 @@ export function buildPaginationItems(page: number, totalPages: number): Paginati
 }
 
 export interface PaginationProps {
-  /** Current page, starting at 1. */
+  /** Current page, starting at 1. Normalised with `normalisePage`. */
   page: number;
+  /** Number of pages: a whole number of at least 1. Any other value renders nothing. */
   totalPages: number;
   /** Builds the link target of a page. Keep the other search parameters in it. */
   hrefForPage: (page: number) => string;
@@ -86,7 +108,10 @@ const ITEM_DISABLED = "cursor-not-allowed text-foreground-disabled";
 
 /**
  * Previous, page numbers, next, as links (so pagination works without JavaScript and each page
- * has a URL). Renders nothing when there is only one page.
+ * has a URL). Renders nothing when there is only one page, and nothing when `totalPages` is not a
+ * whole number of at least 1 (see `normaliseTotalPages`). The current page is normalised with
+ * `normalisePage`, so no link text, label, or href is ever built from `NaN`, `Infinity`, or a
+ * fraction.
  */
 export function Pagination({
   page,
@@ -98,9 +123,9 @@ export function Pagination({
   pageLabel,
   className,
 }: PaginationProps) {
-  const total = Math.max(1, Math.trunc(totalPages));
+  const total = normaliseTotalPages(totalPages);
   if (total <= 1) return null;
-  const current = Math.min(total, Math.max(1, Math.trunc(page)));
+  const current = normalisePage(page, total);
   const items = buildPaginationItems(current, total);
 
   return (

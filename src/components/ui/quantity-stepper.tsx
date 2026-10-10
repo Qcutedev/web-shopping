@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ChangeEvent, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { cn } from "@/lib/utils";
 import { MinusIcon, PlusIcon } from "./icons";
 
@@ -17,28 +17,69 @@ export function clampQuantity(value: number, max: number): number {
   return Math.min(upper, Math.max(MIN_QUANTITY, Math.trunc(value)));
 }
 
-export interface QuantityStepperProps {
-  /** Current quantity (controlled). */
+interface QuantityStepperBaseProps {
+  /**
+   * Current quantity (controlled). The input always shows exactly this number, also when it is
+   * outside 1 to `max`; see `onOutOfRange`.
+   */
   value: number;
-  /** Called with the new, already clamped quantity. Not called when the quantity does not change. */
+  /**
+   * Called with the new quantity when the customer changes it. The argument is always a whole
+   * number from 1 to `max`. Not called when the quantity does not change.
+   */
   onChange: (value: number) => void;
   /** Largest quantity allowed: the available stock. The server still validates stock. */
   max: number;
+  /**
+   * Called when the `value` prop is not a whole number from 1 to `max`, for example after a stock
+   * refetch lowered `max` below the chosen quantity. `clamped` is the nearest allowed quantity.
+   * Called once for each distinct pair of `value` and `clamped`, after render; not called again on
+   * re-renders, and not called while `max` is under 1 (no quantity is allowed then).
+   *
+   * The stepper does not change the quantity by itself. The parent decides: adopt `clamped`
+   * (set its state to it), or keep `value` and show a message (link it with `aria-describedby`
+   * and set `invalid`).
+   */
+  onOutOfRange?: (value: number, clamped: number) => void;
   /** Accessible name of the minus button, for example "ลดจำนวน" (from th.ts). */
   decreaseLabel: string;
   /** Accessible name of the plus button, for example "เพิ่มจำนวน" (from th.ts). */
   increaseLabel: string;
-  /** Accessible name of the number input, for example "จำนวน" (from th.ts). */
-  inputLabel: string;
+  /**
+   * Accessible name of the whole stepper, for what the quantity belongs to: in a list of cart
+   * lines, the product title. When given, the wrapper is a named group. When omitted (a single
+   * stepper next to its own label) the wrapper has no role and no name.
+   */
+  groupLabel?: string;
+  /** Marks the number input invalid (`aria-invalid`) and gives the stepper the error border. */
+  invalid?: boolean;
   disabled?: boolean;
-  /** Id of the number input, for an external visible label. */
-  id?: string;
   /** Form field name of the number input. */
   name?: string;
-  /** Id of text that describes the stepper, for example the stock note. */
+  /** Id of text that describes the stepper, for example the stock note or an error message. */
   "aria-describedby"?: string;
   className?: string;
 }
+
+/**
+ * The number input needs exactly one accessible name. Either pass `inputLabel`, or pass `id` and
+ * render a visible `<label htmlFor={id}>`. With both, `inputLabel` wins (aria-label overrides the
+ * label element), so leave `inputLabel` out when there is a visible label.
+ */
+export type QuantityStepperProps = QuantityStepperBaseProps &
+  (
+    | {
+        /** Accessible name of the number input, for example "จำนวน" (from th.ts). */
+        inputLabel: string;
+        /** Id of the number input. */
+        id?: string;
+      }
+    | {
+        inputLabel?: undefined;
+        /** Id of the number input, referenced by a visible `<label htmlFor>`. */
+        id: string;
+      }
+  );
 
 const STEP_BUTTON =
   // 44px wide. The group border leaves 42px of height, so the pseudo-element restores a 44px touch area.
@@ -49,17 +90,32 @@ const STEP_BUTTON =
   "disabled:cursor-not-allowed disabled:bg-surface disabled:text-foreground-disabled";
 
 /**
- * Minus button, numeric input, plus button. The quantity is clamped to 1 and `max`. Typing is
- * free while the input has focus and is clamped when it loses focus or Enter is pressed.
- * Arrow up and arrow down in the input step by one.
+ * Minus button, numeric input, plus button.
+ *
+ * Contract (controlled component):
+ * - The input shows the `value` prop exactly, and with `name` set a native form submits that
+ *   same number. The stepper never shows a number that differs from the parent's state. (A
+ *   `value` that is not a finite number shows as an empty input.)
+ * - Every change made by the customer (buttons, arrow keys, typing) reaches the parent through
+ *   `onChange` as a whole number from 1 to `max`. Typing is free while the input has focus and is
+ *   clamped when it loses focus or Enter is pressed; Enter does not submit a surrounding form.
+ * - When the `value` prop itself is outside 1 to `max`, the stepper keeps showing it and calls
+ *   `onOutOfRange(value, clamped)` once. The parent owns the decision: lower the quantity to
+ *   `clamped`, or keep it and show a message. Until the parent acts, the plus button is disabled
+ *   above `max`, the minus button is disabled below 1, and the first step in the other direction
+ *   lands on the nearest allowed quantity.
+ * - `max` under 1 disables the whole control. A disabled input is not part of a form submission.
  */
 export function QuantityStepper({
   value,
   onChange,
   max,
+  onOutOfRange,
   decreaseLabel,
   increaseLabel,
   inputLabel,
+  groupLabel,
+  invalid = false,
   disabled = false,
   id,
   name,
@@ -71,18 +127,42 @@ export function QuantityStepper({
 
   const unavailable = !Number.isFinite(max) || max < MIN_QUANTITY;
   const isDisabled = disabled || unavailable;
-  const current = clampQuantity(value, max);
+  const clamped = clampQuantity(value, max);
   const upper = clampQuantity(max, max);
+  const outOfRange = !unavailable && value !== clamped;
+  // Numbers that the buttons and arrow keys step from. They differ only for a fractional value,
+  // where a step goes to the next whole number in its direction.
+  const base = Number.isFinite(value) ? value : MIN_QUANTITY;
+  const stepUpFrom = Math.floor(base);
+  const stepDownFrom = Math.ceil(base);
+
+  // The pair last reported through onOutOfRange, so that each pair is reported once.
+  const reported = useRef<{ value: number; clamped: number } | null>(null);
+  useEffect(() => {
+    if (!outOfRange) {
+      reported.current = null;
+      return;
+    }
+    const last = reported.current;
+    if (last !== null && Object.is(last.value, value) && last.clamped === clamped) return;
+    reported.current = { value, clamped };
+    onOutOfRange?.(value, clamped);
+  });
 
   function commit(next: number) {
-    const clamped = clampQuantity(next, max);
+    const allowed = clampQuantity(next, max);
     setDraft(null);
-    if (clamped !== value) onChange(clamped);
+    if (allowed !== value) onChange(allowed);
   }
 
   function commitDraft() {
     if (draft === null) return;
-    commit(draft === "" ? current : Number(draft));
+    if (draft === "") {
+      // Left empty: show the parent's value again.
+      setDraft(null);
+      return;
+    }
+    commit(Number(draft));
   }
 
   function handleChange(event: ChangeEvent<HTMLInputElement>) {
@@ -97,19 +177,20 @@ export function QuantityStepper({
       commitDraft();
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      commit((draft ? Number(draft) : current) + 1);
+      commit((draft ? Number(draft) : stepUpFrom) + 1);
     } else if (event.key === "ArrowDown") {
       event.preventDefault();
-      commit((draft ? Number(draft) : current) - 1);
+      commit((draft ? Number(draft) : stepDownFrom) - 1);
     }
   }
 
   return (
     <div
-      role="group"
-      aria-label={inputLabel}
+      role={groupLabel ? "group" : undefined}
+      aria-label={groupLabel || undefined}
       className={cn(
         "border-control-border bg-surface inline-flex h-11 items-stretch rounded-sm border",
+        invalid && "border-danger",
         isDisabled && "border-border",
         className,
       )}
@@ -117,8 +198,8 @@ export function QuantityStepper({
       <button
         type="button"
         aria-label={decreaseLabel}
-        disabled={isDisabled || current <= MIN_QUANTITY}
-        onClick={() => commit(current - 1)}
+        disabled={isDisabled || base <= MIN_QUANTITY}
+        onClick={() => commit(stepDownFrom - 1)}
         className={cn(STEP_BUTTON, "rounded-l-[9px]")}
       >
         <MinusIcon />
@@ -132,8 +213,9 @@ export function QuantityStepper({
         autoComplete="off"
         aria-label={inputLabel}
         aria-describedby={describedBy}
+        aria-invalid={invalid ? true : undefined}
         disabled={isDisabled}
-        value={draft ?? String(current)}
+        value={draft ?? (Number.isFinite(value) ? String(value) : "")}
         onChange={handleChange}
         onBlur={commitDraft}
         onKeyDown={handleKeyDown}
@@ -145,8 +227,8 @@ export function QuantityStepper({
       <button
         type="button"
         aria-label={increaseLabel}
-        disabled={isDisabled || current >= upper}
-        onClick={() => commit(current + 1)}
+        disabled={isDisabled || base >= upper}
+        onClick={() => commit(stepUpFrom + 1)}
         className={cn(STEP_BUTTON, "rounded-r-[9px]")}
       >
         <PlusIcon />

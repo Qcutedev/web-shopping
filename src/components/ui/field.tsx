@@ -135,6 +135,12 @@ export function joinIds(...ids: Array<string | undefined>): string | undefined {
   return present.length > 0 ? present.join(" ") : undefined;
 }
 
-function hasContent(node: ReactNode): boolean {
-  return node !== undefined && node !== null && node !== false && node !== "";
+/**
+ * Whether helper or error text would put anything on the screen. `undefined`, `null`, booleans,
+ * and the empty string render nothing in React and count as no content; the number 0 renders "0"
+ * and counts as content. Every primitive that shows helper or error text uses this one check, so
+ * the visible message, `aria-describedby`, and `aria-invalid` always agree.
+ */
+export function hasContent(node: ReactNode): boolean {
+  return node !== undefined && node !== null && typeof node !== "boolean" && node !== "";
 }

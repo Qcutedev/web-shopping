@@ -1,6 +1,6 @@
 import { useId, type InputHTMLAttributes, type ReactNode, type Ref } from "react";
 import { cn } from "@/lib/utils";
-import { FieldMessage } from "./field";
+import { FieldMessage, hasContent } from "./field";
 
 export interface RadioProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type"> {
   /** Visible label. Clicking it selects the radio; the whole row is the 44px touch target. */
@@ -72,8 +72,8 @@ export function RadioGroup({
   children,
 }: RadioGroupProps) {
   const messageId = `${useId()}-message`;
-  const hasError = Boolean(errorText);
-  const hasMessage = hasError || Boolean(helperText);
+  const hasError = hasContent(errorText);
+  const hasMessage = hasError || hasContent(helperText);
 
   return (
     <fieldset

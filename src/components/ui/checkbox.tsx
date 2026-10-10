@@ -1,6 +1,6 @@
 import { useId, type InputHTMLAttributes, type ReactNode, type Ref } from "react";
 import { cn } from "@/lib/utils";
-import { FieldMessage, joinIds } from "./field";
+import { FieldMessage, hasContent, joinIds } from "./field";
 import { CheckIcon } from "./icons";
 
 export interface CheckboxProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type"> {
@@ -28,8 +28,8 @@ export function Checkbox({
   const generatedId = useId();
   const inputId = id ?? generatedId;
   const messageId = `${inputId}-message`;
-  const hasError = Boolean(errorText);
-  const hasMessage = hasError || Boolean(helperText);
+  const hasError = hasContent(errorText);
+  const hasMessage = hasError || hasContent(helperText);
 
   return (
     <div className={cn("flex flex-col", wrapperClassName)}>
