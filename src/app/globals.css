@@ -1,18 +1,285 @@
 @import "tailwindcss";
 
-/* Placeholder tokens from the scaffold. T-017 replaces them with the design system. */
+/*
+ * Design tokens. The source of truth is docs/DESIGN_SYSTEM.md; every value here must match it.
+ * src/components/ui/tokens.test.ts reads this file and fails when a documented contrast pair
+ * drops under its WCAG threshold, so change the document and the test together with a token.
+ * Light theme only.
+ */
 :root {
+  /* Approved by the owner (D-018). */
   --background: #ffffff;
-  --foreground: #14171a;
+  --surface: #ffffff;
+  --surface-muted: #f4f5f3;
+  --border: #e6e8ea;
+  --border-strong: #c9cdd1;
+  --text: #14171a;
+  --text-secondary: #4a5158;
+  --text-muted: #5c636b;
+  --text-nav: #3d444b;
+  --primary: #0e7c66;
+  --on-primary: #ffffff;
+  --ink: #14171a;
+  --on-ink: #ffffff;
+  --success: #15803d;
+  --warning: #8a4b0a;
+  --warning-soft: #fdf3e1;
+  --placeholder-1: #e6eee9;
+  --placeholder-2: #eef0f6;
+  --placeholder-3: #f3ece3;
+  --placeholder-4: #f1eaf0;
+  --placeholder-5: #e8f0f2;
+
+  /* Derived, not yet shown to the owner. */
+  --primary-hover: #0b6654;
+  --primary-active: #095446;
+  --primary-soft: #edf7f4;
+  --ink-hover: #2b3036;
+  --ink-active: #3d444b;
+  --success-soft: #f0f9f2;
+  --danger: #b42318;
+  --danger-hover: #912018;
+  --danger-active: #7a1b14;
+  --on-danger: #ffffff;
+  --danger-soft: #fdecea;
+  --info: #1d5a96;
+  --info-soft: #e7f0f8;
+  --text-disabled: #8b9198;
+  --border-contrast: #7f8790;
+  --focus-ring: #0e7c66;
+  --focus-ring-on-ink: #ffffff;
+
+  /* OQ-01: border of form controls and outline buttons. The owner decides between the approved
+     --border-strong (fails 3:1) and --border-contrast (passes). Change this one line. */
+  --control-border: var(--border-strong);
+
+  /* OQ-03: fill of the selected page, tab, and navigation item. Set to the ink of the selected
+     chip in the approved mockups until the owner decides. Change --selected here; --on-selected
+     only needs to change with it if the new fill is not dark. */
+  --selected: var(--ink);
+  --on-selected: var(--on-ink);
+}
+
+/* Remove the Tailwind default palette, radius, shadow, and type scales so that only design-system
+   values can be used in class names. */
+@theme {
+  --color-*: initial;
+  --radius-*: initial;
+  --shadow-*: initial;
+  --text-*: initial;
+
+  /* Radius (approved values). */
+  --radius-sm: 10px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  /* Elevation (derived, not yet shown to the owner). Cards at rest use a border, not a shadow. */
+  --shadow-sm: 0 1px 2px rgb(20 23 26 / 0.06), 0 1px 3px rgb(20 23 26 / 0.08);
+  --shadow-md: 0 4px 12px rgb(20 23 26 / 0.1);
+  --shadow-lg: 0 12px 32px rgb(20 23 26 / 0.16);
+
+  /* Font sizes with Thai-safe line heights. Prefer the type-* utilities below for named styles. */
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: 1.6;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.6;
+  --text-base: 0.9375rem;
+  --text-base--line-height: 1.65;
+  --text-lg: 1.0625rem;
+  --text-lg--line-height: 1.5;
+  --text-xl: 1.25rem;
+  --text-xl--line-height: 1.5;
+  --text-2xl: 1.5rem;
+  --text-2xl--line-height: 1.4;
+  --text-3xl: 1.875rem;
+  --text-3xl--line-height: 1.4;
+
+  /* Layout. */
+  --container-page: 1200px;
 }
 
 @theme inline {
+  --font-sans:
+    var(--font-ibm-plex-sans-thai), "IBM Plex Sans Thai", "Noto Sans Thai", system-ui, sans-serif;
+
   --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-border-contrast: var(--border-contrast);
+  --color-control-border: var(--control-border);
+
+  --color-foreground: var(--text);
+  --color-foreground-secondary: var(--text-secondary);
+  --color-foreground-muted: var(--text-muted);
+  --color-foreground-nav: var(--text-nav);
+  --color-foreground-disabled: var(--text-disabled);
+
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-active: var(--primary-active);
+  --color-primary-soft: var(--primary-soft);
+  --color-on-primary: var(--on-primary);
+
+  --color-ink: var(--ink);
+  --color-ink-hover: var(--ink-hover);
+  --color-ink-active: var(--ink-active);
+  --color-on-ink: var(--on-ink);
+
+  --color-selected: var(--selected);
+  --color-on-selected: var(--on-selected);
+
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-hover: var(--danger-hover);
+  --color-danger-active: var(--danger-active);
+  --color-danger-soft: var(--danger-soft);
+  --color-on-danger: var(--on-danger);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+
+  --color-placeholder-1: var(--placeholder-1);
+  --color-placeholder-2: var(--placeholder-2);
+  --color-placeholder-3: var(--placeholder-3);
+  --color-placeholder-4: var(--placeholder-4);
+  --color-placeholder-5: var(--placeholder-5);
+
+  --color-focus-ring: var(--focus-ring);
+  --color-focus-ring-on-ink: var(--focus-ring-on-ink);
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: system-ui, sans-serif;
+@layer base {
+  html {
+    color-scheme: light;
+  }
+
+  body {
+    background: var(--background);
+    color: var(--text);
+    font-size: 0.9375rem;
+    /* Thai stacked vowel and tone marks need room: body line height is never under 1.6. */
+    line-height: 1.65;
+  }
+
+  /* Motion is limited to short colour, border, and shadow transitions; remove even those on request. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/*
+ * Named type styles from docs/DESIGN_SYSTEM.md (Typography). They are custom utilities rather than
+ * extra --text-* sizes so that tailwind-merge never mistakes them for a text colour.
+ * A single-property utility placed next to one (font-bold, leading-*) overrides it.
+ */
+@utility type-hero {
+  font-size: clamp(2rem, 4.4vw, 3.25rem);
+  line-height: 1.3;
+  font-weight: 700;
+}
+
+@utility type-page-title {
+  font-size: 1.875rem;
+  line-height: 1.4;
+  font-weight: 700;
+}
+
+@utility type-section-title {
+  font-size: 1.5rem;
+  line-height: 1.4;
+  font-weight: 700;
+}
+
+@utility type-panel-title {
+  font-size: 1.25rem;
+  line-height: 1.5;
+  font-weight: 600;
+}
+
+@utility type-card-title {
+  font-size: 1.0625rem;
+  line-height: 1.5;
+  font-weight: 600;
+}
+
+@utility type-body {
+  font-size: 0.9375rem;
+  line-height: 1.65;
+  font-weight: 400;
+}
+
+@utility type-small {
+  font-size: 0.875rem;
+  line-height: 1.6;
+  font-weight: 400;
+}
+
+@utility type-caption {
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  font-weight: 400;
+}
+
+@utility type-label {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  font-weight: 500;
+}
+
+@utility type-price-card {
+  font-size: 1.125rem;
+  line-height: 1.5;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+@utility type-price-page {
+  font-size: 2rem;
+  line-height: 1.3;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Focus ring: 2px ring with a 2px offset that shows the surface behind the control.
+ * Put `on-ink` on a container with an --ink background to switch every ring inside it
+ * to --focus-ring-on-ink.
+ */
+@utility focus-ring {
+  &:focus-visible {
+    outline: 2px solid var(--focus-ring-color, var(--focus-ring));
+    outline-offset: 2px;
+  }
+}
+
+/* Same ring, drawn on a wrapper while a text input inside it has keyboard focus. */
+@utility focus-ring-within {
+  &:has(input:focus-visible) {
+    outline: 2px solid var(--focus-ring-color, var(--focus-ring));
+    outline-offset: 2px;
+  }
+}
+
+@utility on-ink {
+  --focus-ring-color: var(--focus-ring-on-ink);
+}
+
+/* Page container: max width 1200px with fluid gutters. */
+@utility container-page {
+  width: 100%;
+  max-width: 1200px;
+  margin-inline: auto;
+  padding-inline: clamp(16px, 4vw, 32px);
 }

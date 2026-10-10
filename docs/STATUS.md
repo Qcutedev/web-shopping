@@ -58,6 +58,7 @@ Parked questions per D-019. Work that depends on an open question waits; everyth
 | OQ-17 | Once marked shipped, an order can only become delivered. Is there a need to cancel a shipped order or mark it lost? | T-004 | T-013, T-043 |
 | OQ-18 | If a store renames itself, do old orders show the old name (frozen at purchase, like product details) or the new one? | T-004 | T-013 |
 | OQ-19 | Approve changing CLAUDE.md rule 7 as proposed in D-021 (list of code allowed to reach the database layer). | T-004, B1 | T-011 database check, T-015, T-014, T-016, T-023 |
+| OQ-20 | Design details to confirm on real pages at milestone 1, each currently a marked placeholder: text size in input boxes (15 px as approved, or 16 px so iPhones do not zoom in when typing); chip height on desktop; search box height (52 px used); how required or optional form fields are marked; whether the quantity selector is hidden or greyed out for sold-out products; how negative amounts are written; whether forms show an error summary at the top | ui-ux-design, T-017 | none now; T-018, T-021, T-034 visuals |
 
 The full review register is [reviews/T-004-findings.md](reviews/T-004-findings.md).
 
@@ -77,7 +78,7 @@ The full review register is [reviews/T-004-findings.md](reviews/T-004-findings.m
 | T-014 | Seed | NOT STARTED | |
 | T-015 | Auth | NOT STARTED | |
 | T-016 | Admin bootstrap | NOT STARTED | |
-| T-017 | Design tokens, primitives | IN PROGRESS | ui-ux-design agent running |
+| T-017 | Design tokens, primitives | IMPLEMENTED | ui-ux-design agent report 2026-10-11; orchestrator ran `pnpm verify` on the integrated tree: exit 0, 257 of 257 unit and component tests passed, build succeeded. 21 primitives; test-only dependencies added (jsdom 30.1.2, Testing Library). Not yet seen in a browser. Not built: Dialog, Drawer, Tabs, Toast, Table, FileUpload, StatCard, Switch, ProductCard, CartButton. Code review pending. Raised OQ-20 |
 | T-018 | App shell | NOT STARTED | |
 | T-019 | Server basics | IMPLEMENTED | backend-api agent report 2026-10-11; orchestrator re-ran on `src/server`: Prettier clean, ESLint 0 warnings, 151 of 151 unit tests passed; imports are only `zod` and `node:crypto`. Code review and security review pending. Interim contract choices to write into API_CONTRACTS.md: header `X-Request-Id`, `details` always present, `details.fields` as `{ path, code, message }[]`. Unresolved for security: trusted-proxy rule for per-IP limits (S20), behaviour at the limiter key cap, accepting client-supplied request ids, which personal fields the logger redacts |
 | T-020 | Catalog API | NOT STARTED | |
@@ -129,6 +130,7 @@ The full review register is [reviews/T-004-findings.md](reviews/T-004-findings.m
 | Date | Command | Result |
 | --- | --- | --- |
 | 2026-10-11 | `pnpm verify` (scaffold only) | exit 0; unit tests 2 passed, 0 failed; build succeeded |
+| 2026-10-11 | `pnpm verify` (after T-017, T-019) | exit 0; 13 test files, 257 passed, 0 failed; build succeeded |
 
 No integration, E2E, or security scan has been run yet.
 
