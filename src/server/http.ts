@@ -27,10 +27,13 @@
  *     return errorResponse(error, { requestId, logger: log });
  *   }
  *
- * Never call `request.json()` in a handler: a body that is not valid JSON makes it throw a
- * SyntaxError, which `errorResponse` would turn into a 500 with an error-level log line per
- * request. `readJsonBody` checks the content type first (415) and maps the parse failure to
- * 400 VALIDATION_ERROR.
+ * Never call `request.json()`, `request.text()`, `request.formData()`, `request.arrayBuffer()`,
+ * or `request.blob()` in a handler (security rule SR-05): they hold a body of any size in
+ * memory, and a body that is not valid JSON makes `request.json()` throw a SyntaxError, which
+ * `errorResponse` would turn into a 500 with an error-level log line per request.
+ * `readJsonBody` checks the content type first (415), reads at most a fixed number of bytes
+ * (413), and maps the parse failure to 400 VALIDATION_ERROR. The order in a handler is: origin
+ * check, content-type check, size-limited read, schema validation.
  *
  * Validation errors: only request input becomes 400 VALIDATION_ERROR, and only
  * because the handler says so, by calling `readJsonBody`, `parseInput` (or
@@ -50,6 +53,7 @@ import {
   internalError,
   invalidJsonBody,
   isAppError,
+  payloadTooLarge,
   RateLimitedError,
   unsupportedMediaType,
 } from "./errors";
@@ -203,25 +207,122 @@ export function assertContentType(request: Request, expected: MutationContentTyp
   }
 }
 
+/** Default byte limit of a JSON request body: 100 KiB (security rule SR-05). */
+export const DEFAULT_JSON_BODY_LIMIT_BYTES = 102_400;
+/** The most an endpoint may ask for: 1 MiB. Nothing above it is read as JSON (SR-05). */
+export const MAX_JSON_BODY_LIMIT_BYTES = 1_048_576;
+
+export interface ReadJsonBodyOptions {
+  /**
+   * Largest accepted body in bytes. Default DEFAULT_JSON_BODY_LIMIT_BYTES. An endpoint that
+   * needs more passes its limit here, at most MAX_JSON_BODY_LIMIT_BYTES, and states it in its
+   * entry in docs/API_CONTRACTS.md.
+   */
+  maxBytes?: number;
+}
+
+const CONTENT_LENGTH_PATTERN = /^[0-9]+$/;
+/** Digits of MAX_JSON_BODY_LIMIT_BYTES: a longer declared length is over every limit. */
+const MAX_CONTENT_LENGTH_DIGITS = 7;
+
 /**
- * Reads the JSON body of a mutation. The one way a handler reads a JSON body:
+ * True when the `Content-Length` header allows the body to be read: it is absent, or it is a
+ * plain decimal number of at most `maxBytes`. Signs, blanks inside the value, fractions,
+ * exponents, hexadecimal, and a list of values (a repeated header) are all refused. Leading
+ * zeros are removed before the digits are counted, so a long run of digits is never converted
+ * to a number.
+ */
+function contentLengthAllows(request: Request, maxBytes: number): boolean {
+  const header = request.headers.get("content-length");
+  if (header === null) return true;
+  if (!CONTENT_LENGTH_PATTERN.test(header)) return false;
+  const digits = header.replace(/^0+/, "");
+  if (digits.length > MAX_CONTENT_LENGTH_DIGITS) return false;
+  return Number(digits) <= maxBytes;
+}
+
+/**
+ * Reads the body as a stream with a running byte count and stops as soon as the count passes
+ * `maxBytes` (`Content-Length` can be absent or untrue). At most one chunk beyond the limit is
+ * taken from the stream; the rest is cancelled, not buffered. Returns undefined when the body
+ * is over the limit.
+ */
+async function readBytesUpTo(
+  body: ReadableStream<Uint8Array>,
+  maxBytes: number,
+): Promise<Uint8Array | undefined> {
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      // The refusal stands whether or not the source accepts the cancellation.
+      await reader.cancel().catch(() => undefined);
+      return undefined;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
+/**
+ * Reads the JSON body of a mutation. The one way a handler reads a JSON body (SR-05), in this
+ * order:
  *
- *   - a content type other than `application/json` is 415 UNSUPPORTED_MEDIA_TYPE, decided
- *     before the body is read;
- *   - a body that is not valid JSON (an empty body included) is 400 VALIDATION_ERROR with
- *     `details.fields = [{ path: "", code: "invalid_json", message }]`. It is an ordinary
- *     client error: nothing is logged, and the parser's message, which quotes a piece of the
- *     body, is neither sent nor kept as a cause.
+ *   1. a content type other than `application/json` is 415 UNSUPPORTED_MEDIA_TYPE, decided
+ *      before the body is read;
+ *   2. a `Content-Length` that is larger than the limit, or that is not a plain decimal number,
+ *      is 413 PAYLOAD_TOO_LARGE, also before the body is read;
+ *   3. the body is read as a stream while its bytes are counted; reading stops and the answer is
+ *      413 PAYLOAD_TOO_LARGE as soon as the count passes the limit, so a missing or untrue
+ *      `Content-Length` does not help. The limit is in bytes, not characters;
+ *   4. a body that is not valid JSON (an empty body included) is 400 VALIDATION_ERROR with
+ *      `details.fields = [{ path: "", code: "invalid_json", message }]`.
+ *
+ * 413 and 400 are ordinary client errors: nothing is logged, nothing of the body is kept, and
+ * the parser's message, which quotes a piece of the body, is neither sent nor kept as a cause.
+ *
+ * The limit is `options.maxBytes`, by default DEFAULT_JSON_BODY_LIMIT_BYTES. A `maxBytes` that
+ * is not a positive integer of at most MAX_JSON_BODY_LIMIT_BYTES is a programming error and
+ * throws a TypeError before anything else is looked at, so it fails on every request and in
+ * every test, not only for a large body.
  *
  * Any other failure (the body was already read, the connection broke) is passed on unchanged
  * and becomes a 500. The result is `unknown`: pass it to `parseInput`.
- *
- * No size limit is enforced here: docs/API_CONTRACTS.md does not state one for JSON bodies yet.
  */
-export async function readJsonBody(request: Request): Promise<unknown> {
+export async function readJsonBody(
+  request: Request,
+  options: ReadJsonBodyOptions = {},
+): Promise<unknown> {
+  // Only an absent option means the default; null or any other value is checked below.
+  const maxBytes =
+    options.maxBytes === undefined ? DEFAULT_JSON_BODY_LIMIT_BYTES : options.maxBytes;
+  if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_JSON_BODY_LIMIT_BYTES) {
+    throw new TypeError(
+      `readJsonBody: maxBytes must be an integer from 1 to ${MAX_JSON_BODY_LIMIT_BYTES}.`,
+    );
+  }
   assertContentType(request, JSON_CONTENT_TYPE);
+  if (!contentLengthAllows(request, maxBytes)) throw payloadTooLarge();
+  if (request.bodyUsed) throw new TypeError("readJsonBody: the request body was already read.");
+
+  const bytes =
+    request.body === null ? new Uint8Array(0) : await readBytesUpTo(request.body, maxBytes);
+  if (bytes === undefined) throw payloadTooLarge();
+
+  // Decoded like `request.json()` does: UTF-8, a leading byte order mark removed.
+  const text = new TextDecoder().decode(bytes);
   try {
-    return (await request.json()) as unknown;
+    return JSON.parse(text) as unknown;
   } catch (error) {
     if (error instanceof Error && error.name === "SyntaxError") throw invalidJsonBody();
     throw error;

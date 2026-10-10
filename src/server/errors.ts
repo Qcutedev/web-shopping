@@ -52,7 +52,7 @@ const DEFAULT_MESSAGE: Record<ErrorCode, string> = {
   PRODUCT_UNAVAILABLE: "One or more items can no longer be purchased.",
   INVALID_STATE_TRANSITION: "This status change is not allowed.",
   CONFLICT: "The request conflicts with existing data.",
-  PAYLOAD_TOO_LARGE: "The upload is too large.",
+  PAYLOAD_TOO_LARGE: "The request body is too large.",
   UNSUPPORTED_MEDIA_TYPE: "The media type is not supported.",
   ORDER_LIMIT_EXCEEDED: "The order total exceeds the allowed maximum.",
   RATE_LIMITED: "Too many requests. Try again later.",

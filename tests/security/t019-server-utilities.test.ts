@@ -1490,7 +1490,7 @@ describe("SEC-019 readJsonBody buffers a request body of any size", () => {
 
   for (const declareLength of [true, false]) {
     const label = declareLength ? "that declares its length" : "without a declared length";
-    it.fails(`refuses a 2 MiB JSON body ${label} with 413`, async () => {
+    it(`refuses a 2 MiB JSON body ${label} with 413`, async () => {
       const outcome = await readJsonBody(oversized(declareLength)).then(
         () => 200,
         (error: unknown) => (error instanceof AppError ? error.status : 500),

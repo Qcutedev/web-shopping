@@ -14,8 +14,10 @@ import {
   assertContentType,
   assertSameOrigin,
   created,
+  DEFAULT_JSON_BODY_LIMIT_BYTES,
   errorResponse,
   JSON_CONTENT_TYPE,
+  MAX_JSON_BODY_LIMIT_BYTES,
   MULTIPART_CONTENT_TYPE,
   ok,
   paginated,
@@ -674,5 +676,264 @@ describe("parseInput and asynchronous schemas (N14)", () => {
     const schema = z.string().refine((value) => value.length > 1);
     expect(parseInput(schema, "ok")).toBe("ok");
     expect(() => parseInput(schema, "x")).toThrow(AppError);
+  });
+});
+
+describe("readJsonBody body size limit (SR-05, SEC-019)", () => {
+  const TOO_LARGE = {
+    code: "PAYLOAD_TOO_LARGE",
+    message: "The request body is too large.",
+    details: {},
+  };
+  /** Valid JSON (a string literal) of exactly `bytes` bytes. */
+  const jsonOfBytes = (bytes: number): string => `"${"a".repeat(bytes - 2)}"`;
+  const byteLength = (text: string): number => new TextEncoder().encode(text).byteLength;
+
+  /** A POST whose body is produced chunk by chunk, with a count of what was taken from it. */
+  function streamed(chunks: Iterable<Uint8Array>, headers: Record<string, string> = JSON_HEADERS) {
+    const iterator = chunks[Symbol.iterator]();
+    const taken = { bytes: 0, chunks: 0, cancelled: false };
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          const next = iterator.next();
+          if (next.done === true) {
+            controller.close();
+            return;
+          }
+          taken.bytes += next.value.byteLength;
+          taken.chunks += 1;
+          controller.enqueue(next.value);
+        },
+        cancel() {
+          taken.cancelled = true;
+        },
+      },
+      // Nothing is produced ahead of a read, so `taken` is what the reader asked for.
+      { highWaterMark: 0 },
+    );
+    const request = new Request("http://localhost/api/v1/cart/items", {
+      method: "POST",
+      headers,
+      body,
+      duplex: "half",
+    } as RequestInit);
+    return { request, taken };
+  }
+
+  function* endless(chunkBytes: number): Generator<Uint8Array> {
+    for (;;) yield new Uint8Array(chunkBytes).fill(0x61);
+  }
+
+  it("the default limit is 100 KiB and the ceiling 1 MiB", () => {
+    expect(DEFAULT_JSON_BODY_LIMIT_BYTES).toBe(102_400);
+    expect(MAX_JSON_BODY_LIMIT_BYTES).toBe(1_048_576);
+  });
+
+  it("a body of exactly the limit passes, with and without a declared length", async () => {
+    const body = jsonOfBytes(DEFAULT_JSON_BODY_LIMIT_BYTES);
+    expect(byteLength(body)).toBe(102_400);
+    expect(await readJsonBody(post(body, JSON_HEADERS))).toHaveLength(102_398);
+    expect(
+      await readJsonBody(post(body, { ...JSON_HEADERS, "Content-Length": "102400" })),
+    ).toHaveLength(102_398);
+    expect(await readJsonBody(post(jsonOfBytes(64), JSON_HEADERS), { maxBytes: 64 })).toHaveLength(
+      62,
+    );
+  });
+
+  it("a body one byte over the limit is 413, with and without a declared length", async () => {
+    const body = jsonOfBytes(DEFAULT_JSON_BODY_LIMIT_BYTES + 1);
+    expect((await thrownBy(() => readJsonBody(post(body, JSON_HEADERS)))).toPublic()).toEqual(
+      TOO_LARGE,
+    );
+    const declared = post(body, { ...JSON_HEADERS, "Content-Length": "102401" });
+    expect((await thrownBy(() => readJsonBody(declared))).toPublic()).toEqual(TOO_LARGE);
+    expect(
+      (
+        await thrownBy(() => readJsonBody(post(jsonOfBytes(65), JSON_HEADERS), { maxBytes: 64 }))
+      ).toPublic(),
+    ).toEqual(TOO_LARGE);
+  });
+
+  it("a declared length over the limit is refused before any of the body is read", async () => {
+    const { request, taken } = streamed(endless(1_024), {
+      ...JSON_HEADERS,
+      "Content-Length": "102401",
+    });
+    const error = await thrownBy(() => readJsonBody(request));
+    expect(error.status).toBe(413);
+    expect(request.bodyUsed).toBe(false);
+    expect(taken).toEqual({ bytes: 0, chunks: 0, cancelled: false });
+    // Also when the declared length is untrue and the body is in fact small.
+    const small = post("{}", { ...JSON_HEADERS, "Content-Length": "999999999" });
+    expect((await thrownBy(() => readJsonBody(small))).status).toBe(413);
+    expect(small.bodyUsed).toBe(false);
+  });
+
+  it("a body without Content-Length over the limit fails after at most the limit plus one chunk", async () => {
+    const chunkBytes = 1_024;
+    const limit = 10_000;
+    const { request, taken } = streamed(endless(chunkBytes));
+    const error = await thrownBy(() => readJsonBody(request, { maxBytes: limit }));
+    expect(error.toPublic()).toEqual(TOO_LARGE);
+    expect(taken.bytes).toBeGreaterThan(limit);
+    expect(taken.bytes).toBeLessThanOrEqual(limit + chunkBytes);
+    // The rest of the stream was cancelled, not drained.
+    expect(taken.cancelled).toBe(true);
+  });
+
+  it("an endless body is refused at the default limit as well", async () => {
+    const { request, taken } = streamed(endless(16_384));
+    expect((await thrownBy(() => readJsonBody(request))).status).toBe(413);
+    expect(taken.bytes).toBeLessThanOrEqual(DEFAULT_JSON_BODY_LIMIT_BYTES + 16_384);
+  });
+
+  it("a small Content-Length that lies about a larger body is 413", async () => {
+    const body = jsonOfBytes(DEFAULT_JSON_BODY_LIMIT_BYTES + 5_000);
+    for (const declared of ["2", "0", "102400"]) {
+      const request = post(body, { ...JSON_HEADERS, "Content-Length": declared });
+      expect((await thrownBy(() => readJsonBody(request))).toPublic()).toEqual(TOO_LARGE);
+    }
+    const { request, taken } = streamed(endless(1_024), { ...JSON_HEADERS, "Content-Length": "2" });
+    expect((await thrownBy(() => readJsonBody(request, { maxBytes: 4_096 }))).status).toBe(413);
+    expect(taken.bytes).toBeLessThanOrEqual(4_096 + 1_024);
+  });
+
+  it.each([
+    "-1",
+    "+5",
+    "1.5",
+    "1e3",
+    "0x10",
+    "abc",
+    "",
+    "5 5",
+    "5, 5",
+    "5;5",
+    "Infinity",
+    "NaN",
+    "9".repeat(400),
+    "1048577",
+    `${"0".repeat(20)}102401`,
+  ])("refuses the Content-Length %j with 413 before the body is read", async (value) => {
+    const request = post("{}", JSON_HEADERS);
+    request.headers.set("Content-Length", value);
+    expect(request.headers.get("Content-Length")).toBe(value);
+    expect((await thrownBy(() => readJsonBody(request))).toPublic()).toEqual(TOO_LARGE);
+    expect(request.bodyUsed).toBe(false);
+  });
+
+  it("a repeated Content-Length header is refused", async () => {
+    const request = post("{}", JSON_HEADERS);
+    request.headers.append("Content-Length", "2");
+    request.headers.append("Content-Length", "2");
+    expect((await thrownBy(() => readJsonBody(request))).status).toBe(413);
+  });
+
+  it("accepts a plain decimal Content-Length within the limit, leading zeros included", async () => {
+    for (const value of ["2", "0002", "102400", `${"0".repeat(20)}2`]) {
+      const request = post("{}", { ...JSON_HEADERS, "Content-Length": value });
+      expect(await readJsonBody(request)).toEqual({});
+    }
+  });
+
+  it("counts multi-byte UTF-8 as bytes, not characters", async () => {
+    // One Thai character is three bytes: 20 characters are 60 bytes, 62 with the quotes.
+    const thai = "\u0e01".repeat(20);
+    const body = JSON.stringify(JSON.parse(`"${thai}"`) as string);
+    expect(body).toHaveLength(22);
+    expect(byteLength(body)).toBe(62);
+
+    expect(await readJsonBody(post(body, JSON_HEADERS), { maxBytes: 62 })).toHaveLength(20);
+    const error = await thrownBy(() => readJsonBody(post(body, JSON_HEADERS), { maxBytes: 61 }));
+    expect(error.toPublic()).toEqual(TOO_LARGE);
+    // 22 characters would fit a limit of 22; 62 bytes do not.
+    expect(
+      (await thrownBy(() => readJsonBody(post(body, JSON_HEADERS), { maxBytes: 22 }))).status,
+    ).toBe(413);
+  });
+
+  it("reassembles a multi-byte character split across chunks", async () => {
+    const bytes = new TextEncoder().encode(JSON.stringify({ title: "\u0e01\u0e02" }));
+    const chunks = Array.from(bytes, (byte) => Uint8Array.of(byte));
+    const { request } = streamed(chunks);
+    expect(await readJsonBody(request)).toEqual({ title: JSON.parse('"\u0e01\u0e02"') });
+  });
+
+  it("an empty body is still 400 invalid_json, with or without Content-Length: 0", async () => {
+    for (const request of [
+      post("", JSON_HEADERS),
+      post(null, JSON_HEADERS),
+      post("", { ...JSON_HEADERS, "Content-Length": "0" }),
+      streamed([]).request,
+    ]) {
+      const error = await thrownBy(() => readJsonBody(request));
+      expect(error.status).toBe(400);
+      expect(error.cause).toBeUndefined();
+      expect((error.details as { fields: { code: string }[] }).fields[0]?.code).toBe(
+        "invalid_json",
+      );
+    }
+  });
+
+  it("an endpoint may raise its limit up to the ceiling", async () => {
+    const body = jsonOfBytes(MAX_JSON_BODY_LIMIT_BYTES);
+    const options = { maxBytes: MAX_JSON_BODY_LIMIT_BYTES };
+    expect(await readJsonBody(post(body, JSON_HEADERS), options)).toHaveLength(1_048_574);
+    expect((await thrownBy(() => readJsonBody(post(body, JSON_HEADERS)))).status).toBe(413);
+    const over = post(jsonOfBytes(MAX_JSON_BODY_LIMIT_BYTES + 1), JSON_HEADERS);
+    expect((await thrownBy(() => readJsonBody(over, options))).status).toBe(413);
+  });
+
+  it.each([
+    MAX_JSON_BODY_LIMIT_BYTES + 1,
+    10 * 1024 * 1024,
+    Number.POSITIVE_INFINITY,
+    Number.MAX_SAFE_INTEGER,
+    0,
+    -1,
+    1.5,
+    Number.NaN,
+    "1024" as unknown as number,
+    null as unknown as number,
+  ])(
+    "maxBytes %j is a programming error that fails loudly, even for a tiny body",
+    async (maxBytes) => {
+      const request = post("{}", JSON_HEADERS);
+      let thrown: unknown;
+      try {
+        await readJsonBody(request, { maxBytes });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(TypeError);
+      expect(request.bodyUsed).toBe(false);
+      // Inside a handler that is a 500, never a silently larger limit.
+      expect(errorResponse(thrown, { requestId }).status).toBe(500);
+    },
+  );
+
+  it("the content type is still checked first: an oversized form body is 415 and is not read", async () => {
+    const request = post(jsonOfBytes(200_000), {
+      "Content-Type": "text/plain",
+      "Content-Length": "200000",
+    });
+    expect((await thrownBy(() => readJsonBody(request))).status).toBe(415);
+    expect(request.bodyUsed).toBe(false);
+  });
+
+  it("an oversized body is a 413 response that writes no log line and keeps nothing of the body", async () => {
+    const { logger, lines } = captureLog();
+    const error = await thrownBy(() =>
+      readJsonBody(post(`"MARKER-IN-BODY${"a".repeat(200_000)}"`, JSON_HEADERS)),
+    );
+    expect(error.cause).toBeUndefined();
+    const response = errorResponse(error, { requestId, logger });
+    const text = await response.text();
+    expect(response.status).toBe(413);
+    expect(JSON.parse(text)).toEqual({ error: { ...TOO_LARGE, requestId } });
+    expect(text).not.toContain("MARKER");
+    expect(lines).toHaveLength(0);
   });
 });

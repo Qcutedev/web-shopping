@@ -17,6 +17,7 @@ Decided by the orchestrator on 2026-10-11:
 - **Request id.** The header is `X-Request-Id` on requests and on responses. Every response carries it, and an error envelope repeats it as `error.requestId`. The server generates the id (a UUID). An `X-Request-Id` sent by a client is ignored; it is reused only when the deployment has a trusted proxy configured and the value matches `^[A-Za-z0-9_-]{8,64}$` (security rule SR-03 in [SECURITY.md](SECURITY.md)). Clients must treat the id as opaque and should quote it when reporting a problem.
 - **Origin.** A mutation whose `Origin` header is missing, is `null`, or is anything other than exactly the application origin (scheme, host, and port of `APP_URL`) is rejected with `403 FORBIDDEN`, whatever its content type. `GET` and `HEAD` are not checked.
 - **Content type.** Each mutation accepts exactly one content type: `application/json`, or `multipart/form-data` for the upload endpoint only. A mutation that receives any other content type is rejected with `415 UNSUPPORTED_MEDIA_TYPE` before the body is read. Only the media type is compared, without regard to letter case or parameters, so `application/json; charset=utf-8` is accepted. A request with a body and no `Content-Type` is rejected the same way; mutations that have no body are an open point below.
+- **Body size.** A JSON request body may be at most 102,400 bytes (100 KiB), counted in bytes, not characters (security rule SR-05 in [SECURITY.md](SECURITY.md)). A larger body is rejected with `413 PAYLOAD_TOO_LARGE`, the generic message, and empty `details`. The request is refused before the body is read when its `Content-Length` exceeds the limit or is not a plain decimal number; a body sent without a length, or with an untrue one, is refused as soon as the bytes read pass the limit. An endpoint may raise its limit up to 1,048,576 bytes (1 MiB) and then says so in its entry in this document, in the Notes column, as `Body limit: <n> bytes`; an entry that says nothing has the default. No endpoint raises it so far. Uploads have their own limits (5 MB per file) and are not read as JSON.
 - **JSON body.** A body that is not valid JSON (an empty body included) is rejected with `400 VALIDATION_ERROR` and exactly one field error, `{ "path": "", "code": "invalid_json", "message": "..." }`. Nothing of the body is echoed.
 - **Required headers.** A missing or malformed required request header is rejected with `400 VALIDATION_ERROR` and a field error whose `path` is the header name as this document spells it and whose `code` is `invalid_header`. So far this applies to `Idempotency-Key` on `POST /checkout`: `{ "path": "Idempotency-Key", "code": "invalid_header", "message": "..." }`.
 - **Caching.** Every envelope response, success or error, is sent with `Cache-Control: no-store` unless the endpoint's entry in this document says otherwise. Only public endpoints whose response does not depend on who is asking may be documented as cacheable; none is so far. Error responses are always `no-store`.
@@ -29,13 +30,13 @@ Where these conventions are implemented. No route handler exists yet, so "implem
 | Client address behind "per IP" | `getClientAddress` (`client-address.ts`) | Implemented |
 | Origin | `assertSameOrigin(request, allowedOrigin)` (`http.ts`). The allowed origin is an argument; reading and validating `APP_URL` belongs to `src/server/env.ts` (devops) | Helper implemented; no handler calls it yet |
 | Content type | `assertContentType(request, expected)` (`http.ts`); `readJsonBody` calls it for JSON | Helper implemented; no handler calls it yet |
+| Body size | `readJsonBody(request, { maxBytes })` (`http.ts`): default `DEFAULT_JSON_BODY_LIMIT_BYTES`, ceiling `MAX_JSON_BODY_LIMIT_BYTES`; a larger `maxBytes` throws. The upload limits belong to the upload task | Implemented for JSON; uploads planned |
 | JSON body | `readJsonBody(request)` (`http.ts`), `invalidJsonBody` (`errors.ts`) | Implemented |
 | Required headers | `invalidHeader(name, message)` (`errors.ts`) builds the error. Reading and checking `Idempotency-Key` itself is part of the checkout task (T-032) | Error mapping implemented; the header check is planned |
 | Envelopes, error codes, caching | `ok`, `created`, `paginated`, `errorResponse`, `parseInput` (`http.ts`); `AppError` and the code table (`errors.ts`) | Implemented |
 
 Open, not decided here (the helpers above deliberately do not guess):
 
-- **Size limit for JSON bodies.** No limit is stated, so `readJsonBody` enforces none. `413 PAYLOAD_TOO_LARGE` is documented for uploads only.
 - **Mutations without a body.** The content-type rule says every mutation accepts exactly one content type, but several mutations have no body (`DELETE /me/addresses/{id}`, `POST /seller/products/{id}/publish`). Whether they must still send `Content-Type: application/json` is not decided; `assertContentType` refuses a missing header wherever it is called.
 - **Format of `Idempotency-Key`.** The checkout entry says "UUID". Which UUID versions are accepted, and whether letter case matters when two keys are compared, is not decided.
 
@@ -128,7 +129,7 @@ Still open, not decided here: the shape of `details.items` for `INSUFFICIENT_STO
 | 409 | `PRODUCT_UNAVAILABLE` | Item in cart no longer purchasable |
 | 409 | `INVALID_STATE_TRANSITION` | Status change not allowed |
 | 409 | `CONFLICT` | Uniqueness violation (SKU, slug, duplicate review, open application) |
-| 413 | `PAYLOAD_TOO_LARGE` | Upload over the limit |
+| 413 | `PAYLOAD_TOO_LARGE` | JSON body over the endpoint's limit (100 KiB unless its entry states another), or a `Content-Length` that exceeds it or is not a plain decimal number; upload over the limit |
 | 415 | `UNSUPPORTED_MEDIA_TYPE` | Mutation sent with a content type the endpoint does not accept; upload type not allowed |
 | 422 | `ORDER_LIMIT_EXCEEDED` | Total above the order cap |
 | 429 | `RATE_LIMITED` | Includes `Retry-After` (whole seconds) |
