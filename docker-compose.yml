@@ -1,0 +1,84 @@
+# Local PostgreSQL for development and for tests. NOT for staging or production.
+#
+#   Start:  docker compose up -d --wait
+#   Stop:   docker compose stop
+#   Docs:   docs/DEPLOYMENT.md, section "Local databases"
+#
+# LOCAL DEVELOPMENT VALUES ONLY. Every user name, password, and database name
+# below is a throwaway default for containers that listen on 127.0.0.1 only.
+# They are not secrets and must never be reused in staging or production.
+# Each one can be overridden from the shell or from the git-ignored `.env`
+# file (see `.env.example`); change the matching connection URL as well.
+
+name: marketplace
+
+services:
+  # Development database. Data persists in a named volume across restarts.
+  db-dev:
+    image: postgres:18-trixie
+    environment:
+      POSTGRES_USER: ${POSTGRES_DEV_USER:-marketplace}
+      POSTGRES_PASSWORD: ${POSTGRES_DEV_PASSWORD:-local_dev_only_not_a_secret}
+      POSTGRES_DB: ${POSTGRES_DEV_DB:-marketplace_dev}
+      # UTF-8 so Thai text is stored correctly. Applies only when the data
+      # directory is first initialised.
+      POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=en_US.utf8
+      TZ: UTC
+      PGTZ: UTC
+    # The server works in UTC; display conversion to Asia/Bangkok is the
+    # application's job.
+    command: ["postgres", "-c", "timezone=UTC", "-c", "log_timezone=UTC"]
+    ports:
+      - "127.0.0.1:${POSTGRES_DEV_PORT:-5432}:5432"
+    volumes:
+      # PostgreSQL 18 images keep data under /var/lib/postgresql/<major>/docker,
+      # so the mount point is the parent directory.
+      - db-dev-data:/var/lib/postgresql
+    healthcheck:
+      # TCP on purpose: during first initialisation the entrypoint runs a
+      # temporary server on the Unix socket only, which must not count as ready.
+      test: ["CMD-SHELL", 'pg_isready -h 127.0.0.1 -p 5432 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # Test database. The data directory is in memory (tmpfs): it is discarded
+  # whenever the container stops, so every start is a new, empty database.
+  db-test:
+    image: postgres:18-trixie
+    environment:
+      POSTGRES_USER: ${POSTGRES_TEST_USER:-marketplace}
+      POSTGRES_PASSWORD: ${POSTGRES_TEST_PASSWORD:-local_test_only_not_a_secret}
+      POSTGRES_DB: ${POSTGRES_TEST_DB:-marketplace_test}
+      POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=en_US.utf8
+      TZ: UTC
+      PGTZ: UTC
+    # Durability is switched off because this data is disposable. Never copy
+    # these settings to a database whose contents matter.
+    command:
+      - postgres
+      - -c
+      - timezone=UTC
+      - -c
+      - log_timezone=UTC
+      - -c
+      - fsync=off
+      - -c
+      - synchronous_commit=off
+      - -c
+      - full_page_writes=off
+    ports:
+      - "127.0.0.1:${POSTGRES_TEST_PORT:-5433}:5432"
+    tmpfs:
+      - /var/lib/postgresql:size=1g
+    healthcheck:
+      test: ["CMD-SHELL", 'pg_isready -h 127.0.0.1 -p 5432 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  db-dev-data:
+    name: marketplace-db-dev-data

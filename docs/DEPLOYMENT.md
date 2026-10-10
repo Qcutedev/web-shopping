@@ -2,15 +2,93 @@
 
 Owner: devops agent.
 
-**State on 2026-10-10: nothing is deployed. There is no staging URL and no production URL. No hosting provider, CI workflow, or Dockerfile exists yet.** This document is the plan and the runbook skeleton; sections are marked `Planned` until they have been exercised.
+**State on 2026-10-11: nothing is deployed. There is no staging URL and no production URL. No hosting provider, CI workflow, or Dockerfile exists yet.** This document is the plan and the runbook skeleton; sections are marked `Planned` until they have been exercised. The only exercised section is "Local databases".
 
 ## Environments
 
 | Environment | Purpose | State |
 | --- | --- | --- |
-| Local | Development and tests | Not runnable yet (prerequisites missing) |
+| Local | Development and tests | Databases run through Docker Compose (exercised 2026-10-11, T-012). No schema, migrations, or application connection yet. |
 | Staging | Pre-release verification with production-like configuration | Not configured |
 | Production | Real users | Not configured; requires explicit human approval |
+
+## Local databases
+
+Exercised on 2026-10-11 on Windows 11 with Docker 29.8.2 and Compose v5.5.1. Defined in [`docker-compose.yml`](../docker-compose.yml). Local use only: this file is not a staging or production configuration.
+
+| | Development | Test |
+| --- | --- | --- |
+| Compose service | `db-dev` | `db-test` |
+| Image | `postgres:18-trixie` (PostgreSQL 18.6 when exercised) | same |
+| Host address | `127.0.0.1:5432` | `127.0.0.1:5433` |
+| Database | `marketplace_dev` | `marketplace_test` |
+| User | `marketplace` | `marketplace` |
+| Storage | Named volume `marketplace-db-dev-data`; survives stop, start, and `docker compose down` | In memory (tmpfs); emptied every time the container stops |
+| Connection variable | `DATABASE_URL` | `DATABASE_URL_TEST` |
+| Encoding, time zone | `UTF8`, `UTC` | `UTF8`, `UTC` |
+
+The user names, passwords, and database names are throwaway local defaults written in `docker-compose.yml` and `.env.example`. They are not secrets, the ports are bound to `127.0.0.1` only, and they must never be reused for staging or production. The test database also runs with durability switched off (`fsync=off`), which is safe only because its data is disposable.
+
+Run every command from the repository root in PowerShell, with Docker Desktop running.
+
+One-time setup, to give the application and tools their connection strings (`.env` is git-ignored):
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Start both databases and wait until they are healthy (the first run downloads the image):
+
+```powershell
+docker compose up -d --wait
+```
+
+Check state. Both services must show `(healthy)`:
+
+```powershell
+docker compose ps
+```
+
+Stop both. Development data is kept; test data is discarded:
+
+```powershell
+docker compose stop
+```
+
+View logs (add `-f` to follow, Ctrl+C to leave):
+
+```powershell
+docker compose logs --tail 100 db-dev
+docker compose logs --tail 100 db-test
+```
+
+Open `psql` (leave with `\q`). There is no `psql` on the host; it runs inside the container:
+
+```powershell
+docker compose exec db-dev psql -U marketplace -d marketplace_dev
+docker compose exec db-test psql -U marketplace -d marketplace_test
+```
+
+Get an empty test database again:
+
+```powershell
+docker compose restart db-test
+```
+
+**Reset the development database. DESTRUCTIVE: this permanently deletes all local development data (every table, row, and applied migration). There is no undo.** The test database is not affected.
+
+```powershell
+docker compose rm --stop --force db-dev
+docker volume rm marketplace-db-dev-data
+docker compose up -d --wait
+```
+
+Notes:
+
+- If a host port is already in use, set `POSTGRES_DEV_PORT` or `POSTGRES_TEST_PORT` in `.env` and change the port in the matching connection URL. The other overridable values are listed in `.env.example`.
+- Changing `POSTGRES_DEV_USER`, `POSTGRES_DEV_PASSWORD`, or `POSTGRES_DEV_DB` has no effect on an existing development volume, because PostgreSQL reads them only when it first creates the data directory. Reset the development database to apply them.
+- `docker compose down` removes the containers and network but keeps the development volume. `docker compose down --volumes` also deletes the development data.
+- Verified so far: container health, the queries `SELECT version()`, `SHOW server_encoding`, `SHOW timezone` in both databases, persistence and reset behaviour, and password login with both URLs' credentials from another container. Not yet verified: a connection from a Node.js process on the host using `DATABASE_URL`; that happens when Prisma is added (T-013).
 
 ## Runtime requirements (Planned)
 
@@ -21,13 +99,14 @@ Owner: devops agent.
 
 ## Environment variables (Planned)
 
-The authoritative list is `.env.example` once it exists; `src/server/env.ts` validates it at startup.
+`.env.example` exists and currently holds only the two database URLs (local values) and the optional Compose overrides; the other variables below are added by the tasks that introduce them. `src/server/env.ts` does not exist yet; it will validate the list at startup.
 
 | Variable | Purpose | Secret |
 | --- | --- | --- |
 | `NODE_ENV` | `development`, `test`, `production` | no |
 | `APP_URL` | Public origin; used for the `Origin` check and auth | no |
-| `DATABASE_URL` | PostgreSQL connection string | yes |
+| `DATABASE_URL` | PostgreSQL connection string | yes (the local value in `.env.example` is a throwaway, not a secret) |
+| `DATABASE_URL_TEST` | PostgreSQL connection string for integration tests; local and CI only, never set in staging or production | no (throwaway) |
 | `AUTH_SECRET` | Session signing secret, at least 32 random bytes | yes |
 | `UPLOAD_DIR` | Local storage directory | no |
 | `LOG_LEVEL` | Logging verbosity | no |

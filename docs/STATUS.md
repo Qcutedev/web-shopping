@@ -65,13 +65,13 @@ The full review register is [reviews/T-004-findings.md](reviews/T-004-findings.m
 
 | Id | Task | Status | Evidence / note |
 | --- | --- | --- | --- |
-| T-001 | Install prerequisites | IN PROGRESS | `node -v`, `pnpm -v`, `docker info` succeed; database connection not yet tested (needs T-012) |
+| T-001 | Install prerequisites | VERIFIED | `node -v`, `pnpm -v`, `docker info` succeed; versions in D-020; database reachable through T-012 |
 | T-002 | Initialise git | VERIFIED | Commit `65357c3`; `git status` clean afterwards; no env files tracked |
 | T-003 | Verify delegation | VERIFIED | ui-ux-design agent rewrote DESIGN_SYSTEM.md to the approved direction (D-018) and returned the standard report; orchestrator confirmed the diff touches only that file and the acceptance greps hold. Raised OQ-01 to OQ-03 |
 | T-004 | Review planning documents | IN PROGRESS | Both reviews returned 2026-10-11. Orchestrator-owned findings fixed (plan dependencies, ownership table, D-022 to D-024); REQUIREMENTS.md updated by product-requirements. Still open: findings owned by database, backend-api, qa, security, and 16 owner questions (OQ-04 to OQ-19). Register: reviews/T-004-findings.md |
 | T-010 | Scaffold | IMPLEMENTED | 2026-10-11 `pnpm verify` exit 0: format check clean, lint 0 warnings, typecheck clean, 2 of 2 unit tests passed, `next build` succeeded (routes `/`, `/_not-found`). Code review pending. Scripts `test:integration`, `test:e2e`, `db:*`, `admin:bootstrap` are defined but their tooling is not installed yet |
 | T-011 | Env validation, health | NOT STARTED | Needs T-012, T-013; database check waits on OQ-19 |
-| T-012 | Compose databases | IN PROGRESS | devops agent running |
+| T-012 | Compose databases | IMPLEMENTED | devops agent report 2026-10-11; orchestrator re-ran `docker compose ps` (both healthy) and a query in each database: PostgreSQL 18.6, UTF8, UTC. Dev on 127.0.0.1:5432 (named volume), test on 127.0.0.1:5433 (tmpfs). No `.env` exists or is tracked. Code review pending. Open for T-013: Thai sort order under the default `en_US.utf8` collation |
 | T-013 | Schema v1 | BLOCKED | Waits on owner answers that change the first migration (OQ-04 to OQ-08, OQ-16 to OQ-18) and on data-model fixes from the review (B3, S7, S8, S10 to S12, S19) |
 | T-023 | Integration-test harness | NOT STARTED | Added 2026-10-11 (review finding B9) |
 | T-014 | Seed | NOT STARTED | |
