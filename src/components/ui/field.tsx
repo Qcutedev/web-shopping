@@ -4,7 +4,7 @@ import { ErrorIcon } from "./icons";
 
 /**
  * Class names shared by Input, Textarea, and Select.
- * Border colour comes from --control-border (OQ-01, see globals.css).
+ * Border colour comes from --control-border (see globals.css).
  */
 export const controlClassName =
   "block w-full min-h-11 rounded-sm border border-control-border bg-surface px-3.5 type-body text-foreground " +

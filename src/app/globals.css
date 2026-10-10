@@ -49,13 +49,13 @@
   --focus-ring: #0e7c66;
   --focus-ring-on-ink: #ffffff;
 
-  /* OQ-01: border of form controls and outline buttons. The owner decides between the approved
-     --border-strong (fails 3:1) and --border-contrast (passes). Change this one line. */
-  --control-border: var(--border-strong);
+  /* Border of form controls and outline buttons. Decided by the owner (D-025, OQ-01): the darker
+     --border-contrast, which reaches 3:1 on white and on the muted surface. --border-strong and
+     --border stay for cards and dividers. */
+  --control-border: var(--border-contrast);
 
-  /* OQ-03: fill of the selected page, tab, and navigation item. Set to the ink of the selected
-     chip in the approved mockups until the owner decides. Change --selected here; --on-selected
-     only needs to change with it if the new fill is not dark. */
+  /* Fill of the selected page, tab, and navigation item. Decided by the owner (D-025, OQ-03):
+     dark ink, as the selected chip. */
   --selected: var(--ink);
   --on-selected: var(--on-ink);
 }

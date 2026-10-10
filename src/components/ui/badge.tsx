@@ -13,12 +13,12 @@ const TONES: Record<BadgeTone, string> = {
   info: "bg-info-soft text-info",
 };
 
-// OQ-02: colour of the fulfilment SHIPPED status badge. The spec currently maps it to "primary";
-// the owner decides. Change this one line.
-const SHIPPED_TONE: BadgeTone = "primary";
+// Colour of the fulfilment SHIPPED status badge. Decided by the owner (D-025, OQ-02): blue, the
+// info tone, not the accent green.
+const SHIPPED_TONE: BadgeTone = "info";
 
 export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
-  /** Use "shipped" for the fulfilment SHIPPED status so its colour stays a single decision. */
+  /** Use "shipped" for the fulfilment SHIPPED status so its colour stays defined in one place. */
   variant?: BadgeVariant;
 }
 

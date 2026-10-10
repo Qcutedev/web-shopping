@@ -2,13 +2,17 @@
 
 Owner: ui-ux-design agent. The visual direction in this document was **approved by the project owner on 2026-10-11** (see [DECISIONS.md](DECISIONS.md), D-018), with refinements to come later. It supersedes the earlier indigo starting values. The tokens are implemented in `src/app/globals.css` and the primitives in `src/components/ui/` (T-017). Contrast ratios below are **computed from the implemented token values**: `src/components/ui/tokens.test.ts` reads `globals.css`, recomputes every pair in the contrast tables, and fails when a ratio differs from this document or drops under its threshold.
 
-Three questions are waiting for the owner. Each is implemented as a single value that can be changed in one line; none is decided here.
+The owner decided the following on 2026-10-11 ([DECISIONS.md](DECISIONS.md), D-025). These are rules, not placeholders. Each is still held in one place in the code.
 
-| Id | Question | Value in use until the owner answers | Where to change |
-| --- | --- | --- | --- |
-| OQ-01 | Border of form controls and outline buttons: approved `--border-strong` (1.59:1, fails 3:1) or `--border-contrast` (3.63:1)? | `--border-strong` | `--control-border` in `src/app/globals.css` |
-| OQ-02 | Colour of the fulfilment `SHIPPED` status badge | primary (the mapping below) | `SHIPPED_TONE` in `src/components/ui/badge.tsx` |
-| OQ-03 | Colour of the selected page, tab, and navigation item | `--ink`, as the selected chip in the approved mockups | `--selected` in `src/app/globals.css` |
+| Rule | Decided value | Where it lives |
+| --- | --- | --- |
+| Border of form controls and outline buttons | `--border-contrast` `#7F8790`: 3.63:1 on white, 3.32:1 on the muted surface. The lighter `--border-strong` `#C9CDD1` and `--border` stay for cards and dividers | `--control-border` in `src/app/globals.css` |
+| Colour of the fulfilment `SHIPPED` ("จัดส่งแล้ว") status badge | Blue: the info tone. Not the accent green | `SHIPPED_TONE` in `src/components/ui/badge.tsx` |
+| Colour of the selected tab, page number, and menu item | Dark ink (`--ink`), as the selected chip. Not the accent green | `--selected` in `src/app/globals.css` |
+| Stock drops below a quantity the customer already chose | The quantity is lowered automatically to what is available and the customer is told | `QuantityStepper`; see the QuantityStepper contract |
+| Arrow keys of the quantity stepper outside the allowed range | Up does nothing at or above the available stock, the same as the disabled plus button; Down does nothing at or below 1 | `QuantityStepper`; see the QuantityStepper contract |
+
+Still open, to be decided when the owner can look at real pages at milestone 1 (D-025, OQ-20): input text size, chip height, search box height, required-field marking, the quantity selector of a sold-out product, negative amounts, and the error summary. The values in this document for those items are placeholders and were not changed.
 
 How to read the values in this document:
 
@@ -35,7 +39,7 @@ Defined as CSS variables and mapped into the Tailwind theme. Light theme only in
 | `--surface` | `#FFFFFF` | Cards, panels, inputs |
 | `--surface-muted` | `#F4F5F3` | Muted section fill, table headers, subtle fills |
 | `--border` | `#E6E8EA` | Dividers, card and panel borders |
-| `--border-strong` | `#C9CDD1` | Stronger control border (inputs, outline buttons, chips) |
+| `--border-strong` | `#C9CDD1` | Stronger border for cards and dividers that need more weight than `--border`. Never the boundary of a control (it does not reach 3:1) |
 | `--text` | `#14171A` | Primary text (ink) |
 | `--text-secondary` | `#4A5158` | Secondary text: descriptions, supporting paragraphs |
 | `--text-muted` | `#5C636B` | Meta text: store name, helper text, captions |
@@ -57,7 +61,7 @@ Defined as CSS variables and mapped into the Tailwind theme. Light theme only in
 
 ### Derived tokens (derived, not yet shown to the owner)
 
-Every row in this table is **derived, not yet shown to the owner**.
+Every row in this table is **derived, not yet shown to the owner**, except `--border-contrast`, which the owner chose as the control border (D-025).
 
 | Token | Value | Use |
 | --- | --- | --- |
@@ -75,21 +79,21 @@ Every row in this table is **derived, not yet shown to the owner**.
 | `--info` | `#1D5A96` | Informational text and icons. Derived |
 | `--info-soft` | `#E7F0F8` | Info badge and alert background. Derived |
 | `--text-disabled` | `#8B9198` | Text of disabled controls only. Derived |
-| `--border-contrast` | `#7F8790` | Proposed control border that meets 3:1. Not applied by default; see the note under the contrast table. Derived |
+| `--border-contrast` | `#7F8790` | Border of form controls and outline buttons, through `--control-border`. Meets 3:1. Chosen by the owner (D-025) |
 | `--focus-ring` | `#0E7C66` | 2px ring with a 2px offset in the colour of the surface behind the control. Derived |
 | `--focus-ring-on-ink` | `#FFFFFF` | Focus ring for controls that sit on an `--ink` surface. Derived |
 
-### Alias tokens for the open questions
+### Alias tokens
 
-These tokens hold no colour of their own. Each points at another token so that the owner's answer is a one-line change.
+These tokens hold no colour of their own. Each points at another token, so each rule is defined in one line. The values were decided by the owner (D-025).
 
 | Token | Points at | Use |
 | --- | --- | --- |
-| `--control-border` | `--border-strong` (OQ-01) | Border of inputs, textareas, selects, checkboxes, radios, the quantity stepper, the search field, chips at rest, and outline buttons |
-| `--selected` | `--ink` (OQ-03) | Fill of the current page in Pagination; later the selected tab and navigation item |
-| `--on-selected` | `--on-ink` (OQ-03) | Text on `--selected`. Changes with `--selected` only if the new fill is not dark |
+| `--control-border` | `--border-contrast` | Border of inputs, textareas, selects, checkboxes, radios, the quantity stepper, the search field, chips at rest, and outline buttons |
+| `--selected` | `--ink` | Fill of the current page in Pagination, and of the selected tab and the selected menu or navigation item when those primitives are built |
+| `--on-selected` | `--on-ink` | Text on `--selected` |
 
-The selected chip is not routed through `--selected`: the approved mockups show it in `--ink`, so it uses `--ink` directly.
+The selected chip is not routed through `--selected`: the approved mockups show it in `--ink`, so it uses `--ink` directly. Both resolve to the same colour.
 
 ### Tailwind class names
 
@@ -121,9 +125,9 @@ Custom utilities defined in `globals.css`:
 
 ### Accent usage rule
 
-`--primary` is used only for primary buttons, links, the cart count badge, and active states. It is not used for decoration, headings, section fills, icons at rest, or prices. Prices are `--text`.
+`--primary` is used only for primary buttons, links, the cart count badge, and active states. It is not used for decoration, headings, section fills, icons at rest, or prices. Prices are `--text`. Since D-025 it is also not the colour of a selected item or of the shipped status badge.
 
-The selected chip uses `--ink` with `--on-ink`, as in the mockups, not `--primary`.
+Selection is shown in dark ink, not in `--primary`: the selected chip uses `--ink` with `--on-ink`, as in the mockups, and the selected tab, page number, and menu item use `--selected` with `--on-selected`, which point at the same colours (D-025).
 
 ### Placeholder tints
 
@@ -133,7 +137,7 @@ Until real product photos exist, the product image area is filled with one of th
 
 Ratios are WCAG 2.1 relative-luminance contrast, **computed from the implemented token values in `src/app/globals.css`** by `src/components/ui/tokens.test.ts` (run with `pnpm test`) and rounded down to two decimals. They are calculated from the token values, not measured from rendered pixels in a browser. Requirement: 4.5:1 for body text, 3:1 for large text and control boundaries.
 
-T-017 changed no existing token value; every ratio that was already in these tables was recomputed from `globals.css` and is unchanged. Rows marked "T-017" are new pairs that the primitives use.
+T-017 changed no existing colour value; every ratio that was already in these tables was recomputed from `globals.css` and is unchanged. Rows marked "T-017" are new pairs that the primitives use. The D-025 follow-up changed one alias: `--control-border` now points at `--border-contrast` instead of `--border-strong`.
 
 Text pairs:
 
@@ -172,7 +176,7 @@ Text pairs:
 | `--text` `#14171A` | placeholder tints (lowest of the five) | 15.22 | 4.5 | Pass |
 | `--text-muted` `#5C636B` | placeholder tints (lowest of the five) | 5.14 | 4.5 | Pass |
 | `--on-ink` `#FFFFFF` | `--ink-active` `#3D444B` (T-017) | 9.87 | 4.5 | Pass |
-| `--on-selected` (`--on-ink`) | `--selected` (`--ink`) (T-017, OQ-03) | 17.99 | 4.5 | Pass |
+| `--on-selected` (`--on-ink`) | `--selected` (`--ink`) (T-017, D-025) | 17.99 | 4.5 | Pass |
 | `--on-danger` `#FFFFFF` | `--danger-active` `#7A1B14` (T-017) | 10.52 | 4.5 | Pass |
 | `--text` `#14171A` | `--primary-soft` `#EDF7F4` (T-017) | 16.45 | 4.5 | Pass |
 | `--text` `#14171A` | `--success-soft` `#F0F9F2` (T-017, alert body) | 16.73 | 4.5 | Pass |
@@ -189,7 +193,7 @@ Boundaries and non-text pairs:
 | --- | --- | --- | --- | --- |
 | `--primary` `#0E7C66` button fill | `#FFFFFF` | 5.12 | 3 | Pass |
 | `--ink` `#14171A` surface | `#FFFFFF` | 17.99 | 3 | Pass |
-| `--selected` (`--ink`) current-page fill (T-017, OQ-03) | `#FFFFFF` | 17.99 | 3 | Pass |
+| `--selected` (`--ink`) current-page fill (T-017, D-025) | `#FFFFFF` | 17.99 | 3 | Pass |
 | `--danger` `#B42318` error border of a control (T-017) | `#FFFFFF` | 6.57 | 3 | Pass |
 | Alert border in its tone colour (T-017) | its `-soft` background | 4.66 (success) to 6.17 (warning) | 3 | Pass |
 | `--focus-ring` `#0E7C66` | `#FFFFFF` | 5.12 | 3 | Pass |
@@ -198,14 +202,18 @@ Boundaries and non-text pairs:
 | `--focus-ring-on-ink` `#FFFFFF` | `--ink` `#14171A` | 17.99 | 3 | Pass |
 | `--border-contrast` `#7F8790` | `#FFFFFF` | 3.63 | 3 | Pass |
 | `--border-contrast` `#7F8790` | `--surface-muted` `#F4F5F3` | 3.32 | 3 | Pass |
-| `--border-strong` `#C9CDD1` (approved) | `#FFFFFF` | 1.59 | 3 | **Fails as a control boundary** |
-| `--border-strong` `#C9CDD1` (approved) | `--surface-muted` `#F4F5F3` | 1.46 | 3 | **Fails as a control boundary** |
+| `--control-border` (`--border-contrast`) border of form controls and outline buttons (D-025) | `#FFFFFF` | 3.63 | 3 | Pass |
+| `--control-border` (`--border-contrast`) border of form controls and outline buttons (D-025) | `--surface-muted` `#F4F5F3` | 3.32 | 3 | Pass |
+| `--border-strong` `#C9CDD1` (approved) | `#FFFFFF` | 1.59 | none | Card and divider border only, no requirement. Not used as a control boundary |
+| `--border-strong` `#C9CDD1` (approved) | `--surface-muted` `#F4F5F3` | 1.46 | none | Card and divider border only, no requirement. Not used as a control boundary |
 | `--border` `#E6E8EA` (approved) | `#FFFFFF` | 1.22 | none | Decorative divider, no requirement |
 | `--surface-muted` `#F4F5F3` | `#FFFFFF` | 1.09 | none | Decorative fill, no requirement |
 
 Values adjusted during derivation because the first candidate failed: `--primary-soft` was lightened from `#E3F2EE` (4.44 with `--primary`) to `#EDF7F4` (4.69), and `--success-soft` from `#E8F6EC` (4.49 with `--success`) to `#F0F9F2` (4.66). No approved value was changed.
 
-**Open issue, approved value (OQ-01):** `--border-strong` `#C9CDD1` does not reach 3:1 against white or the muted surface. WCAG 1.4.11 applies where the border is the only thing that identifies a control, which is the case for a text input on a white panel. The approved value is kept as specified. `--border-contrast` is defined as a ready alternative; every form control and outline button reads its border from `--control-border`, which points at `--border-strong` until the owner decides. As implemented, the unchecked checkbox, the unchecked radio, the text input, the select, the textarea, the quantity stepper, the search field, the chip at rest, and the outline button therefore do not meet 1.4.11 at rest. Their hover border is `--border-contrast` (derived), and their focus ring passes. Controls must not rely on a lighter border than `--border-strong` in any case.
+**Control border (decided, D-025).** Form controls and outline buttons use `--border-contrast` `#7F8790` through `--control-border`: **3.63:1 against white and 3.32:1 against the muted surface**, both above the 3:1 that WCAG 1.4.11 requires where the border is the only thing that identifies a control. This covers the unchecked checkbox, the unchecked radio, the text input, the select, the textarea, the quantity stepper, the search field, the chip at rest, and the outline button. `--border-strong` `#C9CDD1` (1.59:1 on white, 1.46:1 on the muted surface) and `--border` stay for cards and dividers and must not be the only boundary of a control. The margin on the muted surface is small (3.32): do not place a control on a fill darker than `--surface-muted` without checking the pair.
+
+Hover border of these controls: the hover style of inputs, selects, textareas, checkboxes, radios, and the search field is still `--border-contrast`, which is now also their border at rest, so hovering one of them shows no border change. Nothing is lost for accessibility (hover is not a required state, and the focus ring is unchanged), and outline buttons and chips still change fill on hover. Whether these controls should get a distinct hover border, and which colour, has not been decided and is not guessed here.
 
 Margins to watch: `--primary` on `--surface-muted` (4.69), `--primary` on `--primary-soft` (4.69), `--success` on `--surface-muted` (4.58), and `--success` on `--success-soft` (4.66) pass with little room. Do not place these foregrounds on any darker fill.
 
@@ -280,20 +288,21 @@ Each component defines default, hover, focus-visible, active, disabled, and wher
 
 | Component | Notes |
 | --- | --- |
-| Button | Variants: primary (`--primary`), dark (`--ink`, for the search button and call-to-action band), secondary (outline, `--border-strong`), ghost, danger. Sizes: `lg` 52 px high with radius 12, `md` 44 px with radius 10, `sm` 36 px with radius 10 for dense dashboard rows only (its touch area is still 44 px on mobile). Hover uses the `-hover` token of the variant. Loading shows a spinner, keeps width, and is disabled. The mockups show large buttons at 50 to 52 px; 52 as the single value and the `sm` size are derived, not yet shown to the owner. |
-| Input, Textarea, Select | Label above, helper below, error text replaces helper and is linked with `aria-describedby`. Height 44, radius 10, border `--border-strong`. Error state: `--danger` border plus error text. |
+| Button | Variants: primary (`--primary`), dark (`--ink`, for the search button and call-to-action band), secondary (outline, `--control-border`), ghost, danger. Sizes: `lg` 52 px high with radius 12, `md` 44 px with radius 10, `sm` 36 px with radius 10 for dense dashboard rows only (its touch area is still 44 px on mobile). Hover uses the `-hover` token of the variant. Loading shows a spinner, keeps width, and is disabled. The mockups show large buttons at 50 to 52 px; 52 as the single value and the `sm` size are derived, not yet shown to the owner. |
+| Input, Textarea, Select | Label above, helper below, error text replaces helper and is linked with `aria-describedby`. Height 44, radius 10, border `--control-border`. Error state: `--danger` border plus error text. |
 | SearchField | Pill-shaped field with a dark (`--ink`) submit button labelled "ค้นหา" inside the right end. A `form` with `role="search"`; the input has an accessible label. |
 | Checkbox, Radio, Switch | Native inputs, 44 px touch area. |
-| QuantityStepper | Minus, numeric input, plus. Every change the customer makes is clamped to 1 and available stock. A quantity that the parent supplies outside that range is shown as given and reported to the parent, which decides (see the QuantityStepper contract below). Buttons have Thai accessible names. |
-| Badge | Pill-shaped. Neutral (`--text-secondary` on `--surface-muted`), primary, success, warning, danger, info (each semantic colour on its soft background). Used for statuses. |
-| Chip | Pill-shaped filter or option. At rest: `--border-strong` border, `--text` label. Selected: `--ink` fill with `--on-ink` label and `aria-pressed="true"` (or a radio group when exactly one may be chosen). Height 44 on mobile. |
+| QuantityStepper | Minus, numeric input, plus. Every change the customer makes is clamped to 1 and available stock. When stock drops below the chosen quantity, the quantity is lowered automatically to what is available and the customer is told (see the QuantityStepper contract below). Buttons have Thai accessible names. |
+| Badge | Pill-shaped. Neutral (`--text-secondary` on `--surface-muted`), primary, success, warning, danger, info (each semantic colour on its soft background). Used for statuses. The shipped status is info (blue). |
+| Chip | Pill-shaped filter or option. At rest: `--control-border` border, `--text` label. Selected: `--ink` fill with `--on-ink` label and `aria-pressed="true"` (or a radio group when exactly one may be chosen). Height 44 on mobile. |
 | Card | Border `--border`, radius 16, padding 16 (24 for panels from `md`). |
 | ProductCard | Square image area with radius 16, filled with a placeholder tint until a real photo exists. Optional low-stock pill at the top-left of the image. Then a two-line title clamp, store name (`--text-muted`), and price (18 / 700, tabular numerals, `--text`). Rating row only when review count is above zero; no sales counts. Whole card is one link; no nested interactive elements. The low-stock pill uses the warning badge colours (derived, not yet shown to the owner). |
 | Price | Formats satang to THB. Tabular numerals. |
 | CartButton | Pill-shaped header button with a count badge (`--primary` fill, `--on-primary` text). The badge is hidden when the cart is empty. The accessible name includes the count. |
 | Table | Sticky header, zebra off, row hover, sortable headers as buttons. |
-| Pagination | Previous, next, page numbers; current page marked with `aria-current`. |
-| Tabs | Arrow-key navigation. |
+| Pagination | Previous, next, page numbers; current page marked with `aria-current` and filled with `--selected` (dark ink) with `--on-selected` text. |
+| Tabs | Arrow-key navigation. The selected tab is shown in dark ink (`--selected`), not in `--primary`, and is marked with `aria-selected`; colour is not the only signal. |
+| Menu and navigation items | The selected or current item is shown in dark ink (`--selected`), not in `--primary`, and is marked with `aria-current` (or `aria-checked` in a menu of choices). |
 | Dialog, Drawer | Radius 16. Focus trapped, Escape closes, focus returns to trigger. |
 | Toast | Polite live region; errors that need action are inline, not toast-only. |
 | Alert | Inline banner: info, success, warning, danger. |
@@ -329,7 +338,7 @@ Shared rules for every primitive below:
 | `Select`, `SelectField` (`select.tsx`) | Native select, 44 px, radius 10, chevron icon at the right | As Input (no read-only state) | Full width | Native `select` and `option`; the platform picker opens on touch devices |
 | `Checkbox` (`checkbox.tsx`) | 20 px box, radius 6 (derived), required `label`, optional `helperText` and `errorText` | Hover: border `--border-contrast`. Checked: `--primary` fill with a white check mark; checked hover `--primary-hover`. Disabled: shared rule (checked and disabled: `--text-disabled` fill). Error: `--danger` border plus error text | The label row is at least 44 px high at every breakpoint and is the touch target | Native `input type="checkbox"` inside its `label`. Space toggles. In forced-colours mode the native control is shown |
 | `Radio`, `RadioGroup` (`radio.tsx`) | 20 px circle with a `--primary` dot when checked. `RadioGroup` is a `fieldset` with a `legend`, `helperText`, `errorText` | As Checkbox | Label row at least 44 px high; options stack vertically | Native radios that share a `name`: arrow keys move, Tab enters and leaves the group. Group message linked with `aria-describedby`; `aria-invalid` on the group |
-| `Badge` (`badge.tsx`) | `neutral` (default), `primary`, `success`, `warning`, `danger`, `info`, and `shipped` (OQ-02). Pill, caption type at weight 500 | Not interactive | Wraps inside narrow containers; never truncated | A `span`. The label text is the status; colour only supports it |
+| `Badge` (`badge.tsx`) | `neutral` (default), `primary`, `success`, `warning`, `danger`, `info`, and `shipped`, which is the info tone (blue; D-025). Pill, caption type at weight 500 | Not interactive | Wraps inside narrow containers; never truncated | A `span`. The label text is the status; colour only supports it |
 | `Chip`, `ChipRadio`, `chipVariants` (`chip.tsx`) | `Chip`: toggle button. `ChipRadio`: single choice within a set. `chipVariants()`: the same look for a filter link. Height 44, pill | Rest: `--control-border` border, `--text` label. Hover: `--surface-muted`. Active: `--border`. Selected: `--ink` fill, `--on-ink` label; hover `--ink-hover`. Disabled: shared rule | 44 px high at every breakpoint (see the open question on desktop height) | `Chip`: `button` with `aria-pressed`. `ChipRadio`: native radio drawn as a chip; wrap the set in a `fieldset` with a `legend`. A filter link uses `aria-current="true"` when selected |
 | `Card`, `CardTitle` (`card.tsx`) | `padding`: `card` 16 px (default), `panel` 16 px and 24 px from `md`, `none`. `as`: `div`, `section`, `article`, `li`. `CardTitle` sizes `card` 17 / 600 and `panel` 20 / 600 with a required heading level | Not interactive. A card that is a link is built by the frontend (ProductCard) | `panel` padding grows at `md` | Choose `as` and the heading level so the page outline stays in order |
 | `Alert` (`alert.tsx`) | Tones `info` (default), `success`, `warning`, `danger`. Optional `title` and `action`. Radius 10 and a 1 px border in the tone colour (derived) | Not interactive itself | Full width; the icon stays at the top-left and text wraps | `role="alert"` for danger, `role="status"` for the others; override with `role`. Each tone has a different icon shape; body text is `--text` |
@@ -338,8 +347,8 @@ Shared rules for every primitive below:
 | `ErrorState` (`error-state.tsx`) | `message`, optional `title`, and either `retryLabel` + `onRetry` (+ `retrying`) or a custom `action` | The retry button is a secondary Button; `retrying` shows its loading state | As EmptyState | `role="alert"`. Icon and text carry the meaning. `onRetry` needs a Client Component parent |
 | `Price`, `formatSatang` (`price.tsx`, `format-price.ts`) | Sizes `inline` (inherits the surrounding type; default), `card` 18 / 700, `page` 32 / 700. Always tabular numerals, `--text`, never wraps | Not interactive | Same at every breakpoint | Plain text such as `฿290.00`. Input is integer satang; a value that is not an integer throws `RangeError` (see below) |
 | `NoticeLabel` (`notice-label.tsx`) | One style: pill, `--warning` on `--warning-soft`, caption type at weight 500 | Not interactive | Wraps if the container is narrower than the text | A `span`; its text is the notice |
-| `QuantityStepper` (`quantity-stepper.tsx`) | One size: 44 px high, radius 10; 44 px wide minus and plus buttons around a 48 px wide number input | Minus is disabled at 1 and below, plus at `max` and above. Typing is free while the input has focus and is clamped to 1 and `max` on blur or Enter; Enter does not submit a surrounding form; an empty input restores the parent's value; non-digits are ignored. `disabled`, or `max` under 1, disables the input and both buttons (shared rule). Error (`invalid`): `--danger` border and `aria-invalid="true"`; the error text is rendered by the parent and linked with `aria-describedby`. Out-of-range `value`: see the contract below. No loading or success state is specified | Same at every breakpoint | The input has one accessible name: `inputLabel`, or a visible `<label htmlFor>` pointing at `id` (then omit `inputLabel`); the types require one of the two. Optional `groupLabel` names the wrapper as a group (`role="group"`); without it the wrapper has no role and no name. Buttons take required `decreaseLabel` and `increaseLabel`. Arrow up and down step by one. Numeric keyboard on touch devices (`inputMode="numeric"`) |
-| `Pagination` (`pagination.tsx`) | Previous, page numbers, next, all links, each 44 by 44 px. Current page: `--selected` fill, `--on-selected` text, weight 700 (OQ-03) | Hover `--surface-muted`, active `--border`. Previous on the first page and next on the last page are shown disabled and are not links. Renders nothing when there is one page or when `totalPages` is not a valid page count (see the Pagination input rules below) | From `sm`: first, last, current, and one neighbour each side, with "…" for gaps. Below `sm`: first, last, and current only, so the row fits a 360 px screen; it wraps on narrower screens | `nav` with a required `label`. Current page has `aria-current="page"`. Required `previousLabel`, `nextLabel`, and `pageLabel(page)`. Ellipses are hidden from assistive technology |
+| `QuantityStepper` (`quantity-stepper.tsx`) | One size: 44 px high, radius 10; 44 px wide minus and plus buttons around a 48 px wide number input | Minus is disabled at 1 and below, plus at `max` and above. Typing is free while the input has focus and is clamped to 1 and `max` on blur or Enter (a number of any length above `max` becomes `max`); Enter does not submit a surrounding form; an empty input restores the parent's value; non-digits are ignored. `disabled`, or `max` under 1, disables the input and both buttons (shared rule) and discards text that was being typed, so the committed value shows when the control is enabled again. Error (`invalid`): `--danger` border and `aria-invalid="true"`; the error text is rendered by the parent and linked with `aria-describedby`. `value` above `max`: lowered automatically, see the contract below. No loading or success state is specified | Same at every breakpoint | The input has one accessible name: `inputLabel`, or a visible `<label htmlFor>` pointing at `id` (then omit `inputLabel`); the types require one of the two. Optional `groupLabel` names the wrapper as a group (`role="group"`); without it the wrapper has no role and no name. Buttons take required `decreaseLabel` and `increaseLabel`. Arrow up and down step by one; Up does nothing at or above `max` and Down does nothing at or below 1, the same as the disabled buttons. Numeric keyboard on touch devices (`inputMode="numeric"`) |
+| `Pagination` (`pagination.tsx`) | Previous, page numbers, next, all links, each 44 by 44 px. Current page: `--selected` fill (dark ink), `--on-selected` text, weight 700 | Hover `--surface-muted`, active `--border`. Previous on the first page and next on the last page are shown disabled and are not links. Renders nothing when there is one page or when `totalPages` is not a valid page count (see the Pagination input rules below) | From `sm`: first, last, current, and one neighbour each side, with "…" for gaps. Below `sm`: first, last, and current only, so the row fits a 360 px screen; it wraps on narrower screens | `nav` with a required `label`. Current page has `aria-current="page"`. Required `previousLabel`, `nextLabel`, and `pageLabel(page)`. Ellipses are hidden from assistive technology |
 | `Breadcrumb` (`breadcrumb.tsx`) | Small type, `--text-muted` links, current page in `--text` at weight 500, chevron separators | Link hover: `--text` and underline | Wraps onto more lines; long Thai names are never truncated. Links are 44 px high | `nav` with a required `label`, ordered list, last item has `aria-current="page"` and is not a link |
 | `SearchField` (`search-field.tsx`) | Pill, 52 px high (derived: the height that lets a 44 px button sit inside), with a `dark` pill button at the right end | Hover: border `--border-contrast`. Focus in the input: ring around the whole pill. The button has its own ring | Full width of its container; the header gives it its own row on mobile | `form` with `role="search"`; a visually hidden `label` (required prop); works without JavaScript as a GET form. Required `name`, `label`, `submitLabel` |
 
@@ -348,12 +357,15 @@ Shared rules for every primitive below:
 **QuantityStepper contract.** `QuantityStepper` is a controlled component: the parent holds the quantity and passes it as `value`.
 
 - The input shows the `value` prop exactly. With `name` set, a native form submits that same number. The stepper never shows a number that differs from the parent's state. A `value` that is not a finite number shows as an empty input.
-- Every change the customer makes (buttons, arrow keys, typing) is passed to `onChange` as a whole number from 1 to `max`. `onChange` is not called when the quantity does not change.
-- When `value` is not a whole number from 1 to `max` (for example a cart line holds 9 and a stock refetch sets `max` to 4), the stepper keeps showing `value` and calls the optional `onOutOfRange(value, clamped)`, where `clamped` is the nearest allowed quantity. It is called once for each distinct pair of `value` and `clamped`, after render; re-renders do not repeat it. If `max` changes again so that `clamped` changes, it is called with the new pair. It is not called through `onChange`, and the stepper does not change the quantity by itself.
-- **The parent owns the decision.** It can adopt the clamped quantity (`onOutOfRange={(_, clamped) => setQuantity(clamped)}`), after which the stepper shows and submits the clamped number; or it can keep the quantity and show a message, by rendering the text itself, passing its id as `aria-describedby`, and setting `invalid`. Which of the two the customer experiences when stock drops below the chosen quantity is an open product question; this primitive supports both and chooses neither. A parent that passes no `onOutOfRange` gets the "keep" behaviour with no message, so every feature that uses the stepper with a changing `max` must pass it.
-- While `value` is out of range and the parent has not acted: plus is disabled above `max`, minus is disabled below 1, and the first step in the other direction calls `onChange` with the nearest allowed quantity (9 with `max` 4: minus gives 4). An emptied input restores `value` without calling `onChange`.
-- `max` under 1 means no quantity is allowed. The whole control is disabled, still shows `value`, takes no part in a form submission (native behaviour of a disabled input), and `onOutOfRange` is not called; the parent already knows from `max` that the item is unavailable.
-- The server validates quantity against stock in every case (CLAUDE.md, rule 3). A kept out-of-range quantity that is submitted must be rejected there.
+- Every change the customer makes (buttons, arrow keys, typing) is passed to `onChange` as a whole number from 1 to `max`. `onChange` is not called when the quantity does not change. A typed number is clamped on blur or Enter; a number too long for JavaScript to hold (for example 400 digits) is above `max` like any other and commits as `max`.
+- **Stock below the chosen quantity (decided, D-025).** When `value` is above `max` (for example a cart line holds 9 and a stock refetch sets `max` to 4), the stepper lowers the quantity automatically: after render it calls `onChange(max)` and then the optional `onLowered(previous, lowered)`, where `previous` is the quantity the customer had chosen and `lowered` is the largest quantity allowed. The parent stores the new quantity from `onChange` exactly as it does for a click, so a parent that passes no `onLowered` still gets the lowered quantity. This happens on mount as well as when `max` changes later, and also while the `disabled` prop is set.
+- **Telling the customer.** The stepper renders no text. The page uses `onLowered` to show the message (proposed key `quantity.lowered` in the strings table) and is responsible for the announcement: put the text in a polite live region that is already on the page before the text appears, for example `FieldMessage` under the stepper (as `helperText`, with its id passed to the stepper as `aria-describedby`) or an `Alert` with the `info` tone, whose `role="status"` wrapper stays mounted. The message is information, not an error: do not set `invalid` and do not use the danger tone. It stays visible until the customer changes the quantity again or leaves the page; it is not a toast-only message.
+- `onChange` plus `onLowered` are called once for each distinct pair of `previous` and `lowered`; re-renders do not repeat them. If the parent does not store the lowered quantity, the stepper keeps showing the parent's `value` and does not call again until `max` changes.
+- **Other values outside the range.** A `value` below 1, a fraction that is not above `max`, or a value that is not a finite number is a mistake of the calling code, not something the customer did. The stepper keeps showing it and calls the optional `onOutOfRange(value, clamped)`, where `clamped` is the nearest allowed quantity, once for each distinct pair, after render. It does not call `onChange` for these. The parent decides: adopt `clamped`, or keep the value and show an error (render the text, pass its id as `aria-describedby`, set `invalid`). `onOutOfRange` is not called for a value above `max`.
+- **Keys and buttons outside the range (decided, D-025).** At or above `max` the plus button is disabled and the Up arrow key does nothing. At or below 1 the minus button is disabled and the Down arrow key does nothing. The first step in the other direction calls `onChange` with the nearest allowed quantity (9 with `max` 4 that the parent kept: minus or Down gives 4). The same applies to a number that is being typed and not yet committed: Up does nothing while the typed number is at or above `max`, Down does nothing while it is 1 or less, and the typed text stays as it is until blur or Enter clamps it. An emptied input restores `value` without calling `onChange`.
+- `max` under 1 means no quantity is allowed. The whole control is disabled, still shows `value`, takes no part in a form submission (native behaviour of a disabled input), and neither `onChange`, `onLowered`, nor `onOutOfRange` is called; the parent already knows from `max` that the item is unavailable. How the quantity selector of a sold-out product should look is still open (OQ-20); this is the placeholder behaviour.
+- **Disabled.** When the control becomes disabled (the `disabled` prop, or `max` under 1), text that was being typed is discarded. The control shows `value` while disabled and after it is enabled again.
+- The server validates quantity against stock in every case (CLAUDE.md, rule 3). An out-of-range quantity that is submitted must be rejected there.
 
 Accessible names: on a product page, where one stepper sits next to a visible "จำนวน" label, pass `id` and render `<label htmlFor>`; omit `inputLabel` and `groupLabel`. In a list of cart lines, pass `inputLabel` ("จำนวน") and set `groupLabel` to the product title, so each stepper is announced as, for example, "เสื้อยืดผ้าฝ้าย, กลุ่ม" then "จำนวน". `groupLabel` and `inputLabel` must not be the same text.
 
@@ -377,6 +389,7 @@ Accessible names: on a product page, where one stepper sits next to a visible "�
 | `quantity.decrease` | ลดจำนวน | `QuantityStepper` `decreaseLabel` |
 | `quantity.increase` | เพิ่มจำนวน | `QuantityStepper` `increaseLabel` |
 | `quantity.label` | จำนวน | `QuantityStepper` `inputLabel`, or the visible `<label>` of the stepper. `groupLabel` needs no string: it is the product title |
+| `quantity.lowered` | สินค้าเหลือ {available} ชิ้น ระบบปรับจำนวนเป็น {available} ชิ้นให้แล้ว | Message the page shows from `QuantityStepper` `onLowered` (`available` is its `lowered` argument). Proposed wording for the D-025 rule that the customer is told; not approved |
 | `pagination.label` | การแบ่งหน้า | `Pagination` `label` |
 | `pagination.previous` | หน้าก่อนหน้า | `Pagination` `previousLabel` |
 | `pagination.next` | หน้าถัดไป | `Pagination` `nextLabel` |
@@ -396,7 +409,7 @@ Accessible names: on a product page, where one stepper sits next to a visible "�
 | Payment `FAILED` | danger | ชำระเงินไม่สำเร็จ |
 | Fulfilment `PENDING` | neutral | รอร้านค้ายืนยัน |
 | Fulfilment `PROCESSING` | info | กำลังเตรียมสินค้า |
-| Fulfilment `SHIPPED` | `shipped` variant, currently primary (OQ-02) | จัดส่งแล้ว |
+| Fulfilment `SHIPPED` | info (blue), through the `shipped` variant | จัดส่งแล้ว |
 | Fulfilment `DELIVERED` | success | จัดส่งสำเร็จ |
 | Fulfilment `CANCELLED` | danger | ยกเลิกแล้ว |
 | Store `PENDING` | warning | รอการอนุมัติ |

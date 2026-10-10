@@ -17,28 +17,51 @@ export function clampQuantity(value: number, max: number): number {
   return Math.min(upper, Math.max(MIN_QUANTITY, Math.trunc(value)));
 }
 
+/**
+ * Number typed into the input. `draft` holds digits only and is not empty, so the result is never
+ * negative or `NaN`. A number too long for JavaScript to hold (`Number()` gives `Infinity`) is
+ * capped, so that it clamps to `max` like any other number above the stock.
+ */
+function draftQuantity(draft: string): number {
+  return Math.min(Number(draft), Number.MAX_SAFE_INTEGER);
+}
+
 interface QuantityStepperBaseProps {
   /**
    * Current quantity (controlled). The input always shows exactly this number, also when it is
-   * outside 1 to `max`; see `onOutOfRange`.
+   * outside 1 to `max`; see `onLowered` and `onOutOfRange`.
    */
   value: number;
   /**
-   * Called with the new quantity when the customer changes it. The argument is always a whole
-   * number from 1 to `max`. Not called when the quantity does not change.
+   * Called with the new quantity when the customer changes it, and when the stepper lowers a
+   * quantity that is above `max` (see `onLowered`). The argument is always a whole number from 1
+   * to `max`. Not called when the quantity does not change.
    */
   onChange: (value: number) => void;
   /** Largest quantity allowed: the available stock. The server still validates stock. */
   max: number;
   /**
-   * Called when the `value` prop is not a whole number from 1 to `max`, for example after a stock
-   * refetch lowered `max` below the chosen quantity. `clamped` is the nearest allowed quantity.
-   * Called once for each distinct pair of `value` and `clamped`, after render; not called again on
-   * re-renders, and not called while `max` is under 1 (no quantity is allowed then).
+   * Called right after the stepper lowered the quantity because `value` was above `max`, for
+   * example after a stock refetch (D-025, OQ-23). `onChange(lowered)` has already been called;
+   * `previous` is the quantity the customer had chosen and `lowered` is the largest quantity
+   * allowed. Use it to tell the customer: render the text (from th.ts) in a live region that is
+   * already on the page, for example `FieldMessage` or an `Alert` with `role="status"`. The
+   * stepper renders no text of its own.
    *
-   * The stepper does not change the quantity by itself. The parent decides: adopt `clamped`
-   * (set its state to it), or keep `value` and show a message (link it with `aria-describedby`
-   * and set `invalid`).
+   * Called once for each distinct pair of `previous` and `lowered`, after render; not called again
+   * on re-renders, and not called while `max` is under 1 (no quantity is allowed then).
+   */
+  onLowered?: (previous: number, lowered: number) => void;
+  /**
+   * Called when the `value` prop is outside 1 to `max` for a reason other than being above `max`:
+   * below 1, a fraction, or not a number. `clamped` is the nearest allowed quantity. A `value`
+   * above `max` is lowered by the stepper and reported through `onLowered` instead.
+   * Called once for each distinct pair of `value` and `clamped`, after render; not called again on
+   * re-renders, and not called while `max` is under 1.
+   *
+   * For these values the stepper does not change the quantity by itself. The parent decides:
+   * adopt `clamped` (set its state to it), or keep `value` and show a message (link it with
+   * `aria-describedby` and set `invalid`).
    */
   onOutOfRange?: (value: number, clamped: number) => void;
   /** Accessible name of the minus button, for example "ลดจำนวน" (from th.ts). */
@@ -99,17 +122,23 @@ const STEP_BUTTON =
  * - Every change made by the customer (buttons, arrow keys, typing) reaches the parent through
  *   `onChange` as a whole number from 1 to `max`. Typing is free while the input has focus and is
  *   clamped when it loses focus or Enter is pressed; Enter does not submit a surrounding form.
- * - When the `value` prop itself is outside 1 to `max`, the stepper keeps showing it and calls
- *   `onOutOfRange(value, clamped)` once. The parent owns the decision: lower the quantity to
- *   `clamped`, or keep it and show a message. Until the parent acts, the plus button is disabled
- *   above `max`, the minus button is disabled below 1, and the first step in the other direction
- *   lands on the nearest allowed quantity.
+ * - When `value` is above `max` (stock dropped below the chosen quantity), the stepper lowers it:
+ *   it calls `onChange(max)` and then `onLowered(previous, max)`, once, after render. The page
+ *   uses `onLowered` to tell the customer, with text from th.ts (D-025, OQ-23).
+ * - Any other `value` outside 1 to `max` (below 1, a fraction, not a number) is a mistake of the
+ *   caller, not of the customer: the stepper keeps showing it and calls
+ *   `onOutOfRange(value, clamped)` once. The parent decides what to do.
+ * - While `value` is outside the range, the plus button and the Up arrow key do nothing at or
+ *   above `max`, the minus button and the Down arrow key do nothing at or below 1 (D-025, OQ-24),
+ *   and the first step in the other direction lands on the nearest allowed quantity.
  * - `max` under 1 disables the whole control. A disabled input is not part of a form submission.
+ * - A disabled control discards text that was being typed and shows `value`.
  */
 export function QuantityStepper({
   value,
   onChange,
   max,
+  onLowered,
   onOutOfRange,
   decreaseLabel,
   increaseLabel,
@@ -130,13 +159,20 @@ export function QuantityStepper({
   const clamped = clampQuantity(value, max);
   const upper = clampQuantity(max, max);
   const outOfRange = !unavailable && value !== clamped;
+  // The chosen quantity is more than the available stock (D-025, OQ-23).
+  const aboveMax = outOfRange && Number.isFinite(value) && value > upper;
   // Numbers that the buttons and arrow keys step from. They differ only for a fractional value,
   // where a step goes to the next whole number in its direction.
   const base = Number.isFinite(value) ? value : MIN_QUANTITY;
   const stepUpFrom = Math.floor(base);
   const stepDownFrom = Math.ceil(base);
 
-  // The pair last reported through onOutOfRange, so that each pair is reported once.
+  // A disabled control shows the committed value: text typed before it was disabled is discarded,
+  // so it cannot come back when the control is enabled again. (A browser does not fire blur on an
+  // input that becomes disabled, so the draft would otherwise survive.)
+  if (isDisabled && draft !== null) setDraft(null);
+
+  // The pair last handled by the effect below, so that each pair is handled once.
   const reported = useRef<{ value: number; clamped: number } | null>(null);
   useEffect(() => {
     if (!outOfRange) {
@@ -146,7 +182,13 @@ export function QuantityStepper({
     const last = reported.current;
     if (last !== null && Object.is(last.value, value) && last.clamped === clamped) return;
     reported.current = { value, clamped };
-    onOutOfRange?.(value, clamped);
+    if (aboveMax) {
+      // Stock is below the chosen quantity: lower it, then let the page tell the customer.
+      onChange(clamped);
+      onLowered?.(value, clamped);
+    } else {
+      onOutOfRange?.(value, clamped);
+    }
   });
 
   function commit(next: number) {
@@ -162,7 +204,7 @@ export function QuantityStepper({
       setDraft(null);
       return;
     }
-    commit(Number(draft));
+    commit(draftQuantity(draft));
   }
 
   function handleChange(event: ChangeEvent<HTMLInputElement>) {
@@ -177,10 +219,16 @@ export function QuantityStepper({
       commitDraft();
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      commit((draft ? Number(draft) : stepUpFrom) + 1);
+      // At or above the available stock the key does nothing, like the disabled plus button.
+      const typed = draft ? draftQuantity(draft) : null;
+      if ((typed ?? base) >= upper) return;
+      commit((typed ?? stepUpFrom) + 1);
     } else if (event.key === "ArrowDown") {
       event.preventDefault();
-      commit((draft ? Number(draft) : stepDownFrom) - 1);
+      // At or below 1 the key does nothing, like the disabled minus button.
+      const typed = draft ? draftQuantity(draft) : null;
+      if ((typed ?? base) <= MIN_QUANTITY) return;
+      commit((typed ?? stepDownFrom) - 1);
     }
   }
 

@@ -34,25 +34,32 @@ function Harness({
 }
 
 /**
- * A parent that owns the quantity and applies one of the two possible answers to an out-of-range
- * value: "adopt" lowers its state to the clamped quantity, "keep" leaves its state alone and shows
+ * A parent that owns the quantity, as a page does. It stores what `onChange` gives it, and shows
+ * the text for a lowered quantity (`onLowered`) in a live region that is always on the page. For a
+ * value that is out of range for another reason (`onOutOfRange`) it applies one of the two possible
+ * answers: "adopt" sets its state to the clamped quantity, "keep" leaves its state alone and shows
  * a message. Its state is printed so tests can compare it with what the stepper shows and submits.
  */
 function ParentHarness({
   initial,
   max,
   policy,
+  disabled,
   onChange,
+  onLowered,
   onOutOfRange,
 }: {
   initial: number;
   max: number;
   policy: "adopt" | "keep";
+  disabled?: boolean;
   onChange?: (value: number) => void;
+  onLowered?: (previous: number, lowered: number) => void;
   onOutOfRange?: (value: number, clamped: number) => void;
 }) {
   const [value, setValue] = useState(initial);
   const [message, setMessage] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   return (
     <form>
       <QuantityStepper
@@ -60,12 +67,17 @@ function ParentHarness({
         name="quantity"
         value={value}
         max={max}
+        disabled={disabled}
         invalid={message !== null}
         aria-describedby={message !== null ? "quantity-message" : undefined}
         onChange={(next) => {
           onChange?.(next);
           setMessage(null);
           setValue(next);
+        }}
+        onLowered={(previous, lowered) => {
+          onLowered?.(previous, lowered);
+          setNotice(`ลดจาก ${previous} เหลือ ${lowered}`);
         }}
         onOutOfRange={(given, clamped) => {
           onOutOfRange?.(given, clamped);
@@ -74,12 +86,16 @@ function ParentHarness({
         }}
       />
       {message !== null ? <p id="quantity-message">{message}</p> : null}
+      <p role="status" data-testid="notice">
+        {notice}
+      </p>
       <output data-testid="parent-state">{String(value)}</output>
     </form>
   );
 }
 
 const parentState = () => screen.getByTestId("parent-state").textContent;
+const notice = () => screen.getByTestId("notice").textContent;
 
 /** What a native form submission would send for the field named "quantity". */
 function submittedQuantity(container: HTMLElement): FormDataEntryValue | null {
@@ -342,34 +358,273 @@ describe("QuantityStepper accessible names", () => {
   });
 });
 
-// Contract: the stepper shows exactly the value it was given, a native form submits that same
-// number, and a value outside 1..max is reported to the parent, which decides what happens.
+// D-025, OQ-23: when stock drops below the quantity the customer chose, the quantity is lowered
+// automatically to what is available and the customer is told. The stepper calls onChange with
+// the lowered quantity and then onLowered, which the page uses for the announcement.
+describe("QuantityStepper with a value above max (stock below the chosen quantity)", () => {
+  it("lowers the quantity and tells the page: shown, submitted, and parent state all agree", () => {
+    const onChange = vi.fn();
+    const onLowered = vi.fn();
+    const onOutOfRange = vi.fn();
+    const { container } = render(
+      <ParentHarness
+        initial={9}
+        max={4}
+        policy="keep"
+        onChange={onChange}
+        onLowered={onLowered}
+        onOutOfRange={onOutOfRange}
+      />,
+    );
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith(4);
+    expect(onLowered).toHaveBeenCalledTimes(1);
+    expect(onLowered).toHaveBeenCalledWith(9, 4);
+    // Not reported as a caller mistake, whatever the parent's policy for those is.
+    expect(onOutOfRange).not.toHaveBeenCalled();
+    expect(input().value).toBe("4");
+    expect(submittedQuantity(container)).toBe("4");
+    expect(parentState()).toBe("4");
+    expect(plus().disabled).toBe(true);
+    // The page's text is in its live region; the stepper itself renders no text.
+    expect(notice()).toBe("ลดจาก 9 เหลือ 4");
+    expect(input().getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("calls onChange before onLowered", () => {
+    const calls: string[] = [];
+    render(
+      <QuantityStepper
+        {...labels}
+        value={9}
+        max={4}
+        onChange={(next) => calls.push(`change ${next}`)}
+        onLowered={(previous, lowered) => calls.push(`lowered ${previous} ${lowered}`)}
+      />,
+    );
+    expect(calls).toEqual(["change 4", "lowered 9 4"]);
+  });
+
+  it("lowers the quantity when max drops below it after mount", () => {
+    const onChange = vi.fn();
+    const onLowered = vi.fn();
+    const view = (max: number) => (
+      <ParentHarness
+        initial={9}
+        max={max}
+        policy="keep"
+        onChange={onChange}
+        onLowered={onLowered}
+      />
+    );
+    const { container, rerender } = render(view(10));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onLowered).not.toHaveBeenCalled();
+    expect(input().value).toBe("9");
+    expect(notice()).toBe("");
+
+    rerender(view(4));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith(4);
+    expect(onLowered).toHaveBeenCalledTimes(1);
+    expect(onLowered).toHaveBeenLastCalledWith(9, 4);
+    expect(input().value).toBe("4");
+    expect(submittedQuantity(container)).toBe("4");
+    expect(parentState()).toBe("4");
+    expect(notice()).toBe("ลดจาก 9 เหลือ 4");
+
+    // Stock drops again, below the lowered quantity: lowered again, announced again.
+    rerender(view(3));
+    expect(onChange).toHaveBeenCalledTimes(2);
+    expect(onLowered).toHaveBeenLastCalledWith(4, 3);
+    expect(input().value).toBe("3");
+    expect(notice()).toBe("ลดจาก 4 เหลือ 3");
+
+    // Stock comes back: the lowered quantity stays, nothing is reported.
+    rerender(view(10));
+    expect(onChange).toHaveBeenCalledTimes(2);
+    expect(onLowered).toHaveBeenCalledTimes(2);
+    expect(input().value).toBe("3");
+    expect(parentState()).toBe("3");
+  });
+
+  it("lowers a fractional quantity above max to max", () => {
+    const onChange = vi.fn();
+    const onLowered = vi.fn();
+    const onOutOfRange = vi.fn();
+    render(
+      <QuantityStepper
+        {...labels}
+        value={9.5}
+        max={4}
+        onChange={onChange}
+        onLowered={onLowered}
+        onOutOfRange={onOutOfRange}
+      />,
+    );
+    expect(onChange).toHaveBeenCalledWith(4);
+    expect(onLowered).toHaveBeenCalledWith(9.5, 4);
+    expect(onOutOfRange).not.toHaveBeenCalled();
+  });
+
+  it("does not report a value that is in range", () => {
+    const onChange = vi.fn();
+    const onLowered = vi.fn();
+    const onOutOfRange = vi.fn();
+    render(
+      <ParentHarness
+        initial={4}
+        max={4}
+        policy="keep"
+        onChange={onChange}
+        onLowered={onLowered}
+        onOutOfRange={onOutOfRange}
+      />,
+    );
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onLowered).not.toHaveBeenCalled();
+    expect(onOutOfRange).not.toHaveBeenCalled();
+    expect(input().value).toBe("4");
+    expect(notice()).toBe("");
+  });
+
+  // A parent that does not store what onChange gives it. The stepper still shows the parent's
+  // value, and must not call it again on every render.
+  it("lowers once for each pair of value and max when the parent does not take the new value", () => {
+    const onChange = vi.fn();
+    const onLowered = vi.fn();
+    const view = (
+      max: number,
+      change: (value: number) => void = onChange,
+      lowered: (previous: number, next: number) => void = onLowered,
+    ) => (
+      <form>
+        <QuantityStepper
+          {...labels}
+          name="quantity"
+          value={9}
+          max={max}
+          onChange={change}
+          onLowered={lowered}
+        />
+      </form>
+    );
+    const { container, rerender } = render(view(4));
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith(4);
+    expect(onLowered).toHaveBeenCalledTimes(1);
+    expect(onLowered).toHaveBeenLastCalledWith(9, 4);
+    // The stepper never shows a number that differs from the parent's state.
+    expect(input().value).toBe("9");
+    expect(submittedQuantity(container)).toBe("9");
+    expect(plus().disabled).toBe(true);
+    expect(minus().disabled).toBe(false);
+
+    // Re-rendering, also with new callback functions, does not repeat the same pair.
+    const wrappedChange = vi.fn();
+    const wrappedLowered = vi.fn();
+    rerender(view(4, wrappedChange, wrappedLowered));
+    rerender(view(4, wrappedChange, wrappedLowered));
+    expect(wrappedChange).not.toHaveBeenCalled();
+    expect(wrappedLowered).not.toHaveBeenCalled();
+    expect(input().value).toBe("9");
+
+    // The available stock changed, so the quantity is lowered to the new number.
+    rerender(view(3));
+    expect(onChange).toHaveBeenCalledTimes(2);
+    expect(onChange).toHaveBeenLastCalledWith(3);
+    expect(onLowered).toHaveBeenLastCalledWith(9, 3);
+
+    // Back in range: nothing happens. Above max again later: lowered again.
+    rerender(view(10));
+    expect(onChange).toHaveBeenCalledTimes(2);
+    rerender(view(3));
+    expect(onChange).toHaveBeenCalledTimes(3);
+    expect(onLowered).toHaveBeenCalledTimes(3);
+    expect(onLowered).toHaveBeenLastCalledWith(9, 3);
+  });
+
+  it("works without an onLowered callback", () => {
+    const onChange = vi.fn();
+    render(<QuantityStepper {...labels} value={9} max={4} onChange={onChange} />);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith(4);
+  });
+
+  it("moves to the nearest allowed quantity on the first step from above max", async () => {
+    // The parent has not taken the lowered quantity yet, so the stepper still shows 9.
+    const onChange = vi.fn();
+    render(<QuantityStepper {...labels} value={9} max={4} onChange={onChange} />);
+    onChange.mockClear();
+    await userEvent.click(minus());
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith(4);
+  });
+
+  // D-025, OQ-24.
+  it("does nothing on arrow up while the value is above max, like the disabled plus button", async () => {
+    const onChange = vi.fn();
+    render(<QuantityStepper {...labels} value={9} max={4} onChange={onChange} />);
+    onChange.mockClear();
+    expect(plus().disabled).toBe(true);
+    await userEvent.click(input());
+    await userEvent.keyboard("{ArrowUp}{ArrowUp}");
+    expect(onChange).not.toHaveBeenCalled();
+    expect(input().value).toBe("9");
+    // Arrow down still steps, to the nearest allowed quantity.
+    await userEvent.keyboard("{ArrowDown}");
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith(4);
+  });
+
+  it("does nothing on arrow up while the number being typed is at or above max", async () => {
+    const onChange = vi.fn();
+    render(<Harness initial={2} max={5} onChange={onChange} />);
+    await userEvent.clear(input());
+    await userEvent.type(input(), "99{ArrowUp}");
+    expect(onChange).not.toHaveBeenCalled();
+    expect(input().value).toBe("99");
+    // Leaving the input still clamps what was typed.
+    await userEvent.tab();
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith(5);
+    expect(input().value).toBe("5");
+  });
+});
+
+// A value outside 1..max for a reason other than stock (below 1, a fraction, not a number) is a
+// mistake of the caller. The stepper shows exactly the value it was given, a native form submits
+// that same number, and the parent is told through onOutOfRange and decides what happens.
 describe("QuantityStepper with a value outside 1 to max", () => {
   it("shows and submits the value it was given, and reports it once", () => {
     const onChange = vi.fn();
+    const onLowered = vi.fn();
     const onOutOfRange = vi.fn();
     const view = (callback: (value: number, clamped: number) => void) => (
       <form>
         <QuantityStepper
           {...labels}
           name="quantity"
-          value={9}
+          value={0}
           max={4}
           onChange={onChange}
+          onLowered={onLowered}
           onOutOfRange={callback}
         />
       </form>
     );
     const { container, rerender } = render(view(onOutOfRange));
 
-    expect(input().value).toBe("9");
-    expect(submittedQuantity(container)).toBe("9");
+    expect(input().value).toBe("0");
+    expect(submittedQuantity(container)).toBe("0");
     expect(onOutOfRange).toHaveBeenCalledTimes(1);
-    expect(onOutOfRange).toHaveBeenCalledWith(9, 4);
-    // The stepper does not change the quantity by itself.
+    expect(onOutOfRange).toHaveBeenCalledWith(0, 1);
+    // The stepper does not change this quantity by itself.
     expect(onChange).not.toHaveBeenCalled();
-    expect(plus().disabled).toBe(true);
-    expect(minus().disabled).toBe(false);
+    expect(onLowered).not.toHaveBeenCalled();
+    expect(minus().disabled).toBe(true);
+    expect(plus().disabled).toBe(false);
 
     // Re-rendering, also with a new callback function, does not report the same value again.
     const wrapped = vi.fn((value: number, clamped: number) => onOutOfRange(value, clamped));
@@ -377,105 +632,93 @@ describe("QuantityStepper with a value outside 1 to max", () => {
     rerender(view(wrapped));
     expect(wrapped).not.toHaveBeenCalled();
     expect(onOutOfRange).toHaveBeenCalledTimes(1);
-    expect(input().value).toBe("9");
-  });
-
-  it("does not report a value that is in range", () => {
-    const onOutOfRange = vi.fn();
-    render(<ParentHarness initial={4} max={4} policy="keep" onOutOfRange={onOutOfRange} />);
-    expect(onOutOfRange).not.toHaveBeenCalled();
-    expect(input().value).toBe("4");
+    expect(input().value).toBe("0");
   });
 
   it("lets the parent adopt the clamped value: shown, submitted, and parent state all agree", () => {
     const onOutOfRange = vi.fn();
     const { container } = render(
-      <ParentHarness initial={9} max={4} policy="adopt" onOutOfRange={onOutOfRange} />,
+      <ParentHarness initial={0} max={4} policy="adopt" onOutOfRange={onOutOfRange} />,
     );
     expect(onOutOfRange).toHaveBeenCalledTimes(1);
-    expect(onOutOfRange).toHaveBeenCalledWith(9, 4);
-    expect(input().value).toBe("4");
-    expect(submittedQuantity(container)).toBe("4");
-    expect(parentState()).toBe("4");
-    expect(plus().disabled).toBe(true);
+    expect(onOutOfRange).toHaveBeenCalledWith(0, 1);
+    expect(input().value).toBe("1");
+    expect(submittedQuantity(container)).toBe("1");
+    expect(parentState()).toBe("1");
+    expect(minus().disabled).toBe(true);
   });
 
   it("lets the parent keep the value and show a message: shown, submitted, and parent state all agree", () => {
     const onOutOfRange = vi.fn();
     const { container } = render(
-      <ParentHarness initial={9} max={4} policy="keep" onOutOfRange={onOutOfRange} />,
+      <ParentHarness initial={0} max={4} policy="keep" onOutOfRange={onOutOfRange} />,
     );
     expect(onOutOfRange).toHaveBeenCalledTimes(1);
-    expect(input().value).toBe("9");
-    expect(submittedQuantity(container)).toBe("9");
-    expect(parentState()).toBe("9");
-    expect(screen.getByRole("textbox", { description: "เกิน 4" })).toBe(input());
+    expect(input().value).toBe("0");
+    expect(submittedQuantity(container)).toBe("0");
+    expect(parentState()).toBe("0");
+    expect(screen.getByRole("textbox", { description: "เกิน 1" })).toBe(input());
     expect(input().getAttribute("aria-invalid")).toBe("true");
   });
 
-  it("reports when max drops below the value after mount, and stays consistent (keep)", () => {
+  it("reports again when the value changes to another one outside the range", () => {
     const onOutOfRange = vi.fn();
-    const view = (max: number) => (
-      <ParentHarness initial={9} max={max} policy="keep" onOutOfRange={onOutOfRange} />
+    const view = (value: number) => (
+      <QuantityStepper
+        {...labels}
+        value={value}
+        max={4}
+        onChange={() => {}}
+        onOutOfRange={onOutOfRange}
+      />
     );
-    const { container, rerender } = render(view(10));
-    expect(onOutOfRange).not.toHaveBeenCalled();
-    expect(input().value).toBe("9");
-
-    rerender(view(4));
+    const { rerender } = render(view(0));
     expect(onOutOfRange).toHaveBeenCalledTimes(1);
-    expect(onOutOfRange).toHaveBeenLastCalledWith(9, 4);
-    expect(input().value).toBe("9");
-    expect(submittedQuantity(container)).toBe("9");
-    expect(parentState()).toBe("9");
+    expect(onOutOfRange).toHaveBeenLastCalledWith(0, 1);
 
-    // Same value and max again: no second report.
-    rerender(view(4));
+    // Same value again: no second report.
+    rerender(view(0));
     expect(onOutOfRange).toHaveBeenCalledTimes(1);
 
-    // The nearest allowed quantity changed, so the parent is told the new one.
-    rerender(view(3));
+    rerender(view(-2));
     expect(onOutOfRange).toHaveBeenCalledTimes(2);
-    expect(onOutOfRange).toHaveBeenLastCalledWith(9, 3);
+    expect(onOutOfRange).toHaveBeenLastCalledWith(-2, 1);
 
     // Back in range: nothing to report. Out of range again later: reported again.
-    rerender(view(10));
-    expect(onOutOfRange).toHaveBeenCalledTimes(2);
     rerender(view(3));
+    expect(onOutOfRange).toHaveBeenCalledTimes(2);
+    rerender(view(-2));
     expect(onOutOfRange).toHaveBeenCalledTimes(3);
-    expect(onOutOfRange).toHaveBeenLastCalledWith(9, 3);
+    expect(onOutOfRange).toHaveBeenLastCalledWith(-2, 1);
   });
 
-  it("reports when max drops below the value after mount, and stays consistent (adopt)", () => {
-    const onOutOfRange = vi.fn();
-    const view = (max: number) => (
-      <ParentHarness initial={9} max={max} policy="adopt" onOutOfRange={onOutOfRange} />
-    );
-    const { container, rerender } = render(view(10));
-    expect(input().value).toBe("9");
-
-    rerender(view(4));
-    expect(onOutOfRange).toHaveBeenCalledTimes(1);
-    expect(onOutOfRange).toHaveBeenLastCalledWith(9, 4);
-    expect(input().value).toBe("4");
-    expect(submittedQuantity(container)).toBe("4");
-    expect(parentState()).toBe("4");
-
-    // Stock comes back: the adopted quantity stays, nothing is reported.
-    rerender(view(10));
-    expect(onOutOfRange).toHaveBeenCalledTimes(1);
-    expect(input().value).toBe("4");
-    expect(parentState()).toBe("4");
-  });
-
-  it("moves to the nearest allowed quantity on the first step from above max", async () => {
+  // D-025, OQ-24.
+  it("does nothing on arrow down while the value is below 1, like the disabled minus button", async () => {
     const onChange = vi.fn();
-    render(<ParentHarness initial={9} max={4} policy="keep" onChange={onChange} />);
-    await userEvent.click(minus());
+    render(<ParentHarness initial={0} max={4} policy="keep" onChange={onChange} />);
+    expect(minus().disabled).toBe(true);
+    await userEvent.click(input());
+    await userEvent.keyboard("{ArrowDown}{ArrowDown}");
+    expect(onChange).not.toHaveBeenCalled();
+    expect(input().value).toBe("0");
+    expect(parentState()).toBe("0");
+    // Arrow up still steps, to the nearest allowed quantity.
+    await userEvent.keyboard("{ArrowUp}");
     expect(onChange).toHaveBeenCalledTimes(1);
-    expect(onChange).toHaveBeenLastCalledWith(4);
-    expect(input().value).toBe("4");
-    expect(parentState()).toBe("4");
+    expect(onChange).toHaveBeenLastCalledWith(1);
+    expect(input().value).toBe("1");
+  });
+
+  it("does nothing on arrow down while the number being typed is 1 or less", async () => {
+    const onChange = vi.fn();
+    render(<Harness initial={3} max={5} onChange={onChange} />);
+    await userEvent.clear(input());
+    await userEvent.type(input(), "0{ArrowDown}");
+    expect(onChange).not.toHaveBeenCalled();
+    expect(input().value).toBe("0");
+    await userEvent.tab();
+    expect(onChange).toHaveBeenLastCalledWith(1);
+    expect(input().value).toBe("1");
   });
 
   it("reports a value below 1 and moves to 1 on the first step", async () => {
@@ -502,11 +745,21 @@ describe("QuantityStepper with a value outside 1 to max", () => {
 
   it("restores the out-of-range value, without onChange, when the input is left empty", async () => {
     const onChange = vi.fn();
-    render(<ParentHarness initial={9} max={4} policy="keep" onChange={onChange} />);
+    render(<ParentHarness initial={0} max={4} policy="keep" onChange={onChange} />);
+    await userEvent.clear(input());
+    await userEvent.tab();
+    expect(input().value).toBe("0");
+    expect(parentState()).toBe("0");
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("restores a value above max that the parent kept, when the input is left empty", async () => {
+    const onChange = vi.fn();
+    render(<QuantityStepper {...labels} value={9} max={4} onChange={onChange} />);
+    onChange.mockClear();
     await userEvent.clear(input());
     await userEvent.tab();
     expect(input().value).toBe("9");
-    expect(parentState()).toBe("9");
     expect(onChange).not.toHaveBeenCalled();
   });
 
@@ -545,11 +798,23 @@ describe("QuantityStepper with a value outside 1 to max", () => {
   });
 
   it("does not report while max is below 1: the control is disabled and submits nothing", () => {
+    const onChange = vi.fn();
+    const onLowered = vi.fn();
     const onOutOfRange = vi.fn();
     const { container } = render(
-      <ParentHarness initial={3} max={0} policy="keep" onOutOfRange={onOutOfRange} />,
+      <ParentHarness
+        initial={3}
+        max={0}
+        policy="keep"
+        onChange={onChange}
+        onLowered={onLowered}
+        onOutOfRange={onOutOfRange}
+      />,
     );
     expect(onOutOfRange).not.toHaveBeenCalled();
+    // No quantity is allowed, so nothing is lowered either.
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onLowered).not.toHaveBeenCalled();
     expect(input().disabled).toBe(true);
     expect(input().value).toBe("3");
     expect(parentState()).toBe("3");
@@ -557,8 +822,103 @@ describe("QuantityStepper with a value outside 1 to max", () => {
   });
 
   it("works without an onOutOfRange callback", () => {
-    render(<QuantityStepper {...labels} value={9} max={4} onChange={() => {}} />);
-    expect(input().value).toBe("9");
-    expect(plus().disabled).toBe(true);
+    const onChange = vi.fn();
+    render(<QuantityStepper {...labels} value={0} max={4} onChange={onChange} />);
+    expect(input().value).toBe("0");
+    expect(minus().disabled).toBe(true);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("QuantityStepper typed numbers and the disabled state", () => {
+  it("commits a number too long to hold as max, not as 1", async () => {
+    const onChange = vi.fn();
+    render(<Harness initial={2} max={5} onChange={onChange} />);
+    const digits = "9".repeat(400);
+    expect(Number(digits)).toBe(Number.POSITIVE_INFINITY);
+    await userEvent.clear(input());
+    await userEvent.click(input());
+    await userEvent.paste(digits);
+    expect(input().value).toBe(digits);
+    await userEvent.tab();
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith(5);
+    expect(input().value).toBe("5");
+  });
+
+  it("commits a number too long to hold as max on Enter and on arrow down as well", async () => {
+    const onChange = vi.fn();
+    render(<Harness initial={2} max={5} onChange={onChange} />);
+    const digits = "9".repeat(400);
+    await userEvent.clear(input());
+    await userEvent.click(input());
+    await userEvent.paste(digits);
+    await userEvent.keyboard("{Enter}");
+    expect(onChange).toHaveBeenLastCalledWith(5);
+    expect(input().value).toBe("5");
+
+    await userEvent.click(minus());
+    expect(input().value).toBe("4");
+    await userEvent.clear(input());
+    await userEvent.click(input());
+    await userEvent.paste(digits);
+    await userEvent.keyboard("{ArrowDown}");
+    expect(onChange).toHaveBeenLastCalledWith(5);
+    expect(input().value).toBe("5");
+  });
+
+  it("discards a typed draft when the control is disabled, and shows the committed value when enabled again", async () => {
+    const onChange = vi.fn();
+    const view = (disabled: boolean) => (
+      <QuantityStepper {...labels} value={2} max={9} disabled={disabled} onChange={onChange} />
+    );
+    const { rerender } = render(view(false));
+    await userEvent.clear(input());
+    await userEvent.type(input(), "7");
+    expect(input().value).toBe("7");
+
+    rerender(view(true));
+    expect(input().disabled).toBe(true);
+    expect(input().value).toBe("2");
+
+    rerender(view(false));
+    expect(input().disabled).toBe(false);
+    expect(input().value).toBe("2");
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("discards a typed draft when max drops under 1 and comes back", async () => {
+    const onChange = vi.fn();
+    const view = (max: number) => (
+      <QuantityStepper {...labels} value={2} max={max} onChange={onChange} />
+    );
+    const { rerender } = render(view(9));
+    await userEvent.clear(input());
+    await userEvent.type(input(), "7");
+    rerender(view(0));
+    expect(input().value).toBe("2");
+    rerender(view(9));
+    expect(input().value).toBe("2");
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("lowers a quantity above max while the disabled prop is set too", () => {
+    const onChange = vi.fn();
+    const onLowered = vi.fn();
+    render(
+      <ParentHarness
+        initial={9}
+        max={4}
+        policy="keep"
+        disabled
+        onChange={onChange}
+        onLowered={onLowered}
+      />,
+    );
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onLowered).toHaveBeenCalledWith(9, 4);
+    expect(input().disabled).toBe(true);
+    expect(input().value).toBe("4");
+    expect(parentState()).toBe("4");
   });
 });

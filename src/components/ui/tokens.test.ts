@@ -117,6 +117,8 @@ const BOUNDARY_PAIRS: Array<[string, string, number]> = [
   ["--focus-ring-on-ink", "--ink", 17.99],
   ["--border-contrast", "--background", 3.63],
   ["--border-contrast", "--surface-muted", 3.32],
+  ["--control-border", "--background", 3.63],
+  ["--control-border", "--surface-muted", 3.32],
   ["--danger", "--background", 6.57],
   ["--info", "--info-soft", 6.16],
   ["--success", "--success-soft", 4.66],
@@ -150,20 +152,22 @@ describe("design tokens", () => {
     // Disabled controls are exempt from the contrast requirement.
     expect(contrast("--text-disabled", "--background")).toBe(3.18);
     expect(contrast("--text-disabled", "--surface-muted")).toBe(2.9);
-    // OQ-01: the approved control border does not reach 3:1. Open question for the owner.
+    // --border-strong does not reach 3:1, so it is never the boundary of a control (D-025, OQ-01).
     expect(contrast("--border-strong", "--background")).toBe(1.59);
     expect(contrast("--border-strong", "--surface-muted")).toBe(1.46);
-    expect(contrast("--control-border", "--background")).toBe(
-      contrast("--border-strong", "--background"),
-    );
     // Decorative, no requirement.
     expect(contrast("--border", "--background")).toBe(1.22);
     expect(contrast("--surface-muted", "--background")).toBe(1.09);
   });
 
-  it("maps the open-question tokens to the owner-approved values", () => {
-    expect(tokens.get("--control-border")).toBe("var(--border-strong)");
+  it("maps the alias tokens to the values the owner decided (D-025)", () => {
+    // OQ-01: form controls and outline buttons use the darker border.
+    expect(tokens.get("--control-border")).toBe("var(--border-contrast)");
+    expect(hex("--control-border")).toBe("#7f8790");
+    // OQ-03: the selected page, tab, and menu item use dark ink, not the accent.
     expect(tokens.get("--selected")).toBe("var(--ink)");
     expect(tokens.get("--on-selected")).toBe("var(--on-ink)");
+    expect(hex("--selected")).toBe("#14171a");
+    expect(hex("--selected")).not.toBe(hex("--primary"));
   });
 });

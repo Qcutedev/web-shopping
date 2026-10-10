@@ -101,7 +101,7 @@ const ITEM =
   "inline-flex h-11 min-w-11 items-center justify-center rounded-sm px-2 type-label tabular-nums " +
   "transition-colors duration-150 focus-ring";
 const ITEM_REST = "text-foreground hover:bg-surface-muted active:bg-border";
-// The current page uses --selected (OQ-03, see globals.css). It is also marked with aria-current
+// The current page uses --selected: dark ink (D-025). It is also marked with aria-current
 // and a heavier weight, so it does not depend on colour.
 const ITEM_CURRENT = "bg-selected font-bold text-on-selected";
 const ITEM_DISABLED = "cursor-not-allowed text-foreground-disabled";
