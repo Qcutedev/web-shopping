@@ -28,14 +28,14 @@ graph TD
 
 | Layer | Location | May import | Responsibility |
 | --- | --- | --- | --- |
-| Presentation | `src/app/(storefront)`, `src/app/seller`, `src/app/admin`, `src/components` | services (read functions), schemas, UI | Rendering, forms, states |
+| Presentation | `src/app/(storefront)`, `src/app/seller`, `src/app/admin`, `src/components` | guards, services (read functions), schemas, UI | Rendering, forms, states |
 | API | `src/app/api/v1` | guards, services, schemas | Parse, authenticate, delegate, map errors |
-| Domain | `src/modules/<domain>` | repositories, other modules' public exports, providers | Business rules, authorization, transactions |
-| Auth | `src/server/auth` | db | Sessions, actor resolution, guards |
+| Domain | `src/modules/<domain>` | repositories, other modules' public exports, providers, `src/server/auth/actor.ts` (D-022) | Business rules, authorization, transactions |
+| Auth | `src/server/auth` | db (pending D-021) | Sessions, actor resolution, guards; `actor.ts` is pure and imports nothing below it |
 | Data | `src/server/db`, `prisma` | Prisma | Client, transaction helper, schema |
 | Platform | `src/server` (logger, env, rate limit, errors) | none of the above | Cross-cutting utilities |
 
-Dependencies point downward only. Lint rules (import restrictions) enforce the two hard edges: only `src/server/db` imports the Prisma client, and client components never import server modules.
+Dependencies point downward only. Lint rules (import restrictions) enforce the hard edges: only `src/server/db` imports the Prisma client; pages, route handlers, and components never import `src/server/db`; client components never import server modules. The full list of code allowed to import `src/server/db` is D-021.
 
 ## Directory layout
 
@@ -50,6 +50,7 @@ src/
     api/
       auth/[...all]/         auth library handler
       health/
+      files/[...key]/        serves stored uploads through StorageProvider
       v1/                    see API_CONTRACTS.md
   modules/
     catalog/ cart/ checkout/ orders/ inventory/ reviews/
@@ -101,29 +102,32 @@ sequenceDiagram
   participant P as MockPaymentProvider
   C->>H: addressId, paymentMethod, Idempotency-Key
   H->>S: actor, input
+  S->>DB: BEGIN
+  S->>DB: lock the customer's cart row (FOR UPDATE)
   S->>DB: find order by (userId, key)
   alt already exists
+    S->>DB: COMMIT
     S-->>C: existing order
   else new
-    S->>DB: BEGIN
-    S->>DB: load cart, products, stores, settings
-    S->>S: validate purchasable, compute totals in satang
-    S->>DB: conditional stock decrement per product (id order)
-    alt any decrement affects 0 rows
+    S->>DB: load cart items, address, settings
+    S->>S: reject empty cart, own-store items (BR-16), over-cap totals (BR-04)
+    S->>DB: per product in id order: decrement stock where stock is enough and product and store are purchasable, returning price
+    alt any update affects 0 rows
       S->>DB: ROLLBACK
-      S-->>C: 409 INSUFFICIENT_STOCK
+      S-->>C: 409 (stock or availability)
     else
+      S->>S: compute totals in satang from returned prices
       S->>DB: insert Order, SellerOrders, OrderItems, Payment(PENDING)
       S->>DB: clear purchased cart items
       S->>DB: COMMIT
       S->>P: charge (simulated)
-      S->>DB: payment PAID, or FAILED + restore stock
+      S->>DB: one transaction: payment PENDING to PAID or FAILED (guarded), restore stock once on FAILED
       S-->>C: order
     end
   end
 ```
 
-The client never sends a price, total, shipping fee, store id, or user id.
+The client never sends a price, total, shipping fee, store id, or user id. The locking, guard, and timeout rules are in D-023 and D-024. Whether an unavailable item stops the whole checkout or is skipped is open (OQ-09); the diagram shows the stop-everything variant.
 
 ## Cross-cutting concerns
 

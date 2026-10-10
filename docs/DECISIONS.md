@@ -4,7 +4,7 @@ Owner: orchestrator. Add an entry whenever a choice constrains future work. Neve
 
 Status values: `PROPOSED` (not yet validated against installed versions or the user), `ACCEPTED`, `SUPERSEDED by D-0xx`.
 
-Every decision below is `PROPOSED`: the stack has not been installed, so version compatibility is unverified. Each is confirmed or revised during T-010.
+Decisions marked `PROPOSED` are not yet validated against the installed stack; each is confirmed or revised by the task that first exercises it. Decisions marked `ACCEPTED` are settled.
 
 | Id | Date | Decision | Status |
 | --- | --- | --- | --- |
@@ -28,6 +28,10 @@ Every decision below is `PROPOSED`: the stack has not been installed, so version
 | D-018 | 2026-10-11 | Visual direction approved by the owner: green accent, IBM Plex Sans Thai | ACCEPTED |
 | D-019 | 2026-10-11 | Operating rules for the long autonomous run | ACCEPTED |
 | D-020 | 2026-10-11 | Toolchain versions on the developer machine | ACCEPTED |
+| D-021 | 2026-10-11 | Explicit list of code allowed to import the database layer | PROPOSED (needs owner approval, OQ-19) |
+| D-022 | 2026-10-11 | `Actor` type and pure permission helpers live in `src/server/auth/actor.ts` | ACCEPTED |
+| D-023 | 2026-10-11 | Checkout is serialised per cart; payment completion is one guarded transaction | ACCEPTED (supersedes parts of D-006 and D-009) |
+| D-024 | 2026-10-11 | Every status transition is a conditional update | ACCEPTED |
 
 ## Details
 
@@ -94,6 +98,25 @@ Agreed with the owner on 2026-10-11.
 
 ### D-020 Toolchain versions
 Node.js v24.20.0, npm 11.19.0, pnpm 12.11.2 (Corepack 0.35.0), Docker 29.8.2 with Compose v5.5.1 on WSL 3.0.1.0, git 2.55.0, GitHub CLI 2.102.0. Pinned by T-010 on 2026-10-11 from `create-next-app@16.4.0` defaults: Next.js 16.4.0 (Turbopack, `cacheComponents` and `partialPrefetching` on, as generated), React 19.3.0, TypeScript 5.9.3, Tailwind CSS 4.3.3 via `@tailwindcss/turbopack`, ESLint 9.39.5 with `eslint-config-next` 16.4.0, Prettier 3.9.9, Vitest 5.0.3, Zod 4.6.5. D-002 and D-014 are thereby validated for the scaffold. Prisma, Better Auth, and Playwright versions are pinned when T-013, T-015, and T-060 add them.
+
+### D-021 Who may import the database layer (proposed)
+Review finding B1: CLAUDE.md rule 7 says only `src/modules/*` imports `src/server/db`, but the auth layer (session storage and loading the actor's role and store), the health check, the seed, the admin bootstrap script, and test factories cannot work without it. Proposed wording for rule 7: "Only `src/server/db` imports the Prisma client. `src/server/db` is imported only by `src/modules/**`, `src/server/auth/**`, `src/server/health.ts`, `prisma/seed.ts`, `scripts/**`, and `tests/**`. Pages, route handlers, and components never import it." CLAUDE.md is not changed until the owner approves (OQ-19). Until then no code outside `src/modules` imports the database layer, which blocks T-011's database check and T-015.
+
+### D-022 Actor and permission helpers
+Resolves review finding B2. `src/server/auth/actor.ts` holds the `Actor` type and pure helpers (`requireRole`, ownership assertions) with no database or framework imports; modules, route handlers, and pages may import it. `requireActor` (session to `Actor`, loading role and store) lives in `src/server/auth` and is the only part that reads the database, subject to D-021. Modules never import the rest of `src/server/auth`, so there is no import cycle. Presentation may import guards.
+
+### D-023 Checkout concurrency
+Resolves review findings B6, B7, B8, and S2, and fixes the invariant behind B5.
+1. Checkout runs in one transaction that first locks the customer's cart row (`SELECT ... FOR UPDATE`). This replaces D-006's "no explicit row locks" for the cart row only; products still use the conditional decrement.
+2. The idempotency lookup happens inside that lock, so a concurrent duplicate waits and then returns the existing order instead of an error. This replaces the pre-transaction lookup in D-009; the unique constraint stays as a backstop.
+3. An empty cart after the lock is a defined error, not an order.
+4. The conditional stock update also requires the product and its store to be purchasable in the same statement and returns the current price, which is the price charged. A price or status change that lands first is therefore either seen or makes the update affect zero rows.
+5. Payment completion (to `PAID` or `FAILED`) is one transaction guarded by `WHERE status = 'PENDING'` and a row count check. Stock is restored in that same transaction, in product id order, and only by the request whose guarded update affected a row. Stock for an order item is restored at most once across all paths; the data model records that it happened.
+6. Orders left payment `PENDING` longer than a configured timeout are failed through the same guarded path by a service function that a script and the checkout path can call. A replay that finds a `PENDING` order returns it without charging again.
+What the customer and seller see after a failed payment (retry, cart contents, visibility to sellers) is an owner decision, OQ-07.
+
+### D-024 Status transitions
+Resolves review finding S3. Every status change (payment, fulfilment, store, product, moderation, user activation) is written as `UPDATE ... WHERE id = :id AND status = :expected` and the affected row count is checked; zero rows is a conflict error. "Not the last admin" is enforced inside a transaction that locks the admin rows it counts. Every write that changes stock for several products processes them in id order.
 
 ## Pending decisions for the user
 

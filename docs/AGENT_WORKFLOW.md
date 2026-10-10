@@ -33,21 +33,22 @@ One owner per path. An agent that needs a change outside its paths requests it i
 
 | Path | Owner |
 | --- | --- |
-| `prisma/**`, `src/server/db/**` | database |
-| `src/server/auth/**`, `src/middleware.ts` | auth |
-| `src/modules/**`, `src/app/api/**`, `src/server/**` (other) | backend-api |
-| `src/app/(storefront)/**`, `src/app/seller/**`, `src/app/admin/**`, `src/components/**` (except `ui`), `src/i18n/**` | frontend |
-| `src/components/ui/**`, `src/app/globals.css`, Tailwind theme, `docs/DESIGN_SYSTEM.md` | ui-ux-design |
-| `tests/**`, `e2e/**`, `docs/TEST_STRATEGY.md` | qa |
+| `prisma/**` (including generated client output), `src/server/db/**` | database |
+| `src/server/auth/**`, `src/app/api/auth/**`, the request middleware or proxy file, `scripts/bootstrap-admin.ts` | auth |
+| `src/modules/**`, `src/app/api/v1/**`, `src/app/api/files/**`, `src/server/**` (other) | backend-api |
+| `src/server/env.ts`, `src/server/health.ts`, `src/app/api/health/**` | devops |
+| `src/app/(storefront)/**`, `src/app/seller/**`, `src/app/admin/**`, `src/app/layout.tsx`, root `error`, `not-found`, and `loading` files, `public/**`, `src/components/**` (except `ui`), `src/i18n/**`, `src/lib/**` (except `utils.ts`) | frontend |
+| `src/components/ui/**`, `src/lib/utils.ts`, `src/app/globals.css`, Tailwind theme, `docs/DESIGN_SYSTEM.md` | ui-ux-design |
+| `tests/**` (except `tests/security`), `e2e/**`, `vitest.integration.config.*`, Playwright config, `docs/TEST_STRATEGY.md` | qa |
 | `tests/security/**`, `docs/SECURITY.md` | security |
-| `.github/**`, `Dockerfile`, `docker-compose*.yml`, `scripts/**`, `docs/DEPLOYMENT.md` | devops |
+| `.github/**`, `Dockerfile`, `docker-compose*.yml`, `scripts/**` (other), `.env.example`, `docs/DEPLOYMENT.md` | devops |
 | `docs/REQUIREMENTS.md` | product-requirements |
 | `docs/API_CONTRACTS.md` | backend-api |
 | `docs/DATA_MODEL.md` | database |
-| `README.md`, `docs/KNOWN_LIMITATIONS.md`, `.env.example` | documentation |
-| `CLAUDE.md`, `docs/PROJECT_PLAN.md`, `docs/STATUS.md`, `docs/DECISIONS.md`, `docs/ARCHITECTURE.md`, `docs/AGENT_WORKFLOW.md`, `package.json`, lockfile, root config | orchestrator |
+| `README.md`, `CONTRIBUTING.md`, `docs/KNOWN_LIMITATIONS.md` | documentation |
+| `CLAUDE.md`, `AGENTS.md`, `.claude/agents/**`, `docs/PROJECT_PLAN.md`, `docs/STATUS.md`, `docs/DECISIONS.md`, `docs/ARCHITECTURE.md`, `docs/AGENT_WORKFLOW.md`, `docs/reviews/**`, `package.json`, lockfile, `next.config.ts`, `eslint.config.mjs`, `vitest.config.mts`, `tsconfig.json`, other root config | orchestrator |
 
-Colocated unit tests (`*.test.ts` next to the source file) belong to the owner of that source file.
+Colocated unit tests (`*.test.ts` next to the source file) belong to the owner of that source file. A task brief may lend a path to another agent for that task only; the brief says so explicitly. An agent that needs a change in an orchestrator-owned config (for example security headers in `next.config.ts`) requests it in its report or is lent the file in its brief.
 
 ## Contract-first rule
 
