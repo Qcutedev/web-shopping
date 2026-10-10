@@ -5,8 +5,9 @@
  * The four reserved keys always win over a field with the same name.
  *
  * Redaction implements "What the logger must do" of security rule SR-04 in
- * docs/SECURITY.md (findings SEC-001, SEC-002, SEC-007). That section is the
- * specification; the lists below are copied from it.
+ * docs/SECURITY.md, including its additions of 2026-10-11 (findings SEC-001,
+ * SEC-002, SEC-007, and SEC-012 to SEC-016). That section is the specification;
+ * the lists below are copied from it.
  *
  *   By key, at any depth (the key is lower-cased and stripped of every
  *   non-alphanumeric character first): a key that contains a word of
@@ -17,14 +18,20 @@
  *
  *   Inside every string (messages, error messages, stacks, values under harmless
  *   keys, and object keys): URL user-info up to the last `@`, the value of a
- *   `key=value` or `key: value` pair and of a URL query parameter whose key
- *   contains a word of SENSITIVE_KEY_PARTS, `Bearer` and `Basic` credentials, and
+ *   `key=value`, `key => value`, or `key: value` pair and of a URL query
+ *   parameter whose key contains a word of SENSITIVE_KEY_PARTS or equals an
+ *   entry of INLINE_SENSITIVE_KEYS, `Bearer` and `Basic` credentials, and
  *   email-shaped substrings are masked. Phone numbers in free text are not
  *   pattern-masked (SR-04 explains why).
  *
- *   In the output line, U+0085, U+2028, U+2029, and the bidirectional control
- *   characters are written as \uXXXX escapes, like the C0 controls that
- *   JSON.stringify already escapes.
+ *   A string longer than its limit is clipped before it is scanned, and the cut
+ *   is treated as hostile: an unfinished URL or email address at the cut is
+ *   masked as well (SEC-014, see `scrubString`).
+ *
+ *   In the output line, DEL, the C1 controls, U+2028, U+2029, and every format
+ *   character (Unicode category Cf: bidirectional controls, zero-width and other
+ *   invisible characters, tag characters) are written as \uXXXX escapes, like
+ *   the C0 controls that JSON.stringify already escapes.
  *
  * Redaction is a second line of defence, not the control. Callers log
  * identifiers and outcomes, never a request body, a Request, a Headers object, a
@@ -108,6 +115,9 @@ const SENSITIVE_KEYS: ReadonlySet<string> = new Set([
   "firstname",
   "lastname",
   "displayname",
+  "username",
+  "customername",
+  "contactname",
   "address",
   "shippingaddress",
   "billingaddress",
@@ -130,12 +140,21 @@ const SENSITIVE_KEYS: ReadonlySet<string> = new Set([
   "failurereason",
   "metadata",
   "trackingnumber",
+  "tel",
+  "mobile",
   "q",
   "query",
   "body",
   "headers",
   "rawheaders",
 ]);
+
+/**
+ * The short secret names of the "equals" list that are also matched in front of `=`, `=>`, or
+ * `:` inside a string (SR-04, SEC-015). The rest of SENSITIVE_KEYS stays key-only, because words
+ * such as `name`, `query`, and `hash` are too common in ordinary text.
+ */
+const INLINE_SENSITIVE_KEYS: ReadonlySet<string> = new Set(["sid", "pass", "pin", "otp"]);
 
 /** URL schemes that name local code, not a network location, and so never hold credentials. */
 const LOCAL_URL_SCHEMES: ReadonlySet<string> = new Set([
@@ -156,6 +175,12 @@ export const MAX_ENTRY_NODES = 2_000;
 export const MAX_ENTRY_CHARS = 64_000;
 /** Longest key looked at in front of `=` or `:` inside a string. */
 const MAX_INLINE_KEY_LENGTH = 64;
+/** Longest run of blanks accepted on either side of a separator inside a string (SR-04). */
+const MAX_SEPARATOR_BLANKS = 32;
+/** Most digits of a line or column number in a file position such as `session.ts:12:5`. */
+const MAX_POSITION_DIGITS = 10;
+/** How far back from a clip an unfinished email address is looked for (SR-04, SEC-014). */
+const CLIP_EMAIL_WINDOW = 256;
 
 function normaliseKey(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -182,9 +207,11 @@ const COLON = 58;
 const DOT = 46;
 const DOUBLE_QUOTE = 34;
 const EQUALS = 61;
+const GREATER_THAN = 62;
 const HYPHEN = 45;
 const SINGLE_QUOTE = 39;
 const SLASH = 47;
+const CLOSE_PARENTHESIS = 41;
 
 function isDigit(code: number): boolean {
   return code >= 48 && code <= 57;
@@ -216,29 +243,50 @@ function isTokenEnd(code: number): boolean {
   return code <= 32 || isQuote(code) || code === 60 || code === 62 || code === 96;
 }
 
+function isSchemeSeparator(text: string, index: number): boolean {
+  return (
+    text.charCodeAt(index) === COLON &&
+    text.charCodeAt(index + 1) === SLASH &&
+    text.charCodeAt(index + 2) === SLASH
+  );
+}
+
 /**
- * Masks URL user-info. After every `://`, everything up to the LAST `@` of the run of
- * non-blank characters is replaced, so a password that contains `@` or `/` leaves no tail.
- * The price is that a URL with an `@` in its path or query loses the part in front of it.
+ * Masks URL user-info. A run is the unbroken text from a `://` to the next blank, quote, or
+ * angle bracket. In each run, everything from the first `://` whose scheme is not local up to
+ * the LAST `@` of the run is replaced, so a password that contains `@`, `/`, or `://` leaves no
+ * tail. The price is that a URL with an `@` in its path or query loses the part in front of it.
+ *
+ * A local-scheme URL (LOCAL_URL_SCHEMES) is exempt so that stack frames stay readable, but the
+ * exemption covers only that URL: a further `://` with another scheme inside the same run is
+ * masked like any other (SEC-012). The run is walked once and the scheme in front of each `://`
+ * is read back over at most 32 characters, so the pass is linear.
  */
 function maskUrlUserInfo(text: string): string {
   let separator = text.indexOf("://");
   if (separator === -1) return text;
 
+  const length = text.length;
   let output = "";
   let copied = 0;
   while (separator !== -1) {
-    const start = separator + 3;
-    let end = start;
+    // The first `://` of this run that may carry credentials, and the last `@` behind it.
+    let maskFrom = -1;
     let lastAt = -1;
-    while (end < text.length) {
+    let end = separator;
+    while (end < length) {
       const code = text.charCodeAt(end);
       if (isTokenEnd(code)) break;
-      if (code === AT) lastAt = end;
+      if (code === AT) {
+        if (maskFrom !== -1) lastAt = end;
+      } else if (maskFrom === -1 && isSchemeSeparator(text, end)) {
+        if (!LOCAL_URL_SCHEMES.has(schemeBefore(text, end, copied))) maskFrom = end + 3;
+        end += 2;
+      }
       end += 1;
     }
-    if (lastAt !== -1 && !LOCAL_URL_SCHEMES.has(schemeBefore(text, separator, copied))) {
-      output += `${text.slice(copied, start)}${REDACTED}`;
+    if (lastAt !== -1) {
+      output += `${text.slice(copied, maskFrom)}${REDACTED}`;
       copied = lastAt;
     }
     // The whole run is consumed, so no character is scanned by two iterations.
@@ -261,15 +309,48 @@ function schemeBefore(text: string, end: number, floor: number): string {
 /** `session.ts:12:5` in a stack frame is a file position, not a `key: value` pair. */
 const FILE_NAME_PATTERN = /\.[A-Za-z0-9]{1,4}$/;
 
+/** Skips at most MAX_POSITION_DIGITS digits from `index`; returns `index` when there is none. */
+function skipPositionDigits(text: string, index: number): number {
+  let end = index;
+  while (end - index < MAX_POSITION_DIGITS && isDigit(text.charCodeAt(end))) end += 1;
+  return end;
+}
+
 /**
- * Masks the value of `key=value` and `key: value` when the key contains a word of
- * SENSITIVE_KEY_PARTS. Covers `password=...` in free text, URL query parameters
- * (`?token=...&`), JSON-like text (`"apiKey":"..."`), and raw header lines
- * (`Cookie: a=b; c=d`, `Authorization: Basic ...`).
+ * True when what follows the colon at `colon` is a line number and nothing else: digits,
+ * optionally `:` and more digits, and then the end of the text, a blank, a line end, or `)`
+ * (SR-04, SEC-013). `session.ts:12:5` qualifies; `db.password.prod:9x7Qz` does not.
+ */
+function isFilePositionAfter(text: string, colon: number): boolean {
+  let end = skipPositionDigits(text, colon + 1);
+  if (end === colon + 1) return false;
+  if (text.charCodeAt(end) === COLON) {
+    const columnEnd = skipPositionDigits(text, end + 1);
+    if (columnEnd === end + 1) return false;
+    end = columnEnd;
+  }
+  if (end >= text.length) return true;
+  const code = text.charCodeAt(end);
+  return isBlank(code) || isLineEnd(code) || code === CLOSE_PARENTHESIS;
+}
+
+/** A key written inside a string whose value must be masked (SR-04, "contains" list plus four). */
+function isSensitiveInlineKey(key: string): boolean {
+  const normalised = normaliseKey(key);
+  return INLINE_SENSITIVE_KEYS.has(normalised) || hasSensitivePart(normalised);
+}
+
+/**
+ * Masks the value of `key=value`, `key => value`, and `key: value` when the key contains a word
+ * of SENSITIVE_KEY_PARTS or equals an entry of INLINE_SENSITIVE_KEYS. Covers `password=...` in
+ * free text, URL query parameters (`?token=...&`), JSON-like text (`"apiKey":"..."`), a printed
+ * Map entry (`'password' => '...'`), and raw header lines (`Cookie: a=b; c=d`,
+ * `Authorization: Basic ...`). Up to MAX_SEPARATOR_BLANKS blanks may stand on either side of the
+ * separator (an aligned configuration dump).
  *
- * After `=` the value runs to the next blank, `&`, quote, or angle bracket, or to the closing
- * quote when it starts with one. After `:` it runs to the end of the line, because a header
- * value may contain blanks.
+ * After `=` and `=>` the value runs to the next blank, `&`, quote, or angle bracket, or to the
+ * closing quote when it starts with one. After `:` it runs to the end of the line, because a
+ * header value may contain blanks.
  */
 function maskKeyValuePairs(text: string): string {
   const length = text.length;
@@ -284,11 +365,15 @@ function maskKeyValuePairs(text: string): string {
       continue;
     }
 
-    // The key, read backwards: optional blanks, an optional (escaped) quote, then key characters.
-    // It never reaches back past `copied` or past the previous separator (neither `=` nor `:` is
-    // a key character), so all the backward steps together are bounded by the string length.
+    // The key, read backwards: optional blanks (a bounded number), an optional (escaped) quote,
+    // then key characters (a bounded number). It never reaches back past `copied`, and every
+    // separator costs at most a constant number of backward steps, so the pass is linear.
     let keyEnd = index;
-    while (keyEnd > copied && index - keyEnd < 4 && isBlank(text.charCodeAt(keyEnd - 1))) {
+    while (
+      keyEnd > copied &&
+      index - keyEnd < MAX_SEPARATOR_BLANKS &&
+      isBlank(text.charCodeAt(keyEnd - 1))
+    ) {
       keyEnd -= 1;
     }
     if (keyEnd > copied && isQuote(text.charCodeAt(keyEnd - 1))) {
@@ -304,22 +389,29 @@ function maskKeyValuePairs(text: string): string {
       keyStart -= 1;
     }
     const key = text.slice(keyStart, keyEnd);
-    if (key.length === 0 || !hasSensitivePart(normaliseKey(key))) {
+    if (key.length === 0 || !isSensitiveInlineKey(key)) {
       index += 1;
       continue;
     }
 
-    let valueStart = index + 1;
+    // `=>` (a printed Map entry, a PHP or Ruby style dump) is one separator of two characters.
+    const isArrow = separator === EQUALS && text.charCodeAt(index + 1) === GREATER_THAN;
+    const afterSeparator = isArrow ? index + 2 : index + 1;
+    let valueStart = afterSeparator;
     if (separator === COLON) {
       const next = text.charCodeAt(valueStart);
       const isScheme = next === SLASH && text.charCodeAt(valueStart + 1) === SLASH;
-      const isFilePosition = isDigit(next) && FILE_NAME_PATTERN.test(key);
+      const isFilePosition = FILE_NAME_PATTERN.test(key) && isFilePositionAfter(text, index);
       if (isScheme || isFilePosition) {
         index += 1;
         continue;
       }
     }
-    while (valueStart < length && valueStart - index <= 4 && isBlank(text.charCodeAt(valueStart))) {
+    while (
+      valueStart < length &&
+      valueStart - afterSeparator < MAX_SEPARATOR_BLANKS &&
+      isBlank(text.charCodeAt(valueStart))
+    ) {
       valueStart += 1;
     }
 
@@ -379,6 +471,7 @@ function isEmailLocalChar(code: number): boolean {
     code === 95 || // _
     code === 37 || // %
     code === 43 || // +
+    code === SINGLE_QUOTE || // o'brien@example.com is a valid address (SR-04, SEC-015)
     code === HYPHEN
   );
 }
@@ -403,6 +496,9 @@ function maskEmails(text: string): string {
   while (at !== -1) {
     let start = at;
     while (start > copied && isEmailLocalChar(text.charCodeAt(start - 1))) start -= 1;
+    // An apostrophe in front of the local part is far more often an opening quote
+    // (`email: 'a@b.co'`) than part of the address; leaving it in place discloses nothing.
+    while (start < at && text.charCodeAt(start) === SINGLE_QUOTE) start += 1;
 
     let end = at + 1;
     while (end < length && isEmailDomainChar(text.charCodeAt(end))) end += 1;
@@ -439,10 +535,48 @@ function scrubText(text: string): string {
   return maskEmails(maskAuthSchemes(maskKeyValuePairs(maskUrlUserInfo(text))));
 }
 
-/** Clips to `limit` characters, then scrubs. The clip comes first so the scan is bounded. */
+/**
+ * Where a clipped text must be cut again because the clip may have split something the masks
+ * would have recognised in the full string (SR-04, SEC-014). Returns `clipped.length` when the
+ * end is harmless. Two shapes are treated as unfinished:
+ *
+ *   - a URL: the unbroken run that reaches the cut contains a `://`. Whatever its scheme, the
+ *     `@` that ends its user-info may lie beyond the cut, so everything after the first `://`
+ *     of that run goes;
+ *   - an email address: the last `@` lies within CLIP_EMAIL_WINDOW characters of the cut and
+ *     only domain characters follow it, so the domain may continue beyond the cut. Its local
+ *     part and what follows go.
+ *
+ * Both walks go backwards from the cut once, so the cost is linear in the clipped length.
+ */
+function hostileClipBoundary(clipped: string): number {
+  const length = clipped.length;
+
+  let runStart = length;
+  while (runStart > 0 && !isTokenEnd(clipped.charCodeAt(runStart - 1))) runStart -= 1;
+  const scheme = clipped.indexOf("://", runStart);
+  if (scheme !== -1) return scheme + 3;
+
+  const at = clipped.lastIndexOf("@");
+  if (at === -1 || length - at > CLIP_EMAIL_WINDOW) return length;
+  for (let index = at + 1; index < length; index += 1) {
+    if (!isEmailDomainChar(clipped.charCodeAt(index))) return length;
+  }
+  let start = at;
+  while (start > 0 && isEmailLocalChar(clipped.charCodeAt(start - 1))) start -= 1;
+  return start === at ? length : start;
+}
+
+/**
+ * Clips to `limit` characters, then scrubs. The clip comes first so the scan is bounded; the
+ * cut itself is then treated as hostile (see `hostileClipBoundary`).
+ */
 function scrubString(value: string, limit: number = MAX_STRING_LENGTH): string {
   if (value.length <= limit) return scrubText(value);
-  return `${scrubText(value.slice(0, limit))}${TRUNCATED}`;
+  const clipped = value.slice(0, limit);
+  const boundary = hostileClipBoundary(clipped);
+  if (boundary === clipped.length) return `${scrubText(clipped)}${TRUNCATED}`;
+  return `${scrubText(clipped.slice(0, boundary))}${REDACTED}${TRUNCATED}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -629,17 +763,24 @@ export function redact(value: unknown): unknown {
 }
 
 /**
- * Characters that JSON.stringify leaves raw but that a log viewer or terminal may treat as a
- * line break (U+0085, U+2028, U+2029) or use to reorder the line visually (bidirectional
- * controls U+202A to U+202E and U+2066 to U+2069). SEC-007.
+ * Characters that JSON.stringify leaves raw but that must not reach a log viewer or a terminal
+ * as they are (SR-04 as widened on 2026-10-11; SEC-007, SEC-016):
+ *
+ *   - U+007F to U+009F: DEL and the C1 controls. U+0085 is a line break for some viewers and
+ *     U+009B starts a terminal escape sequence on terminals that honour 8-bit controls;
+ *   - U+2028 and U+2029: line and paragraph separators;
+ *   - every character of Unicode general category Cf (format): the soft hyphen, the Arabic
+ *     letter mark, zero-width characters and direction marks, all bidirectional controls, the
+ *     invisible operators, the byte order mark, annotation anchors, and the tag characters.
+ *     They can reorder a line visually or hide text from a human reader.
+ *
  * Inclusive code point ranges; the pattern is built from numbers so that this source file never
- * contains one of these characters itself.
+ * contains one of these characters itself. The pattern has the `u` flag, so a match is one whole
+ * code point, and the category escape keeps the list current with the runtime's Unicode data.
  */
 const UNSAFE_OUTPUT_RANGES: readonly (readonly [number, number])[] = [
-  [0x85, 0x85],
+  [0x7f, 0x9f],
   [0x2028, 0x2029],
-  [0x202a, 0x202e],
-  [0x2066, 0x2069],
 ];
 
 function unicodeEscape(code: number): string {
@@ -647,16 +788,23 @@ function unicodeEscape(code: number): string {
 }
 
 const UNSAFE_OUTPUT_CHARACTERS = new RegExp(
-  `[${UNSAFE_OUTPUT_RANGES.map(([from, to]) => `${unicodeEscape(from)}-${unicodeEscape(to)}`).join("")}]`,
-  "g",
+  `[${UNSAFE_OUTPUT_RANGES.map(([from, to]) => `${unicodeEscape(from)}-${unicodeEscape(to)}`).join("")}${"\\"}p{Cf}]`,
+  "gu",
 );
 
-/** Safe on a whole JSON text: these characters can only occur inside its string literals. */
+/**
+ * Safe on a whole JSON text: these characters can only occur inside its string literals.
+ * A character outside the Basic Multilingual Plane becomes its two surrogate escapes, which a
+ * JSON parser reads back as the original character.
+ */
 function escapeUnsafeCharacters(json: string): string {
-  return json.replace(
-    UNSAFE_OUTPUT_CHARACTERS,
-    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
-  );
+  return json.replace(UNSAFE_OUTPUT_CHARACTERS, (character) => {
+    let escaped = "";
+    for (let index = 0; index < character.length; index += 1) {
+      escaped += unicodeEscape(character.charCodeAt(index));
+    }
+    return escaped;
+  });
 }
 
 function writeToStdout(line: string): void {

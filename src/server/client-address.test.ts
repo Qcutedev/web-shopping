@@ -305,3 +305,52 @@ describe("configuration", () => {
     expect(() => assertClientAddressConfig(header("X".repeat(64)))).not.toThrow();
   });
 });
+
+describe("IPv4-mapped IPv6: what each spelling gives (N11; the comment in normaliseAddress)", () => {
+  const via = (value: string): string =>
+    getClientAddress(request({ "X-Forwarded-For": value }), hops(1));
+  const ALL_ZERO_NETWORK = "0000:0000:0000:0000::/64";
+
+  it.each([
+    // The one spelling that is reduced to the IPv4 address.
+    ["::ffff:1.2.3.4", "1.2.3.4"],
+    ["::FFFF:1.2.3.4", "1.2.3.4"],
+    ["::fFfF:1.2.3.4", "1.2.3.4"],
+    // Hexadecimal after the literal prefix: unknown.
+    ["::ffff:0102:0304", UNKNOWN_CLIENT_ADDRESS],
+    ["::ffff:102:304", UNKNOWN_CLIENT_ADDRESS],
+    ["::FFFF:0102:0304", UNKNOWN_CLIENT_ADDRESS],
+    // Anything else after the literal prefix: unknown.
+    ["::ffff:::ffff:1.2.3.4", UNKNOWN_CLIENT_ADDRESS],
+    ["::ffff:0:1.2.3.4", UNKNOWN_CLIENT_ADDRESS],
+    ["::ffff:1.2.3", UNKNOWN_CLIENT_ADDRESS],
+    ["::ffff:01.2.3.4", UNKNOWN_CLIENT_ADDRESS],
+    ["::ffff:", UNKNOWN_CLIENT_ADDRESS],
+    // Every spelling that does not begin with the literal prefix is plain IPv6: all-zero /64.
+    ["0:0:0:0:0:ffff:1.2.3.4", ALL_ZERO_NETWORK],
+    ["0:0:0:0:0:ffff:0102:0304", ALL_ZERO_NETWORK],
+    ["0000:0000:0000:0000:0000:ffff:0102:0304", ALL_ZERO_NETWORK],
+    ["0::ffff:1.2.3.4", ALL_ZERO_NETWORK],
+    ["::0:ffff:1.2.3.4", ALL_ZERO_NETWORK],
+    ["0:0::ffff:102:304", ALL_ZERO_NETWORK],
+  ])("%s gives %s", (input, expected) => {
+    expect(via(input)).toBe(expected);
+  });
+
+  it("no spelling of a mapped address gives a subject of its own", () => {
+    // Whatever the proxy writes, the result is the IPv4 address or a subject shared by many
+    // clients; a different IPv4 address in the same spelling lands on the same shared subject.
+    const shared = new Set([UNKNOWN_CLIENT_ADDRESS, ALL_ZERO_NETWORK]);
+    for (const spelling of [
+      (hex: string) => `::ffff:${hex}`,
+      (hex: string) => `0:0:0:0:0:ffff:${hex}`,
+      (hex: string) => `0::ffff:${hex}`,
+    ]) {
+      const results = new Set(
+        ["0102:0304", "cb00:7107", "ffff:ffff", "0:1"].map((h) => via(spelling(h))),
+      );
+      expect(results.size).toBe(1);
+      expect(shared.has([...results][0] ?? "")).toBe(true);
+    }
+  });
+});

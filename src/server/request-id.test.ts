@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
+import { type ClientAddressConfig, NO_TRUSTED_PROXY } from "./client-address";
 import {
   generateRequestId,
   isValidRequestId,
   readIncomingRequestId,
   REQUEST_ID_HEADER,
   resolveRequestId,
+  trustsIncomingRequestId,
 } from "./request-id";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -121,5 +123,62 @@ describe("readIncomingRequestId", () => {
     expect(readIncomingRequestId(new Headers())).toBe(undefined);
     expect(readIncomingRequestId(null)).toBe(undefined);
     expect(readIncomingRequestId()).toBe(undefined);
+  });
+});
+
+describe("trustsIncomingRequestId (SR-03 derived from the SR-01 configuration, N14)", () => {
+  it("does not trust an incoming id when no proxy is trusted", () => {
+    expect(trustsIncomingRequestId(NO_TRUSTED_PROXY)).toBe(false);
+    expect(trustsIncomingRequestId({ trustedProxyHops: 0 })).toBe(false);
+    expect(trustsIncomingRequestId({ trustedProxyHops: 0, trustedClientIpHeader: undefined })).toBe(
+      false,
+    );
+  });
+
+  it("trusts an incoming id with 1 to 5 trusted hops, or with a trusted client address header", () => {
+    for (let hops = 1; hops <= 5; hops += 1) {
+      expect(trustsIncomingRequestId({ trustedProxyHops: hops })).toBe(true);
+    }
+    expect(
+      trustsIncomingRequestId({ trustedProxyHops: 0, trustedClientIpHeader: "Fly-Client-IP" }),
+    ).toBe(true);
+  });
+
+  it("never trusts and never throws for a configuration SR-01 does not allow", () => {
+    const invalid = [
+      { trustedProxyHops: 6 },
+      { trustedProxyHops: -1 },
+      { trustedProxyHops: 1.5 },
+      { trustedProxyHops: Number.NaN },
+      { trustedProxyHops: Number.POSITIVE_INFINITY },
+      { trustedProxyHops: "1" },
+      { trustedProxyHops: true },
+      {},
+      { trustedProxyHops: 1, trustedClientIpHeader: "X-Real-IP" },
+      { trustedProxyHops: 0, trustedClientIpHeader: "X-Forwarded-For" },
+      { trustedProxyHops: 0, trustedClientIpHeader: "cookie" },
+      { trustedProxyHops: 0, trustedClientIpHeader: "" },
+      { trustedProxyHops: 0, trustedClientIpHeader: null },
+      { trustedProxyHops: 0, trustedClientIpHeader: true },
+      null,
+      undefined,
+      "trust",
+      true,
+    ];
+    for (const config of invalid) {
+      expect(trustsIncomingRequestId(config as unknown as ClientAddressConfig)).toBe(false);
+    }
+  });
+
+  it("feeds resolveRequestId: the same request keeps or loses its id by configuration alone", () => {
+    const id = "proxy-id-00000001";
+    const request = new Request("http://localhost/", { headers: { [REQUEST_ID_HEADER]: id } });
+    const resolve = (config: ClientAddressConfig): string =>
+      resolveRequestId(request, { trustIncoming: trustsIncomingRequestId(config) });
+
+    expect(resolve(NO_TRUSTED_PROXY)).toMatch(UUID);
+    expect(resolve({ trustedProxyHops: 6 })).toMatch(UUID);
+    expect(resolve({ trustedProxyHops: 1 })).toBe(id);
+    expect(resolve({ trustedProxyHops: 0, trustedClientIpHeader: "CF-Connecting-IP" })).toBe(id);
   });
 });

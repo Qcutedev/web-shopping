@@ -1105,3 +1105,352 @@ describe("cost of redaction", () => {
     expect(lines[0]).toContain(TRUNCATED);
   });
 });
+
+describe("local-scheme exemption covers only that URL (SEC-012)", () => {
+  it.each([
+    [
+      "at connect (file:///app/db.js:1:1):postgresql://app:SECRETPW@db:5432/shop",
+      "at connect (file:///app/db.js:1:1):postgresql://[REDACTED]@db:5432/shop",
+    ],
+    [
+      "webpack-internal:///./src/db.ts?u=postgresql://app:SECRETPW@db:5432/shop",
+      "webpack-internal:///./src/db.ts?u=postgresql://[REDACTED]@db:5432/shop",
+    ],
+    ["[file:///a.js,redis://:SECRETPW@cache:6379]", "[file:///a.js,redis://[REDACTED]@cache:6379]"],
+    [
+      "file:///a.js,node://b,turbopack://c,amqp://u:SECRETPW@queue",
+      "file:///a.js,node://b,turbopack://c,amqp://[REDACTED]@queue",
+    ],
+    // An `@` inside the local URL does not move the start of the mask.
+    [
+      "file:///app/node_modules/@scope/pkg.js?u=redis://:SECRETPW@cache",
+      "file:///app/node_modules/@scope/pkg.js?u=redis://[REDACTED]@cache",
+    ],
+    // A password that itself contains a local scheme, or any other `://`, leaves no tail.
+    ["postgres://app:file://SECRETPW@db/shop", "postgres://[REDACTED]@db/shop"],
+    ["postgres://app:SECRET://PW@x@db/shop", "postgres://[REDACTED]@db/shop"],
+    // Only the scheme directly in front of `://` counts.
+    ["xfile://app:SECRETPW@db", "xfile://[REDACTED]@db"],
+    ["postgres+file://app:SECRETPW@db", "postgres+file://[REDACTED]@db"],
+  ])("masks %s", (text, expected) => {
+    expect(redact(text)).toBe(expected);
+  });
+
+  it("still leaves a local-scheme URL on its own readable, with or without an @ in its path", () => {
+    for (const text of [
+      "at load (file:///C:/app/src/server/session.js:10:5)",
+      "at webpack-internal:///./src/app/page.tsx:3:1",
+      "at file:///app/node_modules/@scope/pkg/index.js:1:1",
+      "node://internal/modules turbopack://[project]/src/a.ts webpack://_N_E/./a.ts",
+      "file:///a.js,node://b,https://shop.example/path",
+    ]) {
+      expect(redact(text)).toBe(text);
+    }
+  });
+});
+
+describe("file-position exemption is a line number and nothing else (SEC-013)", () => {
+  it("keeps real file positions readable", () => {
+    for (const text of [
+      "at verify (C:\\app\\session.ts:12:5)",
+      "at verify (/app/session.ts:12:5) again",
+      "see password.ts:7",
+      "see password.ts:7 and token.js:120:33\nnext line",
+      "session.ts:12:5\tend",
+    ]) {
+      expect(redact(text)).toBe(text);
+    }
+  });
+
+  it.each([
+    ["config db.password.prod:9SECRETPW loaded", "config db.password.prod:[REDACTED]"],
+    ["api.token.v1:12345SECRETPW", "api.token.v1:[REDACTED]"],
+    ["auth.secret.key:0SECRETPW", "auth.secret.key:[REDACTED]"],
+    // Digits followed by anything but the end, a blank, a line end, or `)`.
+    ["session.ts:12:5SECRETPW", "session.ts:[REDACTED]"],
+    ["session.ts:12:SECRETPW", "session.ts:[REDACTED]"],
+    ["session.ts:12,SECRETPW", "session.ts:[REDACTED]"],
+    ["session.ts:12:5:SECRETPW", "session.ts:[REDACTED]"],
+    ["session.ts:12-SECRETPW", "session.ts:[REDACTED]"],
+    // A number too long to be a line number is a numeric secret.
+    ["api.token.v1:12345678901", "api.token.v1:[REDACTED]"],
+    // A key that is not a file name was never exempt.
+    ["token:12345", "token:[REDACTED]"],
+  ])("masks %s", (text, expected) => {
+    expect(redact(text)).toBe(expected);
+  });
+});
+
+describe("the clip boundary is treated as hostile (SEC-014)", () => {
+  const LIMIT = 8_000;
+  /** `tail` placed so that exactly `visible` of its characters lie in front of the clip. */
+  const atClip = (tail: string, visible: number): string =>
+    `${"x ".repeat((LIMIT - visible - 1) / 2)}${"x".repeat((LIMIT - visible - 1) % 2)} ${tail}`;
+
+  it("puts the tail where the helper says", () => {
+    const text = atClip("abcdef", 3);
+    expect(text.slice(0, LIMIT).endsWith(" abc")).toBe(true);
+  });
+
+  it("drops everything after :// of a URL that reaches the clip", () => {
+    const url = "postgresql://app:SECRETPW@db:5432/shop";
+    for (let visible = "postgresql://".length + 1; visible < url.length; visible += 1) {
+      const result = redact(atClip(url, visible)) as string;
+      expect(result).not.toContain("SECRET");
+      expect(result).not.toContain("app");
+      expect(result.endsWith(`postgresql://${REDACTED}${TRUNCATED}`)).toBe(true);
+    }
+    // Cut exactly behind `://`: nothing of the user-info is in front of the clip.
+    const bare = redact(atClip(url, "postgresql://".length)) as string;
+    expect(bare.endsWith(`postgresql://${TRUNCATED}`)).toBe(true);
+  });
+
+  it("does the same whatever the scheme, because the credentialed URL may come later in the run", () => {
+    const result = redact(atClip("file:///a.js,redis://:SECRETPW@cache", 20)) as string;
+    expect(result).not.toContain("SECRET");
+    expect(result.endsWith(`file://${REDACTED}${TRUNCATED}`)).toBe(true);
+  });
+
+  it("drops the local part of an email address whose domain reaches the clip", () => {
+    const email = "somchai.j@example.com";
+    for (let visible = "somchai.j@".length; visible < email.length; visible += 1) {
+      const result = redact(atClip(email, visible)) as string;
+      expect(result).not.toContain("somchai");
+      expect(result.endsWith(` ${REDACTED}${TRUNCATED}`)).toBe(true);
+    }
+  });
+
+  it("leaves a harmless end as it was", () => {
+    expect(redact("a".repeat(9_000))).toBe(`${"a".repeat(LIMIT)}${TRUNCATED}`);
+    // A URL that ended before the clip is masked by the ordinary rule only.
+    const finished = redact(atClip("https://shop.example/p/1 then more text", 30)) as string;
+    expect(finished).toContain("https://shop.example/p/1 then");
+    // An @ followed by something that is not a domain, or lying further back than 256 characters.
+    const handle = redact(atClip("ping @somchai, thanks a lot", 20)) as string;
+    expect(handle).toContain("@somchai,");
+    const far = redact(atClip(`a@${"b".repeat(300)}`, 290)) as string;
+    expect(far.endsWith(`a@${"b".repeat(288)}${TRUNCATED}`)).toBe(true);
+  });
+
+  it("applies at the entry-budget boundary as well", () => {
+    // Seven full strings and a filler leave 20 characters of budget for the last string.
+    const result = redact([
+      ...Array.from({ length: 7 }, () => "y".repeat(LIMIT)),
+      "y".repeat(LIMIT - 20),
+      "postgresql://app:SECRETPW@db:5432/shop",
+    ]) as string[];
+    expect(JSON.stringify(result)).not.toContain("SEC");
+    expect(result[8]).toBe(`postgresql://${REDACTED}${TRUNCATED}`);
+  });
+
+  it("applies to the message and to an error message", () => {
+    const { log, line } = capture();
+    const text = atClip("postgresql://app:SECRETPW@db:5432/shop", 22);
+    log.error(text, { err: new Error(atClip("somchai@example.com", 12)) });
+    expect(line()).not.toContain("SECRET");
+    expect(line()).not.toContain("somchai");
+  });
+});
+
+describe("separators, short secret names, and apostrophes (SEC-015)", () => {
+  it.each([
+    ["DB_PASSWORD        = SECRETPW", "DB_PASSWORD        = [REDACTED]"],
+    ["password=      SECRETPW", "password=      [REDACTED]"],
+    [`password${" ".repeat(32)}=${" ".repeat(32)}SECRETPW`, undefined],
+    [`token${"\t".repeat(32)}:${" ".repeat(32)}SECRETPW`, undefined],
+    ["'password' => 'SECRETPW'", "'password' => [REDACTED]"],
+    ['"apiKey"=>"SECRET PW" next', '"apiKey"=>[REDACTED] next'],
+    ["password   =>   SECRETPW next", "password   =>   [REDACTED] next"],
+    ["/cb?sid=SECRETPW&page=2", "/cb?sid=[REDACTED]&page=2"],
+    ["/verify?otp=SECRETPW", "/verify?otp=[REDACTED]"],
+    ["rejected pin=SECRETPW for user 7", "rejected pin=[REDACTED] for user 7"],
+    ["smtp login user=app pass=SECRETPW", "smtp login user=app pass=[REDACTED]"],
+    ["OTP: SECRETPW\nnext", "OTP: [REDACTED]\nnext"],
+    ["'pin' => SECRETPW", "'pin' => [REDACTED]"],
+  ])("masks %s", (text, expected) => {
+    const result = redact(text) as string;
+    expect(result).not.toContain("SECRETPW");
+    expect(result).not.toContain("SECRET PW");
+    if (expected !== undefined) expect(result).toBe(expected);
+  });
+
+  it("the run of blanks is bounded at 32 on either side", () => {
+    // 33 blanks are no longer one pair; the bound is what keeps the look-back constant.
+    const before = `password${" ".repeat(33)}=value`;
+    const after = `password=${" ".repeat(33)}value`;
+    expect(redact(before)).toBe(before);
+    expect(redact(after)).toBe(after);
+  });
+
+  it("matches the four short names exactly, not as a part of a word", () => {
+    for (const text of [
+      "spin=1 compass=north bypass: yes",
+      "hotpin=1 passes=3 pinned: true",
+      "name=Widget query=shirt hash=abc",
+      "a => b, key => value",
+      "x=>y",
+    ]) {
+      expect(redact(text)).toBe(text);
+    }
+  });
+
+  it("redacts the five added keys, exactly", () => {
+    for (const key of [
+      "userName",
+      "user_name",
+      "customerName",
+      "contactName",
+      "tel",
+      "Tel",
+      "mobile",
+    ]) {
+      expect(isSensitiveKey(key)).toBe(true);
+      expect(redact({ [key]: "PERSONAL" })).toEqual({ [key]: REDACTED });
+    }
+    for (const key of ["hotel", "telemetry", "mobileLayout", "storeName", "productName"]) {
+      expect(isSensitiveKey(key)).toBe(false);
+    }
+  });
+
+  it("masks the whole local part of an email address with an apostrophe", () => {
+    expect(redact("sign-in failed for somchai'o@example.com")).toBe(
+      `sign-in failed for ${REDACTED}`,
+    );
+    expect(redact("o'brien@example.com wrote")).toBe(`${REDACTED} wrote`);
+  });
+
+  it("leaves an opening quote in front of an email address in place", () => {
+    expect(redact("user 'somchai@example.com' not found")).toBe(`user '${REDACTED}' not found`);
+    expect(redact("users ''somchai@example.com''")).toBe(`users ''${REDACTED}''`);
+    expect(redact("'@example.com")).toBe("'@example.com");
+  });
+});
+
+describe("output escaping widened to DEL, C1, and format characters (SEC-016)", () => {
+  const escapeOf = (unit: number): string => `${"\\"}u${unit.toString(16).padStart(4, "0")}`;
+  /** The escapes of every UTF-16 unit of one code point. */
+  const escapesOf = (codePoint: number): string =>
+    Array.from({ length: String.fromCodePoint(codePoint).length }, (_, index) =>
+      escapeOf(String.fromCodePoint(codePoint).charCodeAt(index)),
+    ).join("");
+
+  const SAMPLES = [
+    0x7f, 0x80, 0x85, 0x9b, 0x9f, 0xad, 0x600, 0x61c, 0x180e, 0x200b, 0x200c, 0x200d, 0x200e,
+    0x200f, 0x2028, 0x2029, 0x202a, 0x202e, 0x2060, 0x2064, 0x2066, 0x2069, 0x206f, 0xfeff, 0xfff9,
+    0xfffb, 0x110bd, 0x1d173, 0xe0001, 0xe0020, 0xe0041, 0xe007f,
+  ];
+
+  it.each(SAMPLES.map((code) => [code.toString(16).toUpperCase().padStart(4, "0"), code] as const))(
+    "writes U+%s as an escape wherever it stands, and a parser reads the same text back",
+    (_hex, code) => {
+      const character = String.fromCodePoint(code);
+      const hostile = `before${character}after`;
+      const { log, lines, line, entry } = capture({ requestId: hostile });
+      log.info(hostile, {
+        value: hostile,
+        [hostile]: 1,
+        list: [hostile],
+        err: new Error(hostile),
+      });
+
+      expect(lines).toHaveLength(1);
+      expect(line()).not.toContain(character);
+      expect(line()).toContain(`before${escapesOf(code)}after`);
+      expect(entry()).toMatchObject({
+        message: hostile,
+        requestId: hostile,
+        value: hostile,
+        [hostile]: 1,
+        list: [hostile],
+        err: { message: hostile },
+      });
+    },
+  );
+
+  it("leaves no DEL, C1 control, separator, or format character raw in a line", () => {
+    // Every code point of the ranges SR-04 names, plus the whole block U+2000 to U+206F.
+    const codes: number[] = [];
+    for (let code = 0x7f; code <= 0x9f; code += 1) codes.push(code);
+    for (let code = 0x2000; code <= 0x206f; code += 1) codes.push(code);
+    for (let code = 0xfff9; code <= 0xfffb; code += 1) codes.push(code);
+    for (let code = 0xe0020; code <= 0xe007f; code += 1) codes.push(code);
+    codes.push(0xad, 0x61c, 0x180e, 0xfeff, 0xe0001);
+    const all = codes.map((code) => String.fromCodePoint(code)).join("x");
+
+    const { log, line, entry } = capture();
+    log.warn(`title ${all}`, { userAgent: all });
+    expect(line()).not.toMatch(/[\u007F-\u009F\u2028\u2029\p{Cf}]/u);
+    expect(entry()).toMatchObject({ message: `title ${all}`, userAgent: all });
+  });
+
+  it("writes a character outside the Basic Multilingual Plane as its two surrogate escapes", () => {
+    const { log, line } = capture();
+    log.info(`tag${String.fromCodePoint(0xe0041)}end`);
+    expect(line()).toContain(`tag${escapeOf(0xdb40)}${escapeOf(0xdc41)}end`);
+  });
+
+  it("does not touch Thai text, an emoji, or ordinary spaces and punctuation", () => {
+    const emoji = String.fromCodePoint(0x1f600);
+    const text = `สินค้าหมด ${emoji} caf${String.fromCodePoint(0xe9)} 100% (ok) ~`;
+    const { log, line, entry } = capture();
+    log.info(text, { title: text });
+    expect(line()).toContain(text);
+    expect(entry()).toMatchObject({ message: text, title: text });
+  });
+});
+
+describe("cost of the patterns added for SEC-012 to SEC-016", () => {
+  // 8,000 characters each (the per-string cap), like PATHOLOGICAL above.
+  const ADDED: [string, string][] = [
+    ["a local scheme, then nested schemes with @", `file://${"a://b@".repeat(1_332)}`],
+    ["local schemes only", "file://".repeat(1_143)],
+    ["local and remote schemes alternating", "file://x,redis://:p@c,".repeat(364)],
+    ["schemes with the longest scheme look-back", `${"s".repeat(40)}://@`.repeat(182)],
+    ["32 blanks in front of every separator", `${" ".repeat(32)}=`.repeat(243)],
+    ["a sensitive key and 33 blanks", `password${" ".repeat(33)}=`.repeat(191)],
+    ["a sensitive key, =, and 33 blanks", `password=${" ".repeat(33)}`.repeat(191)],
+    ["arrows", "=>".repeat(4_000)],
+    ["sensitive keys with arrows and no value", "pin=>".repeat(1_600)],
+    ["short secret names", "sid=otp=pin=pass=".repeat(471)],
+    ["file names with endless digits", `a.token.ts:${"1".repeat(7_989)}`],
+    ["file positions", "a.token.ts:1:1:".repeat(534)],
+    ["file names with a colon per digit", `a.token.ts${":1".repeat(3_995)}`],
+    ["apostrophes then @", `${"'".repeat(7_990)}@b.example`],
+    ["apostrophe local parts", "'@".repeat(4_000)],
+    ["format characters", String.fromCodePoint(0x200b).repeat(8_000)],
+    ["tag characters", String.fromCodePoint(0xe0041).repeat(4_000)],
+  ];
+
+  it.each(ADDED)("scrubs 100 strings of %s well within the time bound", (_label, text) => {
+    expect(text.length).toBeGreaterThan(7_900);
+    const started = performance.now();
+    for (let round = 0; round < 100; round += 1) redact(text);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
+  // Longer than the cap, so that every call also pays for the hostile-boundary check.
+  const CLIPPED: [string, string][] = [
+    ["one endless URL", `postgresql://${"a".repeat(20_000)}`],
+    ["one endless run with a late scheme", `${"a".repeat(7_990)}://${"b".repeat(20_000)}`],
+    ["one endless local part", `${"a".repeat(7_999)}@${"b".repeat(20_000)}`],
+    ["one endless word", "a".repeat(20_000)],
+    ["at signs", "@".repeat(20_000)],
+    ["scheme separators", "://".repeat(7_000)],
+  ];
+
+  it.each(CLIPPED)("clips and scrubs 100 strings of %s within the time bound", (_label, text) => {
+    const started = performance.now();
+    for (let round = 0; round < 100; round += 1) redact(text);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
+  it("writes 100 lines full of characters that need escaping within the time bound", () => {
+    const text = String.fromCodePoint(0x202e, 0xe0041, 0x9b).repeat(2_000);
+    const lines: string[] = [];
+    const log = createLogger({ write: (line) => lines.push(line) });
+    const started = performance.now();
+    for (let round = 0; round < 100; round += 1) log.info(text, { a: text, b: [text, text] });
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(lines).toHaveLength(100);
+  });
+});

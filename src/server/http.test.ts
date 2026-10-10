@@ -11,12 +11,17 @@ import {
   rateLimited,
 } from "./errors";
 import {
+  assertContentType,
+  assertSameOrigin,
   created,
   errorResponse,
+  JSON_CONTENT_TYPE,
+  MULTIPART_CONTENT_TYPE,
   ok,
   paginated,
   paginationMeta,
   parseInput,
+  readJsonBody,
   toAppError,
 } from "./http";
 import { createLogger } from "./logger";
@@ -351,5 +356,323 @@ describe("unknown errors", () => {
     for (const leaked of ["hunter2", "app:pw", "somchai@example.com"]) {
       expect(lines.join("\n")).not.toContain(leaked);
     }
+  });
+});
+
+/** The AppError thrown by `run`, or a failure when it does not throw one. */
+async function thrownBy(run: () => unknown): Promise<AppError> {
+  try {
+    await run();
+  } catch (error) {
+    if (error instanceof AppError) return error;
+    throw error;
+  }
+  throw new Error("expected an AppError to be thrown");
+}
+
+function post(body: BodyInit | null, headers: Record<string, string> = {}): Request {
+  return new Request("http://localhost/api/v1/cart/items", { method: "POST", body, headers });
+}
+
+const JSON_HEADERS = { "Content-Type": "application/json" };
+
+describe("readJsonBody (N12)", () => {
+  it("returns the parsed body of a JSON request", async () => {
+    expect(await readJsonBody(post('{"quantity":2}', JSON_HEADERS))).toEqual({ quantity: 2 });
+    expect(await readJsonBody(post("null", JSON_HEADERS))).toBeNull();
+    expect(
+      await readJsonBody(post("[1,2]", { "content-type": "application/json; charset=utf-8" })),
+    ).toEqual([1, 2]);
+  });
+
+  it.each([
+    ["an unfinished object", '{"quantity":'],
+    ["plain text", "hello MARKER-IN-BODY"],
+    ["an empty body", ""],
+    ["a trailing comma", '{"quantity":2,}'],
+    ["single quotes", "{'quantity':2}"],
+    ["form encoding sent as JSON", "quantity=2&MARKER-IN-BODY=1"],
+  ])("maps %s to 400 VALIDATION_ERROR with code invalid_json", async (_label, body) => {
+    const error = await thrownBy(() => readJsonBody(post(body, JSON_HEADERS)));
+    expect(error.toPublic()).toEqual({
+      code: "VALIDATION_ERROR",
+      message: "The request is invalid.",
+      details: {
+        fields: [
+          { path: "", code: "invalid_json", message: "The request body is not valid JSON." },
+        ],
+      },
+    });
+    // The parser's message quotes the body; neither it nor a cause is kept.
+    expect(error.cause).toBeUndefined();
+  });
+
+  it("a malformed body is a 400 that writes no log line and echoes nothing of the body", async () => {
+    const { logger, lines } = captureLog();
+    let response: Response;
+    try {
+      const input = parseInput(
+        cartSchema,
+        await readJsonBody(post("hello MARKER-IN-BODY", JSON_HEADERS)),
+      );
+      response = ok(input, { requestId });
+    } catch (error) {
+      response = errorResponse(error, { requestId, logger });
+    }
+    const text = await response.text();
+    expect(response.status).toBe(400);
+    expect(JSON.parse(text)).toEqual({
+      error: {
+        code: "VALIDATION_ERROR",
+        message: "The request is invalid.",
+        details: {
+          fields: [
+            { path: "", code: "invalid_json", message: "The request body is not valid JSON." },
+          ],
+        },
+        requestId,
+      },
+    });
+    expect(text).not.toContain("MARKER-IN-BODY");
+    expect(lines).toHaveLength(0);
+  });
+
+  it("valid JSON of the wrong shape is still the schema's VALIDATION_ERROR, not invalid_json", async () => {
+    const error = await thrownBy(async () =>
+      parseInput(cartSchema, await readJsonBody(post('{"quantity":"two"}', JSON_HEADERS))),
+    );
+    const fields = (error.details as { fields: { code: string }[] }).fields;
+    expect(fields.map((field) => field.code)).toEqual(["invalid_type"]);
+  });
+
+  it.each([
+    ["text/plain", "text/plain"],
+    ["form encoding", "application/x-www-form-urlencoded"],
+    ["multipart", "multipart/form-data; boundary=x"],
+    ["a JSON look-alike", "application/json-patch+json"],
+    ["a JSON suffix type", "application/problem+json"],
+  ])("refuses %s with 415 before the body is read", async (_label, contentType) => {
+    const request = post('{"quantity":2}', { "Content-Type": contentType });
+    const error = await thrownBy(() => readJsonBody(request));
+    expect(error.code).toBe("UNSUPPORTED_MEDIA_TYPE");
+    expect(error.status).toBe(415);
+    expect(request.bodyUsed).toBe(false);
+  });
+
+  it("refuses a request without a content type, also when it has no body", async () => {
+    // A string body gets `text/plain` from the platform; a request without a body gets nothing.
+    expect((await thrownBy(() => readJsonBody(post('{"quantity":2}')))).status).toBe(415);
+    expect((await thrownBy(() => readJsonBody(post(null)))).status).toBe(415);
+  });
+
+  it("passes on a failure that is not a parse error, so that it becomes a 500", async () => {
+    const request = post('{"quantity":2}', JSON_HEADERS);
+    await request.text();
+    let thrown: unknown;
+    try {
+      await readJsonBody(request);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(TypeError);
+    expect(errorResponse(thrown, { requestId }).status).toBe(500);
+  });
+});
+
+describe("assertContentType (N13; content-type convention)", () => {
+  const withType = (contentType?: string): Request =>
+    new Request("http://localhost/api/v1/seller/uploads", {
+      method: "POST",
+      headers: contentType === undefined ? {} : { "Content-Type": contentType },
+    });
+
+  it("accepts exactly the expected media type, in any letter case and with parameters", () => {
+    for (const value of [
+      "application/json",
+      "Application/JSON",
+      "application/json; charset=utf-8",
+      "application/json;charset=UTF-8",
+      "  application/json  ",
+    ]) {
+      expect(() => assertContentType(withType(value), JSON_CONTENT_TYPE)).not.toThrow();
+    }
+    expect(() =>
+      assertContentType(withType("multipart/form-data; boundary=----x"), MULTIPART_CONTENT_TYPE),
+    ).not.toThrow();
+  });
+
+  it.each([
+    [undefined, JSON_CONTENT_TYPE],
+    ["", JSON_CONTENT_TYPE],
+    ["text/plain", JSON_CONTENT_TYPE],
+    ["application/x-www-form-urlencoded", JSON_CONTENT_TYPE],
+    ["multipart/form-data; boundary=x", JSON_CONTENT_TYPE],
+    ["application/jsonx", JSON_CONTENT_TYPE],
+    ["xapplication/json", JSON_CONTENT_TYPE],
+    ["application/json, text/plain", JSON_CONTENT_TYPE],
+    ["text/plain; application/json", JSON_CONTENT_TYPE],
+    ["application/json", MULTIPART_CONTENT_TYPE],
+    ["multipart/mixed; boundary=x", MULTIPART_CONTENT_TYPE],
+    ["application/x-www-form-urlencoded", MULTIPART_CONTENT_TYPE],
+    ["text/plain", MULTIPART_CONTENT_TYPE],
+  ] as const)("refuses %s where %s is expected with 415", async (value, expected) => {
+    const error = await thrownBy(() => assertContentType(withType(value), expected));
+    expect(error.toPublic()).toEqual({
+      code: "UNSUPPORTED_MEDIA_TYPE",
+      message: `The content type must be ${expected}.`,
+      details: {},
+    });
+  });
+});
+
+describe("assertSameOrigin (N13; TM-16 Origin check)", () => {
+  const APP = "https://shop.example";
+  const mutation = (method: string, origin?: string | string[]): Request => {
+    const headers = new Headers({ "Content-Type": "application/json" });
+    for (const value of origin === undefined ? [] : [origin].flat())
+      headers.append("Origin", value);
+    return new Request("https://shop.example/api/v1/cart/items", { method, headers });
+  };
+
+  it.each(["POST", "PATCH", "PUT", "DELETE"])("%s passes with the application origin", (method) => {
+    expect(() => assertSameOrigin(mutation(method, APP), APP)).not.toThrow();
+  });
+
+  it.each(["POST", "PATCH", "PUT", "DELETE", "OPTIONS"])(
+    "%s is refused with 403 when Origin is missing, null, or foreign",
+    async (method) => {
+      for (const origin of [
+        undefined,
+        "",
+        "null",
+        "https://evil.example",
+        "http://shop.example",
+        "https://shop.example:8443",
+        "https://shop.example.evil.example",
+        "https://evil.example/https://shop.example",
+        "https://sub.shop.example",
+        "https://shop.example/",
+        "HTTPS://SHOP.EXAMPLE",
+        "https://shop.example https://evil.example",
+        [APP, "https://evil.example"],
+        [APP, APP],
+      ]) {
+        const error = await thrownBy(() => assertSameOrigin(mutation(method, origin), APP));
+        expect(error.toPublic()).toEqual({
+          code: "FORBIDDEN",
+          message: "The request origin is not allowed.",
+          details: {},
+        });
+      }
+    },
+  );
+
+  it("does not check GET and HEAD, which never change state", () => {
+    for (const method of ["GET", "HEAD"]) {
+      expect(() => assertSameOrigin(mutation(method), APP)).not.toThrow();
+      expect(() => assertSameOrigin(mutation(method, "https://evil.example"), APP)).not.toThrow();
+    }
+  });
+
+  it("compares the origin of the allowed URL only, so a trailing slash or a path does not matter", () => {
+    for (const allowed of [
+      "https://shop.example/",
+      "https://shop.example/th",
+      "https://SHOP.example",
+      "https://shop.example:443",
+    ]) {
+      expect(() => assertSameOrigin(mutation("POST", APP), allowed)).not.toThrow();
+    }
+    expect(() =>
+      assertSameOrigin(mutation("POST", "http://localhost:3000"), "http://localhost:3000"),
+    ).not.toThrow();
+    // The port is part of the origin.
+    expect(() =>
+      assertSameOrigin(mutation("POST", "http://localhost:3001"), "http://localhost:3000"),
+    ).toThrow(AppError);
+  });
+
+  it("takes the allowed origin from its argument only, never from the environment", () => {
+    const before = process.env.APP_URL;
+    process.env.APP_URL = "https://evil.example";
+    try {
+      expect(() => assertSameOrigin(mutation("POST", "https://evil.example"), APP)).toThrow(
+        AppError,
+      );
+      expect(() => assertSameOrigin(mutation("POST", APP), APP)).not.toThrow();
+    } finally {
+      if (before === undefined) delete process.env.APP_URL;
+      else process.env.APP_URL = before;
+    }
+  });
+
+  it("an unusable allowed origin is a configuration fault for every method, never a pass", () => {
+    for (const allowed of [
+      "",
+      "shop.example",
+      "/relative",
+      "null",
+      "*",
+      "file:///app",
+      "ftp://shop.example",
+    ]) {
+      for (const method of ["GET", "POST"]) {
+        expect(() => assertSameOrigin(mutation(method, allowed), allowed)).toThrow(TypeError);
+      }
+    }
+    // Inside a handler's try block that is a 500, not a 403 and not a success.
+    let thrown: unknown;
+    try {
+      assertSameOrigin(mutation("POST", "null"), "null");
+    } catch (error) {
+      thrown = error;
+    }
+    expect(errorResponse(thrown, { requestId }).status).toBe(500);
+  });
+});
+
+describe("parseInput and asynchronous schemas (N14)", () => {
+  it("a schema with an async refinement fails with a clear internal error, not a bare throw", async () => {
+    const schema = z.strictObject({
+      sku: z.string().refine(async (value) => Promise.resolve(value.length > 0)),
+    });
+    const error = await thrownBy(() => parseInput(schema, { sku: "MARKER-SKU" }));
+    expect(error.code).toBe("INTERNAL_ERROR");
+    expect(error.cause).toBeInstanceOf(Error);
+    expect((error.cause as Error).message).toContain(
+      "async refinement or transform is not supported",
+    );
+    // What Zod threw is kept underneath for the log.
+    expect((error.cause as Error).cause).toBeInstanceOf(Error);
+
+    const { logger, lines, entry } = captureLog();
+    const response = errorResponse(error, { requestId, logger });
+    const text = await response.text();
+    expect(response.status).toBe(500);
+    expect(text).not.toContain("async");
+    expect(text).not.toContain("MARKER-SKU");
+    expect(lines).toHaveLength(1);
+    expect(JSON.stringify(entry(0).err)).toContain("parseInput");
+  });
+
+  it("a schema with an async transform fails the same way", async () => {
+    const schema = z.string().transform(async (value) => Promise.resolve(value.trim()));
+    const error = await thrownBy(() => parseInput(schema, " x "));
+    expect(error.code).toBe("INTERNAL_ERROR");
+  });
+
+  it("a refinement that throws is an internal error as well, not a validation error", async () => {
+    const schema = z.string().refine(() => {
+      throw new Error("lookup exploded");
+    });
+    const error = await thrownBy(() => parseInput(schema, "x"));
+    expect(error.code).toBe("INTERNAL_ERROR");
+    expect(((error.cause as Error).cause as Error).message).toBe("lookup exploded");
+  });
+
+  it("an ordinary synchronous refinement still works", () => {
+    const schema = z.string().refine((value) => value.length > 1);
+    expect(parseInput(schema, "ok")).toBe("ok");
+    expect(() => parseInput(schema, "x")).toThrow(AppError);
   });
 });

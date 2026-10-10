@@ -10,7 +10,8 @@
  * id can reuse someone else's or put one id on thousands of requests. An
  * incoming id is reused only when the caller states that a trusted proxy sits
  * in front of the application (`trustIncoming: true`, which the caller derives
- * from the SR-01 proxy configuration) and the value matches REQUEST_ID_PATTERN
+ * from the SR-01 proxy configuration with `trustsIncomingRequestId`) and the
+ * value matches REQUEST_ID_PATTERN
  * (letters, digits, `-`, `_`; 8 to 64 characters). This module never reads the
  * environment.
  *
@@ -22,6 +23,7 @@
  * crypto.randomUUID() both make a GET handler dynamic, which is intended for
  * every handler that uses this module.
  */
+import { assertClientAddressConfig, type ClientAddressConfig } from "./client-address";
 
 export const REQUEST_ID_HEADER = "X-Request-Id";
 
@@ -38,6 +40,27 @@ export interface ResolveRequestIdOptions {
    * Default false: the incoming value is ignored.
    */
   trustIncoming?: boolean;
+}
+
+/**
+ * The SR-03 trust decision, derived from the SR-01 proxy configuration in the one place that
+ * ties the two rules together: an incoming `X-Request-Id` is trusted exactly when a trusted
+ * proxy is configured (`trustedProxyHops` of 1 or more, or `trustedClientIpHeader` set).
+ * Handlers pass the result on instead of computing it themselves:
+ *
+ *   resolveRequestId(request, { trustIncoming: trustsIncomingRequestId(proxyConfig) })
+ *
+ * Never throws, so it is safe to call before a handler's `try` block. A configuration that
+ * SR-01 does not allow gives `false` (the id is generated); `getClientAddress` is what refuses
+ * such a configuration loudly. Like the rest of this module it does not read the environment.
+ */
+export function trustsIncomingRequestId(config: ClientAddressConfig): boolean {
+  try {
+    assertClientAddressConfig(config);
+  } catch {
+    return false;
+  }
+  return config.trustedProxyHops >= 1 || config.trustedClientIpHeader !== undefined;
 }
 
 export function isValidRequestId(value: unknown): value is string {

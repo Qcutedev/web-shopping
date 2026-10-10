@@ -14,7 +14,8 @@
  * see.
  *
  * INTERNAL_ERROR is the exception to "the caller writes the message": its public
- * text is fixed in the AppError constructor, whatever the caller passes.
+ * text is fixed and its public details are forced to `{}` in the AppError
+ * constructor, whatever the caller passes (SEC-017).
  */
 import type { ZodError } from "zod";
 
@@ -74,7 +75,7 @@ export interface PublicError {
 export interface AppErrorOptions {
   /** Public message. Defaults to a fixed message per code. Ignored for INTERNAL_ERROR. */
   message?: string;
-  /** Public details. */
+  /** Public details. Ignored for INTERNAL_ERROR: a 500 always carries `{}`. */
   details?: ErrorDetails;
   /** Internal cause. Logged on the server, never serialised to a client. */
   cause?: unknown;
@@ -96,7 +97,10 @@ export class AppError extends Error {
     this.name = "AppError";
     this.code = code;
     this.status = ERROR_STATUS[code];
-    this.details = options.details ?? {};
+    // The same place fixes the public details of a 500 (SEC-017): whatever a service attached is
+    // dropped, for INTERNAL_ERROR and for any future code whose status is 500 or above.
+    // Diagnostic data belongs in `cause`, which goes to the log only.
+    this.details = this.status >= 500 ? {} : (options.details ?? {});
   }
 
   /** The only representation of this error that may leave the server. */
@@ -206,6 +210,32 @@ export function fromZodError(error: ZodError): AppError {
   );
 }
 
+/** `code` of the single field error reported for a body that is not valid JSON. */
+export const INVALID_JSON_CODE = "invalid_json";
+/** `code` of the field error reported for a missing or malformed request header. */
+export const INVALID_HEADER_CODE = "invalid_header";
+
+/**
+ * 400 VALIDATION_ERROR for a request body that is not valid JSON:
+ * `details.fields = [{ path: "", code: "invalid_json", message }]` (docs/API_CONTRACTS.md).
+ * The parser's own message is not used: it quotes a piece of the rejected body.
+ */
+export function invalidJsonBody(): AppError {
+  return validationError([
+    { path: "", code: INVALID_JSON_CODE, message: "The request body is not valid JSON." },
+  ]);
+}
+
+/**
+ * 400 VALIDATION_ERROR for a missing or malformed request header:
+ * `details.fields = [{ path: <header name>, code: "invalid_header", message }]`
+ * (docs/API_CONTRACTS.md; decided for `Idempotency-Key`). `headerName` is written as the
+ * contract spells it and `message` is public English text; never pass the header's value.
+ */
+export function invalidHeader(headerName: string, message: string): AppError {
+  return validationError([{ path: headerName, code: INVALID_HEADER_CODE, message }]);
+}
+
 export function unauthenticated(options?: AppErrorOptions): AppError {
   return new AppError("UNAUTHENTICATED", options);
 }
@@ -263,7 +293,7 @@ export function rateLimited(
   return new RateLimitedError(retryAfterSeconds, options);
 }
 
-/** The message is fixed (by the AppError constructor): nothing about the cause may reach the client. */
+/** Message and details are fixed (by the AppError constructor): nothing about the cause may reach the client. */
 export function internalError(cause?: unknown): AppError {
   return new AppError("INTERNAL_ERROR", { cause });
 }

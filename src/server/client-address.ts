@@ -132,10 +132,24 @@ function normaliseAddress(candidate: string): string {
   if (candidate.includes("%")) return UNKNOWN_CLIENT_ADDRESS;
 
   // `isIP` only accepts dotted decimal without leading zeros, so IPv4 is already canonical.
+  //
+  // IPv4-mapped IPv6. Only one spelling is reduced to the IPv4 address; every other spelling
+  // lands on a subject that many clients share, never on a fresh one (decided in SR-01,
+  // "Decisions on the implementation"; the entry is written by the trusted proxy, so a client
+  // cannot pick the spelling). Exactly, for the address 1.2.3.4:
+  //
+  //   "::ffff:1.2.3.4"            (prefix in any letter case)  ->  "1.2.3.4"
+  //   "::ffff:0102:0304"          (hexadecimal after the prefix) ->  "unknown"
+  //   "::ffff:" + anything else   ("::ffff:::ffff:1.2.3.4", "::ffff:0:1.2.3.4") ->  "unknown"
+  //   "0:0:0:0:0:ffff:1.2.3.4", "0:0:0:0:0:ffff:0102:0304", "0::ffff:1.2.3.4", and any other
+  //   spelling that does not begin with the literal "::ffff:"  ->  treated as plain IPv6 below,
+  //                                                which gives "0000:0000:0000:0000::/64", the
+  //                                                network that "::" and "::1" also fall into
+  //
+  // So it is NOT true that every valid mapped address gets the IPv4 result: the hexadecimal and
+  // written-out spellings fail closed to a shared subject instead. The deployment check in SR-01
+  // must confirm that the proxy writes plain IPv4 or the dotted "::ffff:" form.
   if (candidate.slice(0, IPV4_MAPPED_PREFIX.length).toLowerCase() === IPV4_MAPPED_PREFIX) {
-    // What follows an IPv4-mapped prefix must be the IPv4 address. Every valid address gets the
-    // result SR-01 describes (the remainder of a valid address is never itself IPv6); the only
-    // difference is that garbage such as "::ffff:::ffff:1.2.3.4" is unknown.
     const mapped = candidate.slice(IPV4_MAPPED_PREFIX.length);
     return isIP(mapped) === 4 ? mapped : UNKNOWN_CLIENT_ADDRESS;
   }

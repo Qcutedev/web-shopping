@@ -865,7 +865,7 @@ describe("SEC-012 a URL password survives when a local-scheme URL starts the sam
     "a comma-separated list without blanks": "[file:///a.js,redis://:SECRETPW@cache:6379]",
   };
   for (const [label, text] of Object.entries(texts)) {
-    it.fails(`masks the password in ${label}`, () => {
+    it(`masks the password in ${label}`, () => {
       expect(logged({ err: new Error(text) })).not.toContain("SECRETPW");
     });
   }
@@ -877,20 +877,20 @@ describe("SEC-013 a secret shaped like a file position is exempt from masking", 
     "api.token.v1:12345SECRETPW",
     "auth.secret.key:0SECRETPW",
   ]) {
-    it.fails(`masks the value in "${text.replace("SECRETPW", "...")}"`, () => {
+    it(`masks the value in "${text.replace("SECRETPW", "...")}"`, () => {
       expect(logged({ detail: text })).not.toContain("SECRETPW");
     });
   }
 });
 
 describe("SEC-014 clipping before scrubbing leaves the start of a secret or an email at the cut", () => {
-  it.fails("leaves no part of a URL password that straddles the 8 000-character clip", () => {
+  it("leaves no part of a URL password that straddles the 8 000-character clip", () => {
     // The clip falls after "SECRET", in front of the "@" that the URL mask needs to see.
     const text = `${"x ".repeat(3_988)}xpostgresql://app:SECRETPW@db:5432/shop`;
     expect(logged({ detail: text })).not.toContain("SECRET");
   });
 
-  it.fails("leaves no part of an email address that straddles the 8 000-character clip", () => {
+  it("leaves no part of an email address that straddles the 8 000-character clip", () => {
     // The clip falls after "somchai@exam", which no longer looks like an email address.
     const text = `${"x ".repeat(3_994)}somchai@example.com`;
     expect(logged({ detail: text })).not.toContain("somchai");
@@ -908,18 +908,18 @@ describe("SEC-015 key and key=value matching misses shapes that SR-04 now lists"
     "a pass pair in free text": "smtp login user=app pass=SECRETPW",
   };
   for (const [label, text] of Object.entries(texts)) {
-    it.fails(`masks ${label}`, () => {
+    it(`masks ${label}`, () => {
       expect(logged({ detail: text })).not.toContain("SECRETPW");
     });
   }
 
-  it.fails("masks the whole local part of an email address that contains an apostrophe", () => {
+  it("masks the whole local part of an email address that contains an apostrophe", () => {
     // z.email() accepts this address, so it can be a customer's.
     expect(logged({ detail: "sign-in failed for somchai'o@example.com" })).not.toContain("somchai");
   });
 
   for (const key of ["userName", "customerName", "contactName", "tel", "mobile"]) {
-    it.fails(`redacts the value under the key "${key}"`, () => {
+    it(`redacts the value under the key "${key}"`, () => {
       expect(logged({ order: { [key]: "PERSONAL-VALUE-7" } })).not.toContain("PERSONAL-VALUE-7");
     });
   }
@@ -935,7 +935,7 @@ describe("SEC-016 invisible, format, and C1 control characters reach the log une
   ];
   for (const codePoint of codePoints) {
     const label = `U+${codePoint.toString(16).toUpperCase().padStart(4, "0")}`;
-    it.fails(`escapes ${label}`, () => {
+    it(`escapes ${label}`, () => {
       const character = String.fromCodePoint(codePoint);
       const line = logged({ [`key${character}`]: `value${character}` }, `message${character}`);
       expect(line).not.toContain(character);
@@ -944,7 +944,7 @@ describe("SEC-016 invisible, format, and C1 control characters reach the log une
 });
 
 describe("SEC-017 details passed to an INTERNAL_ERROR reach the client", () => {
-  it.fails("sends empty details for a 500 whatever the service attached", async () => {
+  it("sends empty details for a 500 whatever the service attached", async () => {
     const error = new AppError("INTERNAL_ERROR", {
       message: "query failed",
       details: { sql: "SELECT * FROM users", target: "somchai@example.com" },
@@ -958,7 +958,7 @@ describe("SEC-017 details passed to an INTERNAL_ERROR reach the client", () => {
 });
 
 describe("SEC-018 one extra rate-limit rule makes a built-in rule throw at its first use", () => {
-  it.fails("never lets a later rule definition disable a built-in rule", async () => {
+  it("never lets a later rule definition disable a built-in rule", async () => {
     const limiter = createRateLimiter({ now: () => 1_000_000 });
     // A new rule is used first. Refusing it right here would be fine: it does not fit.
     try {

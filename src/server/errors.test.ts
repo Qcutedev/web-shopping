@@ -12,6 +12,8 @@ import {
   fromZodError,
   insufficientStock,
   internalError,
+  invalidHeader,
+  invalidJsonBody,
   invalidStateTransition,
   isAppError,
   MAX_FIELD_ERRORS,
@@ -287,5 +289,70 @@ describe("fromZodError", () => {
       parseFailure({ quantity: secret, address: { postalCode: secret }, tags: secret }),
     );
     expect(JSON.stringify(error)).not.toContain(secret);
+  });
+});
+
+describe("INTERNAL_ERROR never carries details (SEC-017)", () => {
+  const details = { sql: "SELECT * FROM users", target: "somchai@example.com" };
+
+  it("forces details to {} in the constructor, next to the fixed message", () => {
+    const error = new AppError("INTERNAL_ERROR", { message: "query failed", details });
+    expect(error.details).toEqual({});
+    expect(error.toPublic()).toEqual({
+      code: "INTERNAL_ERROR",
+      message: "An unexpected error occurred.",
+      details: {},
+    });
+    expect(JSON.stringify(error)).not.toContain("SELECT");
+    expect(JSON.stringify(error)).not.toContain("somchai");
+  });
+
+  it("keeps the cause for the log", () => {
+    const cause = new Error("connection reset");
+    const error = new AppError("INTERNAL_ERROR", { details, cause });
+    expect(error.cause).toBe(cause);
+    expect(error.details).toEqual({});
+  });
+
+  it("applies to every code whose status is 500 or above, and to no other", () => {
+    for (const code of ERROR_CODES) {
+      const error = new AppError(code, { details: { field: "sku" } });
+      expect(error.details).toEqual(ERROR_STATUS[code] >= 500 ? {} : { field: "sku" });
+    }
+  });
+});
+
+describe("invalidJsonBody and invalidHeader (docs/API_CONTRACTS.md, error envelope)", () => {
+  it("invalidJsonBody is a 400 VALIDATION_ERROR with one root field error", () => {
+    const error = invalidJsonBody();
+    expect(error.status).toBe(400);
+    expect(error.cause).toBeUndefined();
+    expect(error.toPublic()).toEqual({
+      code: "VALIDATION_ERROR",
+      message: "The request is invalid.",
+      details: {
+        fields: [
+          { path: "", code: "invalid_json", message: "The request body is not valid JSON." },
+        ],
+      },
+    });
+  });
+
+  it("invalidHeader is a 400 VALIDATION_ERROR whose path is the header name", () => {
+    const error = invalidHeader("Idempotency-Key", "The Idempotency-Key header is required.");
+    expect(error.status).toBe(400);
+    expect(error.toPublic()).toEqual({
+      code: "VALIDATION_ERROR",
+      message: "The request is invalid.",
+      details: {
+        fields: [
+          {
+            path: "Idempotency-Key",
+            code: "invalid_header",
+            message: "The Idempotency-Key header is required.",
+          },
+        ],
+      },
+    });
   });
 });
