@@ -79,7 +79,7 @@ The full review register is [reviews/T-004-findings.md](reviews/T-004-findings.m
 | T-016 | Admin bootstrap | NOT STARTED | |
 | T-017 | Design tokens, primitives | IN PROGRESS | ui-ux-design agent running |
 | T-018 | App shell | NOT STARTED | |
-| T-019 | Server basics | IN PROGRESS | backend-api agent running |
+| T-019 | Server basics | IMPLEMENTED | backend-api agent report 2026-10-11; orchestrator re-ran on `src/server`: Prettier clean, ESLint 0 warnings, 151 of 151 unit tests passed; imports are only `zod` and `node:crypto`. Code review and security review pending. Interim contract choices to write into API_CONTRACTS.md: header `X-Request-Id`, `details` always present, `details.fields` as `{ path, code, message }[]`. Unresolved for security: trusted-proxy rule for per-IP limits (S20), behaviour at the limiter key cap, accepting client-supplied request ids, which personal fields the logger redacts |
 | T-020 | Catalog API | NOT STARTED | |
 | T-021 | Storefront pages | NOT STARTED | |
 | T-030 | Profile, addresses | NOT STARTED | |
