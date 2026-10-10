@@ -4,9 +4,10 @@
  * Findings are registered in docs/SECURITY.md. Two kinds of test live here:
  *
  *   it(...)        a control that was checked and holds today. A failure is a regression.
- *                  This includes the reproductions of SEC-001 to SEC-007, which were open
- *                  findings until the fix was re-checked on 2026-10-11.
- *   it.fails(...)  an OPEN finding (SEC-012 to SEC-018 at the time of writing). The body
+ *                  This includes the reproductions of SEC-001 to SEC-007 and SEC-012 to
+ *                  SEC-018, which were open findings until their fixes (commits 4407b71 and
+ *                  28c92d1) were re-checked on 2026-10-11.
+ *   it.fails(...)  an OPEN finding (SEC-019 at the time of writing). The body
  *                  asserts the SECURE behaviour, which the code does not have yet, so the
  *                  assertion fails and Vitest reports the test as passed ("expected fail").
  *                  When the owner fixes the code the test turns red; the owner may then
@@ -27,7 +28,15 @@ import {
   NO_TRUSTED_PROXY,
 } from "../../src/server/client-address";
 import { AppError, fromZodError, internalError } from "../../src/server/errors";
-import { created, errorResponse, ok, paginated } from "../../src/server/http";
+import {
+  assertContentType,
+  assertSameOrigin,
+  created,
+  errorResponse,
+  ok,
+  paginated,
+  readJsonBody,
+} from "../../src/server/http";
 import { createLogger, type Logger } from "../../src/server/logger";
 import {
   createRateLimiter,
@@ -35,7 +44,11 @@ import {
   RATE_LIMITS,
   type RateLimitRule,
 } from "../../src/server/rate-limit";
-import { REQUEST_ID_HEADER, resolveRequestId } from "../../src/server/request-id";
+import {
+  REQUEST_ID_HEADER,
+  resolveRequestId,
+  trustsIncomingRequestId,
+} from "../../src/server/request-id";
 
 function capture(): { lines: string[]; log: Logger } {
   const lines: string[] = [];
@@ -816,6 +829,14 @@ describe("logger cost stays bounded (re-check of the reported 169-second stall)"
     "bearer and blank runs": (size) => `Bearer${" ".repeat(9)}`.repeat(size / 15),
     "dotted domain run": (size) => `a@${"a.".repeat(size / 2)}`,
     "hyphen tail": (size) => `a@a${"-".repeat(size)}`,
+    // Shapes aimed at the code added in commit 28c92d1 (second re-check).
+    "blank runs in front of separators": (size) => `${" ".repeat(32)}=`.repeat(size / 33),
+    "sensitive key, blank run, arrow, no value": (size) =>
+      `pin${" ".repeat(32)}=>${" ".repeat(33)}`.repeat(size / 70),
+    "local schemes in one run": (size) => "file://a@".repeat(size / 9),
+    "digits after dotted sensitive keys": (size) => "a.token.ts:1234567890:".repeat(size / 22),
+    "one unbroken run with a late scheme": (size) => `${"a".repeat(size - 10)}://b`,
+    "apostrophes around @": (size) => "'''@'''".repeat(size / 7),
   };
 
   for (const [label, build] of Object.entries(shapes)) {
@@ -853,7 +874,9 @@ describe("logger cost stays bounded (re-check of the reported 169-second stall)"
 });
 
 // ---------------------------------------------------------------------------
-// OPEN findings registered by the re-check of 2026-10-11. Owner of the code: backend-api.
+// Findings registered by the first re-check of 2026-10-11 (SEC-012 to SEC-018), fixed in commit
+// 28c92d1 and re-checked the same day. The first test or loop of each block is the original
+// reproduction, unchanged; "second re-check" blocks hold the new adversarial inputs.
 // ---------------------------------------------------------------------------
 
 describe("SEC-012 a URL password survives when a local-scheme URL starts the same run of text", () => {
@@ -977,4 +1000,502 @@ describe("SEC-018 one extra rate-limit rule makes a built-in rule throw at its f
       expect(result.allowed).toBe(true);
     }
   });
+});
+
+// ---------------------------------------------------------------------------
+// Second re-check, 2026-10-11: new adversarial inputs against the fixes of commit 28c92d1.
+// The marker QZXVQZXV stands for a secret; no part of it ("QZ", "XV") may reach the line.
+// ---------------------------------------------------------------------------
+
+describe("second re-check of SEC-012 to SEC-018", () => {
+  const MARKER = "QZXVQZXV";
+  const leaks = (line: string): boolean => line.includes("QZ") || line.includes("XV");
+
+  describe("SEC-012 URL credentials behind local-scheme URLs", () => {
+    for (const text of [
+      `file:///a.js:1:1):file:///b.js,postgresql://app:${MARKER}@db/shop`,
+      `turbopack://[project]/src/db.ts?x=mongodb+srv://u:${MARKER}@cluster0/shop`,
+      `node://internal;amqp://guest:${MARKER}@mq:5672`,
+      `file:///home/me@host/a.js,redis://:${MARKER}@cache:6379`,
+      `webpack://app/./db.ts|WEBPACK://x|PostgreSQL://app:QZ://XV@QZXV@db/shop`,
+      `postgresql://app:${MARKER}@db/shop?from=file:///a.js`,
+    ]) {
+      it(`masks the password in "${text.replace(MARKER, "...").slice(0, 60)}"`, () => {
+        expect(leaks(logged({ err: new Error(text), detail: text }, text))).toBe(false);
+      });
+    }
+
+    it("still leaves a local stack frame with an @ in its path readable", () => {
+      const frame = "at load (file:///C:/app/node_modules/@scope/pkg/index.js:10:5)";
+      expect(logged({ frame })).toContain("@scope/pkg/index.js:10:5");
+    });
+  });
+
+  describe("SEC-013 file positions", () => {
+    for (const text of [
+      `db.password.prod:9x7${MARKER}`,
+      `api.token.v1:12345678901${MARKER}`,
+      `auth.secret.key:12:${MARKER}`,
+      `session.ts:12:5${MARKER}`,
+      `x.token.js:12:5:${MARKER}`,
+      `cookie.tsx:12,${MARKER}`,
+      `jwt.io:443/${MARKER}`,
+    ]) {
+      it(`masks the value in "${text.replace(MARKER, "...")}"`, () => {
+        expect(leaks(logged({ detail: text }))).toBe(false);
+      });
+    }
+
+    it("keeps real file positions readable", () => {
+      const line = logged({
+        a: "at verify (C:\\app\\session.ts:12:5)",
+        b: "src/server/token.ts:7",
+        c: "cookie.tsx:120:33\n    at next",
+      });
+      expect(line).toContain("session.ts:12:5");
+      expect(line).toContain("token.ts:7");
+      expect(line).toContain("cookie.tsx:120:33");
+    });
+  });
+
+  describe("SEC-014 every position of the cut", () => {
+    const secrets: Record<string, string> = {
+      "a connection URL": `postgresql://app:${MARKER}@db:5432/shop`,
+      "a connection URL after a local-scheme URL": `file:///a.js,redis://:${MARKER}@cache:6379`,
+      "a key=value pair": `password=${MARKER}`,
+      "a header line": `Cookie: session_token=${MARKER}`,
+      "a bearer token": `Bearer ${MARKER}`,
+    };
+    for (const [label, secret] of Object.entries(secrets)) {
+      it(`leaves no part of ${label} wherever the 8 000-character clip falls`, () => {
+        let withStart = 0;
+        for (let offset = 0; offset <= secret.length + 2; offset += 1) {
+          const text = `${"x".repeat(8_000 - offset - 1)} ${secret} tail`;
+          const line = logged({ detail: text });
+          expect(leaks(line)).toBe(false);
+          if (line.includes(secret.slice(0, 4))) withStart += 1;
+        }
+        // The cut really moved through the secret: its harmless start is visible in some lines.
+        expect(withStart).toBeGreaterThan(4);
+        expect(withStart).toBeLessThan(secret.length + 3);
+      });
+
+      it(`leaves no part of ${label} wherever the entry budget runs out`, () => {
+        const full = "y".repeat(8_000);
+        let withStart = 0;
+        for (let left = 0; left <= secret.length + 2; left += 1) {
+          // Seven full strings and one partial one leave `left` characters of the 64 000 budget
+          // (the key "a" costs one) for the string that holds the secret.
+          const partial = "y".repeat(7_999 - left);
+          const line = logged({ a: [full, full, full, full, full, full, full, partial, secret] });
+          expect(leaks(line)).toBe(false);
+          if (line.includes(secret.slice(0, 4))) withStart += 1;
+        }
+        expect(withStart).toBeGreaterThan(4);
+        expect(withStart).toBeLessThan(secret.length + 3);
+      });
+    }
+
+    it("leaves no local part of an email wherever the cut falls at or behind the @", () => {
+      const email = "qzlocal.part'x+tag@mail.example.co.th";
+      const at = email.indexOf("@");
+      for (let visible = at + 1; visible <= email.length; visible += 1) {
+        const text = `${"x".repeat(8_000 - visible - 1)} ${email} tail`;
+        const line = logged({ detail: text }, text);
+        expect(line).not.toContain("qzlocal");
+        expect(line).not.toContain("part'x");
+      }
+    });
+  });
+
+  describe("SEC-015 separators, inline keys, keys, and apostrophes", () => {
+    const blanks = " ".repeat(32);
+    const texts: Record<string, string> = {
+      "32 blanks on both sides of =": `API_KEY${blanks}=${blanks}${MARKER}`,
+      "32 blanks on both sides of :": `Authorization${blanks}:${blanks}Token ${MARKER}`,
+      "tabs and blanks mixed": `password \t \t=\t \t${MARKER}`,
+      "an arrow without blanks": `password=>${MARKER}`,
+      "a quoted arrow pair": `"client_secret"=>"${MARKER} ${MARKER}"`,
+      "an arrow with a long gap": `token   =>${blanks}${MARKER}`,
+      "an upper-case PIN with blanks": `PIN : ${MARKER}`,
+      "otp after another parameter": `/v?page=2&otp=${MARKER}&x=1`,
+      "sid in a cookie line under a harmless name": `jar: theme=dark; sid=${MARKER}`,
+      "a quoted pass": `{"pass":"${MARKER}"}`,
+    };
+    for (const [label, text] of Object.entries(texts)) {
+      it(`masks ${label}`, () => {
+        expect(leaks(logged({ detail: text, err: new Error(text) }, text))).toBe(false);
+      });
+    }
+
+    it("masks addresses with apostrophes and leaves an opening quote alone", () => {
+      const line = logged({
+        a: "qzuser'o'brien@example.com",
+        b: "email: 'qzuser@example.com'",
+        c: "it's qzuser's@example.co.th now",
+      });
+      expect(line).not.toContain("qzuser");
+      expect(line).not.toContain("brien");
+    });
+
+    it("redacts the new keys in any spelling, and does not confuse look-alike words", () => {
+      const line = logged({
+        user_name: MARKER,
+        "Customer-Name": MARKER,
+        CONTACTNAME: MARKER,
+        Tel: MARKER,
+        MOBILE: MARKER,
+        detail: "passed=3 spin=2 compass:north pinned: yes",
+      });
+      expect(leaks(line)).toBe(false);
+      expect(line).toContain("passed=3 spin=2 compass:north pinned: yes");
+    });
+  });
+
+  describe("SEC-016 escaping", () => {
+    const codePoints = [
+      0x81, 0x8f, 0x90, 0x600, 0x6dd, 0x70f, 0x200c, 0x2061, 0x2067, 0x206a, 0xfffa, 0xfffb,
+      0x110bd, 0x1d173, 0xe0020, 0xe007f,
+    ];
+    it("escapes further format and control characters and parses back to the same text", () => {
+      for (const codePoint of codePoints) {
+        const character = String.fromCodePoint(codePoint);
+        const message = `a${character}b${character}${character}c`;
+        const line = logged({ [`k${character}`]: [character, { v: character }] }, message);
+        expect(line).not.toContain(character);
+        expect((JSON.parse(line) as { message: string }).message).toBe(message);
+      }
+    });
+
+    it("leaves ordinary text alone and survives lone surrogates", () => {
+      const thai = "สวัสดีครับ ร้านค้า 100%";
+      const line = logged({ detail: `${thai} \ud83d\ude00 caf\u00e9 \ud800 end` });
+      expect(line).toContain(thai);
+      expect(line).toContain("\ud83d\ude00");
+      expect(() => JSON.parse(line) as unknown).not.toThrow();
+    });
+  });
+
+  describe("SEC-017 public details of a server fault", () => {
+    it("drops details on every route to a 500 and keeps them on client errors", async () => {
+      const attached = { sql: "SELECT 1", hint: MARKER };
+      const internal = new AppError("INTERNAL_ERROR", { details: attached, cause: attached });
+      expect(internal.details).toEqual({});
+      expect(JSON.stringify(internal)).not.toContain(MARKER);
+      expect(JSON.stringify(internal.toPublic())).not.toContain(MARKER);
+      for (const thrown of [internal, new Error(MARKER), { details: attached }, MARKER]) {
+        const response = errorResponse(thrown, { requestId: REQUEST_ID });
+        expect(response.status).toBe(500);
+        expect(leaks(await response.text())).toBe(false);
+      }
+      const conflict = new AppError("CONFLICT", { details: { field: "sku" } });
+      expect(conflict.details).toEqual({ field: "sku" });
+    });
+  });
+
+  describe("SEC-018 the rule set is fixed at creation", () => {
+    const extra: RateLimitRule = { name: "cart-add", limit: 60, windowMs: 60_000, maxKeys: 1 };
+
+    it("refuses an over-budget or duplicated rule set when the limiter is created", () => {
+      expect(() => createRateLimiter({ rules: [...Object.values(RATE_LIMITS), extra] })).toThrow(
+        TypeError,
+      );
+      expect(() => createRateLimiter({ rules: [extra, { ...extra, limit: 1 }] })).toThrow(
+        TypeError,
+      );
+      expect(() => createRateLimiter({ rules: [{ ...extra, name: "Cart:Add" }] })).toThrow(
+        TypeError,
+      );
+    });
+
+    it("rejects a rule outside the set on every call, in any order, without side effects", async () => {
+      const limiter = createRateLimiter({ now: () => 1_000_000 });
+      for (let round = 0; round < 3; round += 1) {
+        await expect(limiter.consume("u", extra)).rejects.toThrow(TypeError);
+        await expect(
+          limiter.consume("u", { ...RATE_LIMITS.CHECKOUT, limit: 1_000_000 }),
+        ).rejects.toThrow(TypeError);
+        await expect(
+          limiter.consume("u", { ...RATE_LIMITS.CHECKOUT, name: "checkout " }),
+        ).rejects.toThrow(TypeError);
+        for (const rule of Object.values(RATE_LIMITS)) {
+          expect((await limiter.consume(`round-${round}`, rule)).allowed).toBe(true);
+        }
+      }
+      // The rejected calls consumed nothing from the real checkout rule.
+      const first = await limiter.consume("u", RATE_LIMITS.CHECKOUT);
+      expect(first.remaining).toBe(RATE_LIMITS.CHECKOUT.limit - 1);
+    });
+
+    it("is not affected by a caller changing its rule object after creation", async () => {
+      const mutable = { ...extra, maxKeys: 10 };
+      const limiter = createRateLimiter({ rules: [mutable], now: () => 1_000_000 });
+      mutable.limit = 1_000_000;
+      await expect(limiter.consume("u", mutable)).rejects.toThrow(TypeError);
+      const empty = createRateLimiter({ rules: [] });
+      await expect(empty.consume("u", RATE_LIMITS.CHECKOUT)).rejects.toThrow(TypeError);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// First security review of the request helpers added in commit 28c92d1 (TM-16, SR-03).
+// ---------------------------------------------------------------------------
+
+describe("TM-16 same-origin check (assertSameOrigin)", () => {
+  const APP = "https://shop.example";
+  const request = (method: string, origin?: string | string[]): Request => {
+    const headers = new Headers({ "content-type": "application/json" });
+    for (const value of origin === undefined ? [] : [origin].flat()) {
+      headers.append("origin", value);
+    }
+    return new Request(`${APP}/api/v1/cart`, { method, headers });
+  };
+  const status = (candidate: Request, allowed = APP): number => {
+    try {
+      assertSameOrigin(candidate, allowed);
+      return 200;
+    } catch (error) {
+      if (error instanceof AppError) return error.status;
+      throw error;
+    }
+  };
+  const MUTATING = ["POST", "PUT", "PATCH", "DELETE", "OPTIONS", "PURGE"];
+
+  it("accepts only the exact application origin on every method but GET and HEAD", () => {
+    for (const method of MUTATING) {
+      expect(status(request(method, APP))).toBe(200);
+      expect(status(request(method))).toBe(403);
+    }
+    expect(status(request("GET"))).toBe(200);
+    expect(status(request("HEAD", "https://evil.example"))).toBe(200);
+  });
+
+  it("refuses every near miss of the origin", () => {
+    const foreign = [
+      "null",
+      "",
+      "https://shop.example:443",
+      "https://shop.example:8443",
+      "http://shop.example",
+      "HTTPS://SHOP.EXAMPLE",
+      "https://Shop.example",
+      "https://shop.example.",
+      "https://shop.example/",
+      "https://shop.example/path",
+      "https://user@shop.example",
+      "https://shop.example@evil.example",
+      "https://shop.example.evil.example",
+      "https://evilshop.example",
+      "https://www.shop.example",
+      "https://shop.example#x",
+      "https://shop.example?x",
+      "https://shop.example\\@evil.example",
+      "//shop.example",
+      "shop.example",
+      "https://xn--shop-example",
+      "https://shop.example https://shop.example",
+      "https://shop.example,https://shop.example",
+      ["https://shop.example", "https://shop.example"],
+      ["https://evil.example", "https://shop.example"],
+      ["https://shop.example", "null"],
+    ];
+    for (const origin of foreign) {
+      for (const method of MUTATING) {
+        expect(status(request(method, origin))).toBe(403);
+      }
+    }
+  });
+
+  it("compares against the origin of APP_URL only, in its canonical form", () => {
+    const spellings = [
+      "https://shop.example/",
+      "https://SHOP.example:443/th/",
+      "https://user:pw@shop.example/app?x=1#y",
+    ];
+    for (const allowed of spellings) {
+      expect(status(request("POST", APP), allowed)).toBe(200);
+      expect(status(request("POST", "https://evil.example"), allowed)).toBe(403);
+    }
+    // A non-default port and an internationalised host are part of the origin.
+    expect(status(request("POST", "http://localhost:3000"), "http://localhost:3000")).toBe(200);
+    expect(status(request("POST", "http://localhost"), "http://localhost:3000")).toBe(403);
+    expect(status(request("POST", "http://localhost:3000"), "http://localhost")).toBe(403);
+    const punycode = new URL("https://ร้านค้า.example").origin;
+    expect(punycode).toMatch(/^https:\/\/xn--/);
+    expect(status(request("POST", punycode), "https://ร้านค้า.example")).toBe(200);
+  });
+
+  it("an unusable APP_URL never lets a request through, whatever the method", () => {
+    for (const allowed of [
+      "",
+      "*",
+      "null",
+      "shop.example",
+      "//shop.example",
+      "ftp://shop.example",
+      "javascript:alert(1)",
+      "file:///etc/passwd",
+      "https://",
+    ]) {
+      for (const method of ["GET", "POST"]) {
+        expect(() => assertSameOrigin(request(method, allowed), allowed)).toThrow(TypeError);
+      }
+    }
+  });
+});
+
+describe("TM-16 content type and JSON body (assertContentType, readJsonBody)", () => {
+  const post = (contentType: string | null, body: string): Request => {
+    const headers = new Headers();
+    if (contentType !== null) headers.set("content-type", contentType);
+    else headers.delete("content-type");
+    const built = new Request("https://shop.example/api/v1/cart", {
+      method: "POST",
+      headers,
+      body,
+    });
+    // A string body makes the platform add text/plain; remove it to model a missing header.
+    if (contentType === null) built.headers.delete("content-type");
+    return built;
+  };
+  const rejection = async (candidate: Request): Promise<AppError> => {
+    try {
+      await readJsonBody(candidate);
+    } catch (error) {
+      if (error instanceof AppError) return error;
+      throw error;
+    }
+    throw new Error("readJsonBody accepted the request");
+  };
+
+  it("refuses every content type a cross-site form can send, before reading the body", async () => {
+    for (const contentType of [
+      null,
+      "",
+      "text/plain",
+      "text/plain; application/json",
+      "application/x-www-form-urlencoded",
+      "multipart/form-data; boundary=x",
+      "application/jsonx",
+      "application/json+x",
+      "xapplication/json",
+      "application/json, text/plain",
+      "text/plain, application/json",
+      "application/ json",
+      "*/*",
+    ]) {
+      const candidate = post(contentType, '{"quantity":1}');
+      const error = await rejection(candidate);
+      expect(error.status).toBe(415);
+      expect(candidate.bodyUsed).toBe(false);
+    }
+  });
+
+  it("accepts application/json in any case and with parameters", async () => {
+    for (const contentType of [
+      "application/json",
+      "Application/JSON; charset=utf-8",
+      " application/json ;x=1",
+    ]) {
+      expect(await readJsonBody(post(contentType, '{"quantity":1}'))).toEqual({ quantity: 1 });
+    }
+    expect(() =>
+      assertContentType(post("multipart/form-data; boundary=x", ""), "multipart/form-data"),
+    ).not.toThrow();
+    expect(() => assertContentType(post("application/json", ""), "multipart/form-data")).toThrow();
+  });
+
+  it("turns a body that is not JSON into a 400 that repeats nothing of the body", async () => {
+    for (const body of ["", "{", `{"password":"${"QZXVQZXV"}"`, "QZXVQZXV", "{'a':1}", "\u0000"]) {
+      const error = await rejection(post("application/json", body));
+      expect(error.status).toBe(400);
+      expect(error.cause).toBeUndefined();
+      const lines: string[] = [];
+      const log = createLogger({ level: "debug", write: (line) => lines.push(line) });
+      const text = await errorResponse(error, { requestId: REQUEST_ID, logger: log }).text();
+      expect(text).not.toContain("QZXV");
+      expect(lines).toHaveLength(0);
+    }
+  });
+
+  it("a hostile but valid document does not pollute prototypes or crash the parser", async () => {
+    const polluting =
+      '{"__proto__":{"polluted":true},"constructor":{"prototype":{"polluted":true}}}';
+    const parsed = (await readJsonBody(post("application/json", polluting))) as object;
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(Object.getPrototypeOf(parsed)).toBe(Object.prototype);
+    const deep = `${"[".repeat(20_000)}${"]".repeat(20_000)}`;
+    const outcome = await readJsonBody(post("application/json", deep)).then(
+      () => 200,
+      (error: unknown) => (error instanceof AppError ? error.status : 500),
+    );
+    expect([200, 400]).toContain(outcome);
+  });
+});
+
+describe("SR-03 trust decision for incoming request ids (trustsIncomingRequestId)", () => {
+  it("is true only for a valid configuration with a trusted proxy", () => {
+    expect(trustsIncomingRequestId(NO_TRUSTED_PROXY)).toBe(false);
+    expect(trustsIncomingRequestId({ trustedProxyHops: 0 })).toBe(false);
+    expect(trustsIncomingRequestId({ trustedProxyHops: 1 })).toBe(true);
+    expect(trustsIncomingRequestId({ trustedProxyHops: 5 })).toBe(true);
+    expect(
+      trustsIncomingRequestId({ trustedProxyHops: 0, trustedClientIpHeader: "CF-Connecting-IP" }),
+    ).toBe(true);
+    const invalid = [
+      { trustedProxyHops: 6 },
+      { trustedProxyHops: -1 },
+      { trustedProxyHops: 1.5 },
+      { trustedProxyHops: "1" },
+      { trustedProxyHops: true },
+      { trustedProxyHops: Number.POSITIVE_INFINITY },
+      { trustedProxyHops: 1, trustedClientIpHeader: "X-Real-IP" },
+      { trustedProxyHops: 0, trustedClientIpHeader: "X-Forwarded-For" },
+      { trustedProxyHops: 0, trustedClientIpHeader: "" },
+      { trustedProxyHops: 0, trustedClientIpHeader: true },
+      {},
+      null,
+      undefined,
+      "1",
+    ];
+    for (const config of invalid) {
+      expect(trustsIncomingRequestId(config as unknown as ClientAddressConfig)).toBe(false);
+    }
+  });
+
+  it("with the default configuration a client-chosen id is still ignored end to end", () => {
+    const chosen = "attacker-chosen-id-0003";
+    const incoming = new Request("https://shop.example/", { headers: { "x-request-id": chosen } });
+    const resolved = resolveRequestId(incoming, {
+      trustIncoming: trustsIncomingRequestId(NO_TRUSTED_PROXY),
+    });
+    expect(resolved).not.toBe(chosen);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// OPEN finding registered by the second re-check of 2026-10-11. Owner of the code: backend-api.
+// ---------------------------------------------------------------------------
+
+describe("SEC-019 readJsonBody buffers a request body of any size", () => {
+  const oversized = (declareLength: boolean): Request => {
+    // 2 MiB of valid JSON: above the default limit of rule SR-05 (100 KiB) and above the
+    // largest limit an endpoint may ask for (1 MiB).
+    const body = JSON.stringify({ note: "a".repeat(2 * 1024 * 1024) });
+    const headers = new Headers({ "content-type": "application/json" });
+    if (declareLength) headers.set("content-length", String(body.length));
+    return new Request("https://shop.example/api/v1/cart", { method: "POST", headers, body });
+  };
+
+  for (const declareLength of [true, false]) {
+    const label = declareLength ? "that declares its length" : "without a declared length";
+    it.fails(`refuses a 2 MiB JSON body ${label} with 413`, async () => {
+      const outcome = await readJsonBody(oversized(declareLength)).then(
+        () => 200,
+        (error: unknown) => (error instanceof AppError ? error.status : 500),
+      );
+      expect(outcome).toBe(413);
+    });
+  }
 });
