@@ -8,6 +8,24 @@ Last updated: 2026-10-10
 
 Planning documents and agent definitions are written and the empty Next.js scaffold builds. **No marketplace feature exists yet. Nothing has been deployed.**
 
+## Resume here (handoff written 2026-10-11)
+
+The owner paused the run after answering the open questions and will continue in a new session. Nothing is running; the tree is clean; all work is committed locally on `main` (no remote, nothing pushed). A new session should read CLAUDE.md, this file, DECISIONS.md (D-017 to D-025), PROJECT_PLAN.md, AGENT_WORKFLOW.md, and reviews/T-004-findings.md, then wait for the owner's go-ahead before starting.
+
+Standing rules from the owner (D-019): never guess, park questions here and ask in batches; commit locally after each task passes its checks, never push without being told; stop for owner review at the five milestones. Milestone 1 (foundation plus browsable storefront) is in progress.
+
+Before starting, check the machine: Docker Desktop running and `docker compose up -d --wait` (the test database is empty after every container start); `pnpm install --frozen-lockfile`; `pnpm verify` should exit 0 with 1050 tests.
+
+Next steps, in order:
+
+1. Orchestrator: update `eslint.config.mjs` and `scripts/check-import-guards.mjs` to the rule 7 allow-list now in CLAUDE.md (D-021 accepted). The lint config still denies everything except `src/modules`.
+2. Write the D-025 answers into the owning documents, in parallel where owners differ: product-requirements (REQUIREMENTS.md Q7 to Q19 become rules), ui-ux-design (OQ-01 to OQ-03, OQ-23, OQ-24 in tokens, Badge, QuantityStepper, plus re-review minors in the T-017 row), security (OQ-21, OQ-22 in SECURITY.md, and the SEC-019 re-check).
+3. database and backend-api: fix their T-004 review findings in DATA_MODEL.md and API_CONTRACTS.md using D-023, D-024, and D-025 (register items B3 to B5, S4 to S15, S19, M1, M2, M5, M6, M11, M12), then code-review checks the two documents agree. qa and devops fix their document items (M7 to M10).
+4. T-013 schema (database), pinning Prisma and widening the driver lint pattern (re-review item N3); then T-023 integration-test harness (qa); then T-011 env validation and health (devops, including SR-01 proxy variables and `APP_URL`); then T-015 auth, T-014 seed, T-016 admin bootstrap, T-018 app shell, T-020 catalog API, T-021 storefront pages, T-072 security headers.
+5. Milestone 1 report to the owner, with OQ-20 shown on real pages.
+
+Known environment limits: the session cannot edit its own permission settings, so command prompts need the owner's "always allow"; long multi-agent runs can exhaust the usage limit (it happened once; interrupted agents were resumed without loss). Approved design mockups: link in D-018.
+
 ## Environment (checked 2026-10-10 on the developer machine)
 
 | Tool | Result |
@@ -34,6 +52,8 @@ Terminals and editors opened before the installs do not see the new PATH until r
 | B-04 | No GitHub remote; `gh` not logged in | T-070 cannot be verified on a real run | User runs `gh auth login`, then create the repository; CI can be written but not proven until then |
 
 ## Questions for the owner
+
+**Answered 2026-10-11:** the owner answered every question below except OQ-20. The answers are in DECISIONS.md D-025 and are binding; the table is kept for the question wording only. **Still open: OQ-20** (design details, to be reviewed on real pages at milestone 1).
 
 Parked questions per D-019. Work that depends on an open question waits; everything else continues.
 
@@ -79,9 +99,9 @@ Registered in [SECURITY.md](SECURITY.md). State on 2026-10-11 after two re-check
 | T-003 | Verify delegation | VERIFIED | ui-ux-design agent rewrote DESIGN_SYSTEM.md to the approved direction (D-018) and returned the standard report; orchestrator confirmed the diff touches only that file and the acceptance greps hold. Raised OQ-01 to OQ-03 |
 | T-004 | Review planning documents | IN PROGRESS | Both reviews returned 2026-10-11. Orchestrator-owned findings fixed (plan dependencies, ownership table, D-022 to D-024); REQUIREMENTS.md updated by product-requirements. Still open: findings owned by database, backend-api, qa, security, and 16 owner questions (OQ-04 to OQ-19). Register: reviews/T-004-findings.md |
 | T-010 | Scaffold | VERIFIED | Re-review 2026-10-11: APPROVE. Follow-ups closed the same day (non-normal import paths, non-literal require, `prisma/` exemption; probes now 42 of 42); still open: widen the driver pattern when T-013 picks the Prisma output path and adapter (re-review item N3). History: | 2026-10-11 `pnpm verify` exit 0 on the scaffold. Code review 2026-10-11: CHANGES REQUIRED (import guard bypassed by relative, dynamic, and `.js` imports). Fixed by the orchestrator: guards match by regular expression, cover JS files and dynamic imports, deny `src/server/db` everywhere except `src/modules`; `scripts/check-import-guards.mjs` (27 of 27 probes) runs in `pnpm lint`; `noUncheckedIndexedAccess` enabled. `pnpm verify` exit 0 on the integrated tree; re-review running. Scripts `test:integration`, `test:e2e`, `db:*`, `admin:bootstrap` are defined but their tooling is not installed yet |
-| T-011 | Env validation, health | NOT STARTED | Needs T-012, T-013; database check waits on OQ-19 |
+| T-011 | Env validation, health | NOT STARTED | Needs T-013 |
 | T-012 | Compose databases | VERIFIED | Code review APPROVE and security review (no Critical or High; SEC-008, SEC-009 Low open) 2026-10-11. devops agent report 2026-10-11; orchestrator re-ran `docker compose ps` (both healthy) and a query in each database: PostgreSQL 18.6, UTF8, UTC. Dev on 127.0.0.1:5432 (named volume), test on 127.0.0.1:5433 (tmpfs). No `.env` exists or is tracked. Code review pending. Open for T-013: Thai sort order under the default `en_US.utf8` collation |
-| T-013 | Schema v1 | BLOCKED | Waits on owner answers that change the first migration (OQ-04 to OQ-08, OQ-16 to OQ-18) and on data-model fixes from the review (B3, S7, S8, S10 to S12, S19) |
+| T-013 | Schema v1 | NOT STARTED | Owner answers received (D-025). Still needs the data-model fixes from the review first (B3, S7, S8, S10 to S12, S19) |
 | T-023 | Integration-test harness | NOT STARTED | Added 2026-10-11 (review finding B9) |
 | T-014 | Seed | NOT STARTED | |
 | T-015 | Auth | NOT STARTED | |

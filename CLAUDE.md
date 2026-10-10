@@ -84,7 +84,7 @@ Rules that are not negotiable:
 4. Money is integer satang (`Int`). No floating-point arithmetic on money.
 5. Checkout, stock changes, and status transitions run inside a database transaction.
 6. Seller queries are always scoped by `storeId` derived from the session, never from the request body or URL alone.
-7. Only `src/server/db` imports the Prisma client; only `src/modules/*` imports `src/server/db`.
+7. Only `src/server/db` imports the Prisma client. `src/server/db` is imported only by `src/modules/**`, `src/server/auth/**`, `src/server/health.ts`, `prisma/seed.ts`, `scripts/**`, and `tests/**`. Pages, route handlers, and components never import it. (Owner approved 2026-10-11, D-021.)
 8. No secrets in source, logs, client bundles, or docs. `.env.example` holds placeholders only.
 
 ## Verification before claiming anything

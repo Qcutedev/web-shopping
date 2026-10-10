@@ -28,10 +28,11 @@ Decisions marked `PROPOSED` are not yet validated against the installed stack; e
 | D-018 | 2026-10-11 | Visual direction approved by the owner: green accent, IBM Plex Sans Thai | ACCEPTED |
 | D-019 | 2026-10-11 | Operating rules for the long autonomous run | ACCEPTED |
 | D-020 | 2026-10-11 | Toolchain versions on the developer machine | ACCEPTED |
-| D-021 | 2026-10-11 | Explicit list of code allowed to import the database layer | PROPOSED (needs owner approval, OQ-19) |
+| D-021 | 2026-10-11 | Explicit list of code allowed to import the database layer | ACCEPTED (owner approved 2026-10-11, see D-025) |
 | D-022 | 2026-10-11 | `Actor` type and pure permission helpers live in `src/server/auth/actor.ts` | ACCEPTED |
 | D-023 | 2026-10-11 | Checkout is serialised per cart; payment completion is one guarded transaction | ACCEPTED (supersedes parts of D-006 and D-009) |
 | D-024 | 2026-10-11 | Every status transition is a conditional update | ACCEPTED |
+| D-025 | 2026-10-11 | Owner answers to open questions OQ-01 to OQ-19 and OQ-21 to OQ-24 | ACCEPTED |
 
 ## Details
 
@@ -117,6 +118,35 @@ What the customer and seller see after a failed payment (retry, cart contents, v
 
 ### D-024 Status transitions
 Resolves review finding S3. Every status change (payment, fulfilment, store, product, moderation, user activation) is written as `UPDATE ... WHERE id = :id AND status = :expected` and the affected row count is checked; zero rows is a conflict error. "Not the last admin" is enforced inside a transaction that locks the admin rows it counts. Every write that changes stock for several products processes them in id order.
+
+### D-025 Owner answers to the open questions
+On 2026-10-11 the owner accepted the orchestrator's recommendation for every open question except OQ-20, which stays open until the owner can look at real pages at milestone 1. The answers are rules from now on. The owning documents (REQUIREMENTS.md, DATA_MODEL.md, API_CONTRACTS.md, DESIGN_SYSTEM.md, SECURITY.md) do not contain them yet; each owner writes them in before the task that depends on them.
+
+| Question | Answer |
+| --- | --- |
+| OQ-01 | Form controls and outline buttons use the darker border: `--control-border` points to `--border-contrast` (`#7F8790`). The approved light border stays for cards and dividers. |
+| OQ-02 | The "จัดส่งแล้ว" (shipped) badge is blue (the info tone), not accent green. |
+| OQ-03 | The selected tab, page number, and menu item use dark ink, as the selected chip does. |
+| OQ-04 | No switch to turn product approval off. Approval is always required. The moderation on/off setting is removed from the admin settings. |
+| OQ-05 | An approved product needs approval again only when its title, description, category, or pictures change. Price and stock changes take effect at once. While it waits for re-approval the product is hidden from the shop. |
+| OQ-06 | A rejected or taken-down product can be corrected by the seller and submitted again. |
+| OQ-07 | After a failed (mock) payment the items return to the customer's cart and the customer checks out again; the failed order is not retried. Sellers do not see orders whose payment failed. |
+| OQ-08 | A seller or admin may cancel an order that is already paid. It is shown as "ยกเลิกแล้ว คืนเงินนอกระบบ" (cancelled, refund handled outside the system); the system records no refund. Cancelled orders are not counted in sales or revenue figures. |
+| OQ-09 | If any cart item cannot be bought at checkout, the whole checkout stops until the customer removes or fixes that item. No partial purchase. |
+| OQ-10 | Switching a category off removes its products from the whole shop (search, store pages, product pages) and makes them unbuyable. |
+| OQ-11 | Sold-out products stay visible, marked "สินค้าหมด". |
+| OQ-12 | "Low stock" means 5 or fewer. |
+| OQ-13 | In the MVP admins are created only by the bootstrap script. No promotion from the admin screens. |
+| OQ-14 | Deactivating a user who owns a store hides the store and its products. |
+| OQ-15 | The placeholder marketplace name is "ชื่อแบรนด์". |
+| OQ-16 | Admin settings limits: flat shipping fee from 0 to 1,000 THB; commission from 0 to 100 percent. |
+| OQ-17 | A shipped order can only become delivered. Cancelling or marking a shipped order lost is not in the MVP. |
+| OQ-18 | Orders keep the store name as it was at purchase. A later rename does not change old orders. |
+| OQ-19 | Approved: CLAUDE.md rule 7 now carries the D-021 list. This also allows `prisma/seed.ts` to import the database layer. |
+| OQ-21 | Server logs are kept 90 days and may be read by system administrators only. |
+| OQ-22 | The login's IP address and browser details may be stored with the session and are deleted when the session ends or expires. |
+| OQ-23 | When stock drops below a quantity the customer already chose, the quantity is lowered automatically to what is available and the customer is told. |
+| OQ-24 | With the quantity above the available stock, the Up arrow key does nothing, the same as the disabled plus button (and Down does nothing below 1). |
 
 ## Pending decisions for the user
 
