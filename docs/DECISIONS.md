@@ -93,7 +93,7 @@ Agreed with the owner on 2026-10-11.
 - Work stops for owner review at five milestones: (1) foundation plus browsable storefront, (2) cart, mock checkout, orders, (3) seller platform, (4) admin platform, (5) full test, security review, and fixes.
 
 ### D-020 Toolchain versions
-Node.js v24.20.0, npm 11.19.0, pnpm 12.11.2 (Corepack 0.35.0), Docker 29.8.2 with Compose v5.5.1 on WSL 3.0.1.0, git 2.55.0, GitHub CLI 2.102.0. Framework and library versions are added here when T-010 pins them.
+Node.js v24.20.0, npm 11.19.0, pnpm 12.11.2 (Corepack 0.35.0), Docker 29.8.2 with Compose v5.5.1 on WSL 3.0.1.0, git 2.55.0, GitHub CLI 2.102.0. Pinned by T-010 on 2026-10-11 from `create-next-app@16.4.0` defaults: Next.js 16.4.0 (Turbopack, `cacheComponents` and `partialPrefetching` on, as generated), React 19.3.0, TypeScript 5.9.3, Tailwind CSS 4.3.3 via `@tailwindcss/turbopack`, ESLint 9.39.5 with `eslint-config-next` 16.4.0, Prettier 3.9.9, Vitest 5.0.3, Zod 4.6.5. D-002 and D-014 are thereby validated for the scaffold. Prisma, Better Auth, and Playwright versions are pinned when T-013, T-015, and T-060 add them.
 
 ## Pending decisions for the user
 

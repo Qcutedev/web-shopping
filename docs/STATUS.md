@@ -6,7 +6,7 @@ Last updated: 2026-10-10
 
 ## Summary
 
-Planning documents and agent definitions are written. **No application code exists. Nothing has been built, tested, or deployed.**
+Planning documents and agent definitions are written and the empty Next.js scaffold builds. **No marketplace feature exists yet. Nothing has been deployed.**
 
 ## Environment (checked 2026-10-10 on the developer machine)
 
@@ -35,17 +35,23 @@ Terminals and editors opened before the installs do not see the new PATH until r
 
 ## Questions for the owner
 
-Parked questions per D-019. None open.
+Parked questions per D-019. Work that depends on an open question waits; everything else continues.
+
+| Id | Question | Raised by | Blocks |
+| --- | --- | --- | --- |
+| OQ-01 | The approved light-grey outline on input boxes and outline buttons (`#C9CDD1`) is too faint for accessibility guidelines (1.59:1, guideline 3:1). Keep the approved look, or use a darker grey outline (`#7F8790`) on form controls? | ui-ux-design, T-003 | Input and outline-button styling in T-017 |
+| OQ-02 | The accent green is reserved for main buttons and links. Should the "จัดส่งแล้ว" (shipped) status badge also be green-accent, or a neutral or blue colour? | ui-ux-design, T-003 | Badge colours in T-017 |
+| OQ-03 | For the currently selected tab, page number, or menu item: dark ink (like the selected category chip in the mockup) or accent green? | ui-ux-design, T-003 | Tabs, pagination, nav styling in T-017 |
 
 ## Tasks
 
 | Id | Task | Status | Evidence / note |
 | --- | --- | --- | --- |
 | T-001 | Install prerequisites | IN PROGRESS | `node -v`, `pnpm -v`, `docker info` succeed; database connection not yet tested (needs T-012) |
-| T-002 | Initialise git | IN PROGRESS | `git init -b main` and `.gitignore` done; first commit awaits user go-ahead |
-| T-003 | Verify delegation | NOT STARTED | |
-| T-004 | Review planning documents | NOT STARTED | Documents written by the orchestrator, not yet independently reviewed |
-| T-010 | Scaffold | NOT STARTED | Unblocked; waits on T-002 first commit |
+| T-002 | Initialise git | VERIFIED | Commit `65357c3`; `git status` clean afterwards; no env files tracked |
+| T-003 | Verify delegation | VERIFIED | ui-ux-design agent rewrote DESIGN_SYSTEM.md to the approved direction (D-018) and returned the standard report; orchestrator confirmed the diff touches only that file and the acceptance greps hold. Raised OQ-01 to OQ-03 |
+| T-004 | Review planning documents | IN PROGRESS | product-requirements and code-review agents running |
+| T-010 | Scaffold | IMPLEMENTED | 2026-10-11 `pnpm verify` exit 0: format check clean, lint 0 warnings, typecheck clean, 2 of 2 unit tests passed, `next build` succeeded (routes `/`, `/_not-found`). Code review pending. Scripts `test:integration`, `test:e2e`, `db:*`, `admin:bootstrap` are defined but their tooling is not installed yet |
 | T-011 | Env validation, health | NOT STARTED | |
 | T-012 | Compose databases | NOT STARTED | Unblocked |
 | T-013 | Schema v1 | NOT STARTED | Design drafted in DATA_MODEL.md |
@@ -101,7 +107,11 @@ Parked questions per D-019. None open.
 
 ## Test and build results
 
-None. No test, lint, type check, build, or scan has been run because no code and no runtime exist yet.
+| Date | Command | Result |
+| --- | --- | --- |
+| 2026-10-11 | `pnpm verify` (scaffold only) | exit 0; unit tests 2 passed, 0 failed; build succeeded |
+
+No integration, E2E, or security scan has been run yet.
 
 ## Deployment
 

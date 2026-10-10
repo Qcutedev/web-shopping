@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+/* Placeholder tokens from the scaffold. T-017 replaces them with the design system. */
+:root {
+  --background: #ffffff;
+  --foreground: #14171a;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: system-ui, sans-serif;
+}

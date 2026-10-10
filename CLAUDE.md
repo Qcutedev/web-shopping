@@ -6,7 +6,7 @@ Project instructions for Claude Code and every subagent working in this reposito
 
 A Thai-language multi-vendor e-commerce marketplace (Shopee/Lazada style) with three roles: customer, seller, admin. Modular monolith. Correctness and security take priority over feature count.
 
-Current state: **planning only, no application code yet.** See [docs/STATUS.md](docs/STATUS.md) before assuming anything exists.
+Current state: **early build; most features do not exist yet.** See [docs/STATUS.md](docs/STATUS.md) before assuming anything exists.
 
 ## Where the truth lives
 
@@ -35,7 +35,9 @@ Next.js (App Router) + TypeScript strict, React, Tailwind CSS, shadcn/ui, Postgr
 
 ## Commands
 
-No scripts exist yet. The scaffold task (T-010) must create these exact script names, and this section must be updated when it does:
+All script names below exist in `package.json` (T-010). `test:integration`, `test:e2e`, `db:migrate`, `db:seed`, and `admin:bootstrap` fail until their tooling lands (T-012 to T-016, T-060); see [docs/STATUS.md](docs/STATUS.md). `pnpm verify` runs format check, lint, type check, unit tests, and build.
+
+Next.js 16 differs from older versions (Cache Components are on). Read the relevant guide in `node_modules/next/dist/docs/` before writing framework code; see [AGENTS.md](AGENTS.md).
 
 | Purpose | Command |
 | --- | --- |

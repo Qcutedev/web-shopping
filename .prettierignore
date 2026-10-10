@@ -1,0 +1,15 @@
+.next/
+out/
+build/
+coverage/
+node_modules/
+playwright-report/
+test-results/
+pnpm-lock.yaml
+next-env.d.ts
+prisma/migrations/
+# Next.js rewrites this file on `next dev`
+AGENTS.md
+# Markdown is hand-formatted (tables, mermaid)
+*.md
+.claude/
