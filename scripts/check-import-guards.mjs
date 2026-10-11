@@ -54,6 +54,30 @@ const probes = [
   ["src/modules/catalog/probe.ts", 'import { Pool } from "pg";', true],
   ["src/modules/catalog/probe.ts", 'const m = await import("@prisma/client");', true],
   ["src/modules/catalog/probe.ts", 'import { x } from "../../generated/prisma/client";', true],
+  // The driver adapter, the adapter utilities, the pg companion packages, and the generated client
+  // at its pinned location (T-013) are covered as well.
+  ["src/modules/catalog/probe.ts", 'import { PrismaPg } from "@prisma/adapter-pg";', true],
+  ["src/server/auth/probe.ts", 'import { PrismaPg } from "@prisma/adapter-pg";', true],
+  ["src/server/health.ts", 'const m = await import("@prisma/adapter-pg");', true],
+  ["scripts/probe.ts", 'import { PrismaPg } from "@prisma/adapter-pg";', true],
+  ["tests/helpers/probe.ts", 'import { PrismaPg } from "@prisma/adapter-pg";', true],
+  ["src/app/probe.js", 'const { PrismaPg } = require("@prisma/adapter-pg");', true],
+  ["src/modules/catalog/probe.ts", 'import { x } from "@prisma/driver-adapter-utils";', true],
+  ["src/modules/catalog/probe.ts", 'import { x } from "@prisma/client/runtime/client";', true],
+  ["src/modules/catalog/probe.ts", 'import Pool from "pg-pool";', true],
+  ["src/modules/catalog/probe.ts", 'import { parse } from "pg-connection-string";', true],
+  ["src/modules/catalog/probe.ts", 'import { Pool } from "pg/lib/index.js";', true],
+  [
+    "src/modules/catalog/probe.ts",
+    'import { PrismaClient } from "../../../prisma/generated/prisma/client";',
+    true,
+  ],
+  [
+    "tests/helpers/probe.ts",
+    'const m = await import("../../prisma/generated/prisma/client");',
+    true,
+  ],
+  ["scripts/probe.ts", 'import { Role } from "../prisma/generated/prisma/enums";', true],
   // Allowed.
   ["src/modules/catalog/probe.ts", 'import { db } from "@/server/db";', false],
   ["src/modules/catalog/probe.ts", 'import { db } from "../../server/db";', false],
@@ -72,6 +96,16 @@ const probes = [
   ["src/app/a/b/probe.tsx", 'import { cn } from "../../../lib/utils";', false],
   ["src/app/probe.ts", 'import fs from "node:fs";', false],
   ["prisma/seed.ts", 'import { PrismaClient } from "@prisma/client";', false],
+  ["src/server/db/probe.ts", 'import { PrismaPg } from "@prisma/adapter-pg";', false],
+  [
+    "src/server/db/probe.ts",
+    'import { PrismaClient } from "../../../prisma/generated/prisma/client";',
+    false,
+  ],
+  // Not a database client: the Prisma CLI configuration at the repository root, and packages whose
+  // names only start with the same letters.
+  ["prisma7.config.ts", 'import { defineConfig } from "prisma/config";', false],
+  ["src/app/probe.ts", 'import x from "pgx-not-a-driver";', false],
 ];
 
 const GUARD_RULES = new Set(["no-restricted-imports", "no-restricted-syntax"]);

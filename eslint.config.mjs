@@ -7,8 +7,12 @@ import nextTs from "eslint-config-next/typescript";
 // violations; an inline eslint-disable, createRequire, or a re-export through an allowed folder
 // still gets past them and has to be caught in review.
 const ALL_CODE = ["**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"];
-// Revisit when T-013 pins the Prisma generator output path and driver adapter.
-const DB_DRIVER = "^(@prisma/client|pg|postgres)(/|$)|(^|/)generated/prisma(/|$)";
+// Pinned by T-013: the client is generated into prisma/generated/prisma, and the driver is the
+// `pg` pool behind `@prisma/adapter-pg`. The pattern covers every `@prisma/*` package (client,
+// driver adapters, their runtime utilities), `pg` and its `pg-*` companion packages, and the
+// generated client by path. The `prisma` package itself (the CLI and `prisma/config`) is not a
+// database client and is not covered.
+const DB_DRIVER = "^(@prisma/[^/]+|pg(-[a-z0-9-]+)?|postgres)(/|$)|(^|/)generated/prisma(/|$)";
 const DB_LAYER = "(^|/)server/db(/|$)";
 const SIBLING_DB = "^(\\./|(\\.\\./)+)db(/|$)";
 // The patterns above match text, so a path must be written in its normal form: no "/./", no "//",
