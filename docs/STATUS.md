@@ -8,7 +8,7 @@ Last updated: 2026-10-11
 
 Planning documents and agent definitions are written and the empty Next.js scaffold builds. **No marketplace feature exists yet. Nothing has been deployed.**
 
-## Resume here (handoff updated 2026-10-11, third session)
+## Resume here (handoff updated 2026-10-11, fourth session)
 
 A new session should read CLAUDE.md, this file, DECISIONS.md (D-017 to D-029), PROJECT_PLAN.md, AGENT_WORKFLOW.md, and reviews/T-004-findings.md. All work is committed locally on `main` (no remote, nothing pushed) unless the list below says otherwise.
 
@@ -22,17 +22,21 @@ Done in the third session (each committed):
 - SEC-020 fixed and re-checked; SEC-008 re-checked; SEC-021 found, fixed, and re-checked. Open findings: SEC-009 and SEC-010, both Low.
 - API_CONTRACTS.md rewritten for the T-004 findings and D-026; D-026 written into REQUIREMENTS.md (BR-31 to BR-38), DATA_MODEL.md, and SECURITY.md (OQ-47 to OQ-50).
 
-**Interrupted on the usage limit (third session, 2026-10-11, resets 17:50 Asia/Bangkok).** Three agents died mid-task:
+Fourth session (2026-10-11, evening), each item committed unless marked:
 
-- qa on `docs/TEST_STRATEGY.md` and devops on `docs/DEPLOYMENT.md`: each left a small **partial, uncommitted** edit (about 20 lines each). Read `git diff` for both files, then relaunch each agent with its full brief (step 1 below) and tell it to continue from the file as it is. Do not commit the partial edits on their own.
-- code-review cross-document check (read-only): nothing written; relaunch (step 2).
+- Machine checked: Docker up, both databases healthy, `pnpm verify` exit 0 with 1191 passed.
+- Step 3 done (`7532fc6`): BR-17 to BR-38 are in the PROJECT_PLAN.md "Covers" columns; T-016 acceptance states the BR-26 behaviour; D-030 keeps Markdown out of Prettier. Left over: script `db:migrate:deploy` is added with T-013; REQUIREMENTS.md still says the Covers columns lack BR-17 to BR-38 ("gap" sentence above its second traceability table), to be removed by product-requirements in the fix round after the cross-document check.
+- DEPLOYMENT.md finished by devops (`b94de02`): OQ-47 to OQ-50, D-028, D-029; new sections "Scheduled work", "Database backups", "Restore procedure", "Open questions" (DEP-Q1 to DEP-Q11). Not yet reviewed by security against SR-06 and SR-07.
+- **Running when this was written:** qa on `docs/TEST_STRATEGY.md` (partial, uncommitted edit in the tree; if it died, read `git diff` and relaunch with the step 1 brief) and ui-ux-design on DESIGN_SYSTEM.md, the primitives, and `src/i18n/th.ts` (OQ-45, OQ-46, the three D-028 texts; uncommitted until `pnpm verify` passes).
+- Not started: step 2 (code-review cross-document check, then the code reviews).
 
-Everything else is committed. D-028 and D-029 are written into REQUIREMENTS.md (`ac36564`), DATA_MODEL.md (`90b193f`), and API_CONTRACTS.md (`d7dc3e0`).
+Raised by devops, for other owners: the start-up hook file an in-process timer would need (Next.js instrumentation file) has no owner in AGENT_WORKFLOW.md, assign one before T-015; script names for running the purge and the sweep on demand are needed with T-015 and T-032; T-011 fixes the timeout variable (proposed `PAYMENT_TIMEOUT_MINUTES`, integer, default 15); security rules on restored sessions (DEP-Q7) and settles DEP-Q4 with devops in T-071; KNOWN_LIMITATIONS.md "no background job runner" is updated when T-015 lands.
 
-Parked for the owner (ask in plain Thai with a recommendation, with the next batch; neither blocks T-013):
+Parked for the owner (ask in plain Thai with a recommendation, with the next batch; none blocks T-013):
 
 - Q38 (REQUIREMENTS.md): the Thai mark on a cart line whose product is hidden; must not say why. Recommended: "สินค้านี้ไม่พร้อมจำหน่ายในขณะนี้".
 - Confirm the shared reading of "view only" for a suspended store: all three documents also refuse editing the store profile (name, description, logo, contact phone), uploading, and deleting a product. The owner was told in chat and has not objected; no schema effect either way.
+- DEPLOYMENT.md "Open questions" DEP-Q1 to DEP-Q3 and DEP-Q5 to DEP-Q9 (who the system administrators are and who approves one; how often access is checked; who may place and close an investigation hold and how often a hold is reviewed; whether 30 days is also the shortest time a backup is kept; whether a restore signs everyone out; how soon after 15 minutes an unpaid order must fail; a shortest time for logs). Each has a recommendation in the document. None blocks T-013; DEP-Q7 and DEP-Q8 should be answered before T-015 and T-032.
 
 Next steps, in order:
 
