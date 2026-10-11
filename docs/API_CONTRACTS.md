@@ -1,6 +1,6 @@
 # API Contracts
 
-Owner: backend-api agent. This is the **planned** contract, corrected on 2026-10-11 after the T-004 planning review ([reviews/T-004-findings.md](reviews/T-004-findings.md)) and the owner answers in [DECISIONS.md](DECISIONS.md) D-025 and D-026. **No endpoint is implemented yet.** Once an endpoint is built, the Zod schemas in `src/modules/<domain>/schema.ts` are authoritative for it and this document must match them.
+Owner: backend-api agent. This is the **planned** contract, corrected on 2026-10-11 after the T-004 planning review ([reviews/T-004-findings.md](reviews/T-004-findings.md)) the owner answers in [DECISIONS.md](DECISIONS.md) D-025, D-026, and D-028, and the technical rulings in D-029. **No endpoint is implemented yet.** Once an endpoint is built, the Zod schemas in `src/modules/<domain>/schema.ts` are authoritative for it and this document must match them.
 
 What this document must agree with, and which one wins when a name or value is in question:
 
@@ -11,13 +11,13 @@ What this document must agree with, and which one wins when a name or value is i
 | Security rules (SR), threat controls (TM) | [SECURITY.md](SECURITY.md) |
 | Decisions (D) and owner answers (OQ-01 to OQ-19 and OQ-21 to OQ-24 in D-025; OQ-25 to OQ-50 in D-026) | [DECISIONS.md](DECISIONS.md) |
 
-**D-026 is binding and newer than the other documents.** Where REQUIREMENTS.md or DATA_MODEL.md has not yet been updated to an answer in D-026, this contract follows D-026 and cites it; the places where another document still says otherwise are listed in [section 8.4](#84-documents-that-do-not-yet-match-d-026).
+**D-026, D-028, and D-029 are binding and newer than parts of the other documents.** Where another document has not yet been updated to one of them, this contract follows the decision and cites it; the places known to lag are listed in [section 8.4](#84-documents-that-do-not-yet-match-the-decisions).
 
 Markers used below:
 
-- **`OPEN (owner)`**: the point waits for an owner answer that no document and no decision gives. The behaviour is not defined and nothing may be built on a guess (D-019). After D-026 only a few such points remain, none with a question id yet.
+- **`OPEN (owner)`**: the point waits for an owner answer that no document and no decision gives. The behaviour is not defined and nothing may be built on a guess (D-019). After D-028 no such point remains in this contract.
 - **`OPEN (technical)`**: not an owner matter; settled by the named task.
-- **`DISAGREEMENT`**: two documents say different things and no decision settles it. The contract does not pick a side; the list is in [section 8.3](#83-disagreements-between-documents).
+- **`DISAGREEMENT`**: two documents say different things and no decision settles it. The contract does not pick a side. None remains ([section 8.3](#83-disagreements-between-documents)).
 
 All open points are collected in [section 8](#8-open-points).
 
@@ -301,7 +301,7 @@ Names and values are exactly those of DATA_MODEL.md section 3. Anything not list
 | `payment.provider` | `MOCK` | order payment: a mock payment |
 | `fulfilmentStatus` | `PENDING`, `PROCESSING`, `SHIPPED`, `DELIVERED`, `CANCELLED` | seller order |
 
-`DISAGREEMENT`: the payment table in REQUIREMENTS.md still lists `PAID` to `REFUNDED` as a later transition; DATA_MODEL.md removes the value from schema v1. No response in this contract can contain `REFUNDED`, which is true under both documents for the MVP. See [section 8.3](#83-disagreements-between-documents).
+No response in this contract can contain `REFUNDED`: DATA_MODEL.md section 3 has no such value in schema v1.
 
 ### 3.1 Payment status (per order)
 
@@ -309,7 +309,7 @@ Names and values are exactly those of DATA_MODEL.md section 3. Anything not list
 | --- | --- | --- |
 | (new order) | `PENDING` | Checkout |
 | `PENDING` | `PAID` | The mock provider confirms |
-| `PENDING` | `FAILED` | The mock provider declines (a simulated failure), or the order stayed `PENDING` past the configured timeout (D-023 point 6) |
+| `PENDING` | `FAILED` | The mock provider declines (a simulated failure), or the order was still `PENDING` 15 minutes after it was created (D-023 point 6; D-028) |
 
 `PAID` and `FAILED` are final. **No endpoint pays, retries, reopens, or refunds an order**, and no client-callable endpoint sets a payment status (SECURITY.md TM-12).
 
@@ -366,10 +366,10 @@ Two independent fields. Approval is always required and cannot be switched off: 
 | `REJECTED`, `TAKEN_DOWN` | `PENDING` | The seller saves a correction (BR-19; D-026, OQ-36) |
 
 - **Moderated fields** (BR-18): `title`, `description`, `categoryId`, and the **set** of pictures. A change to one of them on an `APPROVED` product returns it to `PENDING`, and it is not visible until approved again. A save in which none of them differs from the stored value changes nothing in moderation.
-- **Not moderated:** `priceSatang`, `stock`, `sku`, and `status`. A change applies at once and leaves `moderationStatus` alone. One request that changes a moderated field and the price does both: the price is stored and the product returns to `PENDING`.
+- **Not moderated:** `priceSatang`, `stock`, `sku`, and `status`. A change applies at once and leaves the `moderationStatus` of an `APPROVED` or `PENDING` product alone (for a `REJECTED` or `TAKEN_DOWN` product see "Resubmission" below). One request that changes a moderated field and the price does both: the price is stored and the product returns to `PENDING`.
 - **No seller request sets `moderationStatus`.** The key is unknown in every seller body.
-- **Picture order** (D-026, OQ-35). Changing only the **order** of a product's pictures, or which one is first, is **not** a picture change: `moderationStatus` stays as it is and the new order shows at once. Only adding, removing, or replacing a picture is a picture change. In terms of the request: an `imageKeys` array that holds the same keys as before in another order needs no approval; one that holds a different set of keys does. DATA_MODEL.md section 4.2 is still written for the opposite reading and is to be changed by the database agent ([section 8.4](#84-documents-that-do-not-yet-match-d-026)); whether a pure reorder raises `contentRevision` is for that change to say (`OPEN (technical)`).
-- **Resubmission** (BR-19; D-026, OQ-36). There is **no separate "submit again" endpoint** and no request that resubmits a product unchanged. Saving a correction to a `REJECTED` or `TAKEN_DOWN` product through `PATCH /seller/products/{id}` returns it to `PENDING` automatically; a save in which nothing differs from the stored values does not. Certain: a save that changes a moderated field resubmits. `DISAGREEMENT`, not settled by D-026: whether a save that changes **only the price**, or a stock change, counts as a correction. The answer's wording ("saving a correction", as REQUIREMENTS Q20 recommended: "any correction") suggests yes; DATA_MODEL.md section 4.2 says a price-only or stock-only edit does not resubmit. Until that is settled a client must read `moderationStatus` from the response of such a save and must not assume either outcome.
+- **Picture order** (D-026, OQ-35). Changing only the **order** of a product's pictures, or which one is first, is **not** a picture change: `moderationStatus` stays as it is and the new order shows at once. Only adding, removing, or replacing a picture is a picture change. In terms of the request: an `imageKeys` array that holds the same keys as before in another order needs no approval; one that holds a different set of keys does. A pure reorder also leaves `contentRevision` and the product's place in the approval queue as they are (DATA_MODEL.md section 4.2).
+- **Resubmission** (BR-19; D-026, OQ-36). There is **no separate "submit again" endpoint** and no request that resubmits a product unchanged. Saving a correction to a `REJECTED` or `TAKEN_DOWN` product through `PATCH /seller/products/{id}` returns it to `PENDING` automatically; a save in which nothing differs from the stored values does not. **What counts as a correction** (D-028): a change to `title`, `description`, `categoryId`, the set of pictures, or **`priceSatang`**. A change only to stock, to `sku`, or to the order of the pictures does **not** resubmit the product. The price is a correction only in this case: on an `APPROVED` product a price change still takes effect at once and needs no approval (BR-18). A price-only resubmission leaves `contentRevision` as it is, because the moderated content is the same.
 - `moderationNote` holds the reason of the last rejection or takedown. The owning seller and admins can read it; it is cleared on approval.
 
 ### 3.4 Visibility and "can be bought"
@@ -577,11 +577,11 @@ Response of both writes: `201` when `POST /cart/items` created a line, `200` oth
 
 - No price is stored in the cart; `unitPriceSatang` is the product's current price and every total is computed by the server (REQ-C-10).
 - `shippingFeeSatang` is the current flat fee from the settings, once per store group; it is a **simulated flat rate** (BR-08). `shippingTotalSatang` is the fee multiplied by the number of store groups that have at least one buyable line.
-- `buyable` is `false`, and the line **blocks checkout** (BR-22), when the product is no longer visible (`unbuyableReason: "NOT_AVAILABLE"`) or is sold out (`"SOLD_OUT"`). For a `NOT_AVAILABLE` line `unitPriceSatang`, `lineTotalSatang`, and `stock` are `null`; the title stays so the customer can recognise the line and remove it.
-- **A line whose product sold out stays in the cart** (D-026, OQ-29): it is returned with `buyable: false`, `unbuyableReason: "SOLD_OUT"`, and `stock: 0`, is **not counted in any total**, cannot be bought, and stays until the customer removes it. Nothing removes it automatically. Lines with `NOT_AVAILABLE` are left out of the totals in the same way; no requirement states that case, so it is a display rule set here by backend-api.
+- `buyable` is `false`, and the line **blocks checkout** (BR-22), in two cases, told apart by `unbuyableReason`: `"SOLD_OUT"` (the product is visible and its stock is 0) and `"NOT_AVAILABLE"` (the product is hidden: unpublished, archived, awaiting approval, rejected, taken down, its store suspended, its owner deactivated, or its category switched off; the response does not say which). `unbuyableReason` is `null` on a buyable line. For a `NOT_AVAILABLE` line `unitPriceSatang`, `lineTotalSatang`, and `stock` are `null`; the title stays so the customer can recognise the line and remove it.
+- **A line that cannot be bought stays in the cart** (D-026, OQ-29, for a sold-out product; D-028, for a hidden one, which is treated the same way). It is returned with `buyable: false` and its `unbuyableReason`, is **not counted in any total**, cannot be bought, and stays until the customer removes it. Nothing removes it automatically, and it becomes buyable again by itself if the product comes back.
 - `canCheckout` is `true` only when the cart has at least one line and every line is buyable.
-- **Quantity above stock** (BR-30; D-026, OQ-30). When a line's stored quantity is above the product's stock and the stock is at least 1, the cart response carries the lowered quantity (equal to the stock), the totals use it, and `quantityLowered` is `true` so the customer is told on the cart page. A client is never shown a quantity above stock without `quantityLowered`. The same is reported at checkout: an order is **never** placed with a quantity the customer has not seen ([section 5.5.3](#553-checkout-refused-because-a-line-cannot-be-bought)).
-- `DISAGREEMENT`, not settled by D-026: TEST_STRATEGY.md expects the cart read itself to store the lowered quantity, while SECURITY.md TM-16 says a `GET` never changes state ([section 8.3](#83-disagreements-between-documents)). A client must therefore not assume that reading the cart changed what is stored: to accept a lowered quantity it sends `PATCH /cart/items/{itemId}` with that quantity, which is correct under either reading.
+- **Quantity above stock** (BR-30; D-026, OQ-30). When a line's stored quantity is above the product's stock and the stock is at least 1, the cart response carries the lowered quantity (equal to the stock), the totals use it, and `quantityLowered` is `true` so the customer is told on the cart page. A client is never shown a quantity above stock without `quantityLowered`.
+- **`GET /cart` never stores anything** (D-029 point 1; SECURITY.md TM-16). The lowered quantity in a cart response is derived at read time from the stored quantity and the stock; the stored quantity is unchanged by the read, so `quantityLowered` stays `true` on every read until a mutation stores the lower value. The mutations that store it are `PATCH /cart/items/{itemId}`, `POST /cart/items` on that line, and `POST /checkout` ([section 5.5.3](#553-checkout-refused-because-a-line-cannot-be-bought)).
 - A product that nobody ever ordered and that its seller deletes disappears from carts without a message; accepted for the MVP (D-026, OQ-43).
 
 ### 5.5 Checkout and orders
@@ -608,7 +608,7 @@ There is **no** endpoint to pay, retry, cancel, or refund an order as a customer
 
 What checkout does, in one transaction (D-023): it locks the caller's cart, returns the existing order if the key was used before, refuses an empty cart, takes stock for every line with a statement that also requires the line to be buyable and returns the price charged, computes the totals from those prices and the current settings, refuses a total above the cap, writes the order with one seller order per store and the copies listed in [section 5.5.2](#552-response), and empties the cart. The payment is then completed in a second guarded transaction.
 
-Refusals. In every one of them no order exists, no stock changed, nothing was charged, and the cart is as it was:
+Refusals. In every one of them no order exists, no stock changed, and nothing was charged. The cart is as it was, with one exception: a checkout refused because a quantity is above the stock stores the lowered quantity ([section 5.5.3](#553-checkout-refused-because-a-line-cannot-be-bought)).
 
 | Case | Response |
 | --- | --- |
@@ -675,7 +675,7 @@ The same shape is the item of `GET /orders` and the body of `GET /orders/{id}`.
 - The commission rate is recorded on each seller order but is **not** in the customer's response; the seller's and the admin's views carry `commissionRateBps` ([section 5.7.3](#573-seller-orders)). Nothing is deducted from any amount (BR-13).
 - `shipment` is `null` until the seller order is `SHIPPED`; then `{ "carrierName": "...", "trackingNumber": "...", "isSimulated": true, "shippedAt": "...", "deliveredAt": null }`, with `carrierName` and `trackingNumber` `null` when the seller entered none.
 - `review` is the caller's review of that item, `{ "id", "rating", "comment", "createdAt" }`, or `null`.
-- `paymentStatus` in a checkout response is normally `PAID` or `FAILED`. It is `PENDING` only when the provider did not answer; a repeat with the same key then returns the same order and does not charge again, and the timeout path of D-023 later fails it.
+- `paymentStatus` in a checkout response is normally `PAID` or `FAILED`. It is `PENDING` only when the provider did not answer; a repeat with the same key then returns the same order and does not charge again. An order still `PENDING` 15 minutes after it was created is failed (D-028; D-023 point 6).
 
 #### 5.5.3 Checkout refused because a line cannot be bought
 
@@ -706,12 +706,21 @@ No partial purchase (BR-22; D-025, OQ-09; finding S4). If **any** line of the ca
 
 The `code` is `INSUFFICIENT_STOCK` when every listed line has the reason `INSUFFICIENT_STOCK`, and `PRODUCT_UNAVAILABLE` otherwise. Both are `409` and both carry the same `details.items`. This settles the shape of `details.items` that the earlier version left open.
 
-**Checkout stops so the customer confirms again** (D-026, OQ-30). When a line's quantity is found to be above the stock at the moment the order is placed, the order is **not** placed with a lowered quantity. The checkout is refused as above, and the refusal carries what the customer must see before confirming:
+**Checkout stops so the customer confirms again** (D-026, OQ-30; D-029 point 2). When a line's quantity is found to be above the stock at the moment the order is placed, the order is **not** placed with a lowered quantity. The checkout is refused as above, creates no order, takes no stock, and charges nothing. It does one thing: **for every `INSUFFICIENT_STOCK` line whose `availableStock` is at least 1, the refused request itself stores that lower quantity on the cart line.** This is the only state a refused checkout changes; lines that cannot be bought at all (sold out, `NOT_AVAILABLE`, `OWN_STORE`) are left as they are. How the transaction does this (a savepoint, or validating before taking stock) is `OPEN (technical)` for T-013 and T-032.
 
-- for each such line, `availableStock` is the **new quantity** the line can have (0 means sold out: the line must be removed);
-- `details.totals` is the **new total**: the cart's totals as `GET /cart` computes them with every `INSUFFICIENT_STOCK` line lowered to its `availableStock` and every line that cannot be bought at all left out. It is information for the confirmation screen, not a price the client sends back.
+The refusal carries what the customer must see before confirming:
 
-To confirm, the client stores the new quantities (`PATCH /cart/items/{itemId}` for a lowered line, `DELETE` for a line that cannot be bought) and sends `POST /checkout` again. The refused attempt created no order, so the same `Idempotency-Key` may be used again. The server computes the charge afresh; if stock moved again in between, the checkout is refused again.
+- for each such line, `requestedQuantity` is what the line held and `availableStock` is the **new quantity** now stored on it (0 means sold out: nothing was stored and the line must be removed);
+- `details.totals` is the **new total**: exactly what `GET /cart` returns after this request, with the lowered quantities and with every line that cannot be bought left out. It is information for the confirmation screen, not a price the client sends back.
+
+**To confirm, the customer submits checkout again**: the client shows the new quantities and total and, on the customer's action, sends `POST /checkout` once more. No `PATCH` is needed for a lowered line, because the refused request already stored it. Lines that cannot be bought at all still block checkout (BR-22) and must be removed with `DELETE /cart/items/{itemId}` first. The server computes the charge afresh; if stock moved again in between, the checkout is refused again in the same way.
+
+**The `Idempotency-Key` across the refused and the confirming request.** A refused checkout creates no order, so its key is not recorded anywhere: a key is only ever tied to an order.
+
+- The confirming request is a new customer decision and **should carry a new key**. The server also accepts the old one, because it cannot tell them apart.
+- A repeat of the refused request with the same key is therefore **not** answered with the same refusal: it is a fresh checkout of the cart as it now is, and it can succeed with the quantities the first attempt lowered.
+- For that reason a client **must not resend a checkout automatically** after a `409`, and must treat a checkout whose response was lost as unknown: it reads `GET /cart` first. An empty cart means the order was placed, and resending with the same key returns it. A cart with `quantityLowered` lines or changed totals means the attempt was refused, and the customer must be shown the cart before anything is sent again.
+- `OPEN (technical)` for T-032, with security: nothing on the server distinguishes a blind resend of a refused checkout from the customer's confirmation, so the rule above is kept by the client only ([section 8.2](#82-open-technical)).
 
 #### 5.5.4 Failed payment
 
@@ -744,7 +753,9 @@ When the mock provider declines (`mockOutcome: "FAIL"`, **a simulated failure**)
 **`cartReturn`** tells the customer how the items came back (D-026, OQ-26). One entry per returned item: `orderedQuantity` is what the failed order held, `cartQuantity` is the quantity of that product's cart line afterwards, and `capped` is `true` when the line ended lower than the line's earlier quantity plus `orderedQuantity`. The top-level `capped` is `true` when any entry is.
 
 - When the cart already has a line for the same product, the quantities are **added together, capped at 99 and at the available stock** (the stock after the order's stock was restored).
-- `cartReturn` is present only in the response of the checkout request during which the payment failed. It is `null` in every other response that carries this order: a repeat with the same key, `GET /orders`, `GET /orders/{id}`, and the admin's views. `OPEN (technical)`: nothing in DATA_MODEL.md records that a cap applied, so the fact cannot be reported later, and after a timeout failure there is no checkout response to carry it ([section 8.2](#82-open-technical)).
+- An item of a store's part that was **already cancelled before the payment failed does not return to the cart** and has no entry (D-028; it narrows BR-20's "every item"). Only the parts not already cancelled return.
+- `cartReturn` is read from what the failure stored on each order item (DATA_MODEL.md section 6.12: `cartQuantityBeforeReturn`, `cartQuantityAfterReturn`), so it is **the same in every response that carries this failed order**: the checkout request during which the payment failed, a repeat with the same key, `GET /orders`, `GET /orders/{id}`, and the admin's views, and also after a timeout failure. `cartQuantity` is the line's quantity just after the return, not the cart's current quantity. `cartReturn` is `null` on an order whose payment did not fail.
+- The cart read does not carry this notice. No later notice is required (D-028): after a timeout failure it is enough that the cart shows the quantity it really holds; a client that wants to explain it reads `cartReturn` from the failed order.
 
 What has happened by the time the response is sent, in one transaction:
 
@@ -760,9 +771,16 @@ Who sees a failed order:
 - **Sellers never do** (BR-20): its seller orders are in no seller list, a seller's request for one by id is `404 NOT_FOUND`, and they count in no seller figure.
 - **The customer and the admin do** (D-026, OQ-25). The failed order stays in `GET /orders` and `GET /orders/{id}` for the customer and in the admin's order endpoints, marked as payment failed: `paymentStatus: "FAILED"`, and each of its seller orders `CANCELLED` with `cancellationKind: "PAYMENT_FAILED"`. No further action is possible on it for anyone.
 
-**Timeout** (D-026, OQ-27). An order that fails because the payment provider never answered returns its items to the cart in exactly the same way, with the same merge and caps. That failure does not happen inside a checkout request: the customer sees it on the next read of the order (`paymentStatus: "FAILED"`, `failureReason: "TIMEOUT"`) and of the cart.
+**Timeout** (D-026, OQ-27; D-028). An order that fails because the payment provider never answered, which happens once it has been `PENDING` for 15 minutes, returns its items to the cart in exactly the same way, with the same merge and caps. That failure does not happen inside a checkout request: the customer sees it on the next read of the order (`paymentStatus: "FAILED"`, `failureReason: "TIMEOUT"`) and of the cart.
 
-- `DISAGREEMENT`, not settled by D-026 and so `OPEN (owner)`: BR-20 returns "every item of the order" to the cart; DATA_MODEL.md section 7.2 step 5 does not return the items of a seller order that was already cancelled before the payment failed. See [section 8.3](#83-disagreements-between-documents).
+**Texts.** The Thai wording is fixed by D-028 and D-026 OQ-46 and lives only in `src/i18n/th.ts`. The API carries the facts that select a text, never the text:
+
+| Text (see D-028, D-026) | Selected by |
+| --- | --- |
+| Mark on an order whose payment failed | `paymentStatus: "FAILED"` |
+| Adding a sold-out product was refused | `409 INSUFFICIENT_STOCK` from a cart write ([section 5.4](#54-cart)) |
+| A returned quantity was cut | `cartReturn.items[].capped`; `{quantity}` is that entry's `cartQuantity` |
+| A quantity was lowered to the stock | `quantityLowered` on a cart line or cart write; `{available}` is `stock` |
 
 ### 5.6 Reviews
 
@@ -786,8 +804,8 @@ The product and the reviewer are taken from the order item and the session, neve
 | POST | `/seller/application` | customer-role | Body `{ storeName, description, contactPhone }`. Rate-limited. A `SELLER` already owns a store and an `ADMIN` cannot become a seller: both get `403 FORBIDDEN` (BR-06). A second application while one is `PENDING`: `409 CONFLICT`, reason `OPEN_APPLICATION`. A rejected applicant may apply again (a new application). |
 | GET | `/seller/application` | user | The caller's latest application: `{ id, storeName, description, contactPhone, status, reviewNote, reviewedAt, createdAt }`. `reviewNote` is the rejection reason. Never applied: `404 NOT_FOUND`. |
 | GET | `/seller/store` | seller (any store status) | Own store: `{ id, name, slug, description, logo, contactPhone, status, statusReason, isSample }`. `statusReason` is the reason of the last suspension or reinstatement. |
-| PATCH | `/seller/store` | seller | Body: `name`, `description`, `logoKey` (a storage key of the caller's store, or `null` to remove the logo; [section 5.8](#58-uploads-and-files)). The slug does not change on a rename. Existing orders keep the old name ([section 5.5.2](#552-response)). `contactPhone` is not editable here: REQ-S-02 lists name, description, and logo only, and whether a seller may change the store's contact phone is `OPEN (owner)`, no question id yet. |
-| GET | `/seller/summary` | seller | [Section 5.7.4](#574-dashboard-summary). |
+| PATCH | `/seller/store` | seller | Body: any of `name`, `description`, `contactPhone`, `logoKey` (a storage key of the caller's store, or `null` to remove the logo; [section 5.8](#58-uploads-and-files)). A seller may change the contact phone, and no change here needs approval (D-028). The slug does not change on a rename. Existing orders keep the old name ([section 5.5.2](#552-response)). |
+| GET | `/seller/summary` | seller (any store status) | [Section 5.7.4](#574-dashboard-summary). |
 
 "`seller (any status)`" in the earlier version described users whose role was still `CUSTOMER` (finding B3). The two application endpoints are what such a user has; everything else under `/seller` needs role `SELLER`.
 
@@ -797,9 +815,9 @@ Every query is scoped by the store that belongs to the session. Another store's 
 
 | Method | Path | Access | Notes |
 | --- | --- | --- | --- |
-| GET | `/seller/products` | seller | Paginated. Own products. Filters: `status`, `moderationStatus`, `lowStock=true`, `soldOut=true`. |
+| GET | `/seller/products` | seller (any store status) | Paginated. Own products. Filters: `status`, `moderationStatus`, `lowStock=true`, `soldOut=true`. |
 | POST | `/seller/products` | seller | Creates with `status: "DRAFT"` and `moderationStatus: "PENDING"`. |
-| GET | `/seller/products/{id}` | seller | Else 404. |
+| GET | `/seller/products/{id}` | seller (any store status) | Else 404. |
 | PATCH | `/seller/products/{id}` | seller | Else 404. Not allowed on an `ARCHIVED` product: `409 INVALID_STATE_TRANSITION`. |
 | POST | `/seller/products/{id}/publish` | seller | No body. `DRAFT` to `PUBLISHED`. Else 404. |
 | POST | `/seller/products/{id}/unpublish` | seller | No body. `PUBLISHED` to `DRAFT`. Else 404. |
@@ -831,10 +849,10 @@ Product as its seller sees it:
 - Editing, moderation, and resubmission follow [section 3.3](#33-product-status-and-moderation). The response of every write carries the resulting `moderationStatus`.
 - A SKU must be unique among the store's products that are not archived: `409 CONFLICT`, reason `DUPLICATE_SKU`. An archived product's SKU may be used again.
 - `imageKeys` replaces the whole ordered set of pictures. More than 8: `400 VALIDATION_ERROR` (REQ-S-05). A key that is not an upload of the caller's store: `404 NOT_FOUND` with `details.resource` `"upload"`, the same whether the key is unknown or another store's. A key attached to another product: `409 CONFLICT`, reason `UPLOAD_IN_USE`. Removing a picture from a product never deletes the file.
-- **Low stock and sold out** (BR-25; D-026, OQ-33). `lowStock` is `true` when the product is on sale and its stock is **1 to 5**. `soldOut` is `true` when the product is on sale and its stock is **0**; it is a separate figure, never part of low stock. Both are `false` for a product that is not on sale: a draft, a rejected, a taken-down, or an archived product. "On sale" is read here as `status` `PUBLISHED` and `moderationStatus` `APPROVED`; D-026 does not name a published product that is still waiting for approval, and this reading counts it as not on sale because it cannot be bought. The filters `lowStock=true` and `soldOut=true` and the two counts of the summary use exactly these definitions. The number 5 is one constant in the seller product module, not a setting. (The public `soldOut` of [section 5.2](#52-catalog) is only ever seen on visible products and is simply `stock == 0`.)
+- **Low stock and sold out** (BR-25; D-026, OQ-33; D-028). `lowStock` is `true` when the product is on sale and its stock is **1 to 5**. `soldOut` is `true` when the product is on sale and its stock is **0**; it is a separate figure, never part of low stock. **On sale** means `status` is `PUBLISHED` **and** `moderationStatus` is `APPROVED`, read from the product's own two fields only. So both are `false` for a draft, an archived, a rejected, or a taken-down product, and for a published product still awaiting approval (D-028). A published, approved product **is still counted while it is hidden** because its store is suspended or its category is switched off (D-028). The filters `lowStock=true` and `soldOut=true` and the two counts of the summary use exactly these definitions. The number 5 is one constant in the seller product module, not a setting. (The public `soldOut` of [section 5.2](#52-catalog) is only ever seen on visible products and is simply `stock == 0`.)
 - **Stock** (REQ-S-06; D-026, OQ-40). The largest stock a seller may enter is **1,000,000**. `set` is the new absolute value: an integer from 0 to 1,000,000, otherwise `400 VALIDATION_ERROR`. `adjust` is a delta: a non-zero integer from -1,000,000 to 1,000,000, otherwise `400 VALIDATION_ERROR`. A result below zero is `409 CONFLICT`, reason `NEGATIVE_STOCK`; an increase whose result would be above 1,000,000 is `409 CONFLICT`, reason `STOCK_LIMIT`; both change nothing. A stock change applies at once and never touches moderation. Stock given back by a cancellation or a failed payment is not a seller entry and is never refused.
 - **Switched-off category** (D-026, OQ-39). Creating a product with a `categoryId` whose category is inactive, or changing a product's `categoryId` to one, is refused with `409 CONFLICT`, reason `CATEGORY_INACTIVE`, and changes nothing. A product that is already in a category that was switched off later can still be edited as long as its `categoryId` is not changed to another inactive one. An unknown `categoryId` is `404 NOT_FOUND` with `details.resource` `"category"`.
-- **Suspended store** (REQ-S-09). A seller whose store is `SUSPENDED` cannot create or publish: `403 SELLER_NOT_APPROVED`. The table gives every product endpoint the access `seller`, as the earlier version did. Whether a suspended seller may still **read** their products and summary, or unpublish, archive, or adjust stock, is not stated by any document: `OPEN (owner)`, no question id yet ([section 8.1](#81-open-owner)).
+- **Suspended store: view only, apart from orders** (REQ-S-09; BR-14; D-028). A seller whose store is `SUSPENDED` may use exactly these endpoints: `GET /seller/store`, `GET /seller/summary`, `GET /seller/products`, `GET /seller/products/{id}`, the three order endpoints of [section 5.7.3](#573-seller-orders) (`GET /seller/orders`, `GET /seller/orders/{id}`, `POST /seller/orders/{id}/status`), and `GET /seller/application`. Every other seller endpoint is refused with `403 SELLER_NOT_APPROVED` until the store is reinstated: creating, editing, publishing, unpublishing, archiving, and deleting a product, adjusting stock, editing the store (`PATCH /seller/store`), and uploading (`POST /seller/uploads`). Deleting a product, editing the store, and uploading are not named one by one in D-028; they are refused because they are not views.
 
 #### 5.7.3 Seller orders
 
@@ -956,7 +974,7 @@ Every path below requires `ADMIN`. A guest gets `401`, a customer or seller `403
 | POST | `/admin/stores/{id}/suspend` | Body `{ reason }`, required. `APPROVED` to `SUSPENDED`; otherwise `409 INVALID_STATE_TRANSITION`. |
 | POST | `/admin/stores/{id}/reinstate` | Body `{ reason }`, required. `SUSPENDED` to `APPROVED`; otherwise `409 INVALID_STATE_TRANSITION`. |
 
-- Approval always **creates** the store. `DISAGREEMENT` in wording only: REQ-A-03 says "creates or activates"; DATA_MODEL.md section 4.1 shows there is no second case, because a user who owns a store cannot apply (REQ-S-01). See [section 8.3](#83-disagreements-between-documents).
+- Approval always **creates** the store (DATA_MODEL.md section 4.1): a user who owns a store cannot apply (REQ-S-01), so there is no "activate" case.
 - Suspending hides the store's products and blocks new orders for it; it does **not** end the seller's sessions, and the seller keeps the three order endpoints of [section 5.7.3](#573-seller-orders) (BR-14; finding B4).
 - Store item for admins: `{ id, name, slug, description, logo, contactPhone, status, statusReason, isSample, ownerId, ownerIsActive, createdAt }`.
 
@@ -966,8 +984,8 @@ Every path below requires `ADMIN`. A guest gets `401`, a customer or seller `403
 | --- | --- | --- |
 | GET | `/admin/products` | Paginated. Filters: `queue=true`, `moderationStatus`, `status`, `storeId`, `q` (substring of the title). `queue=true` is the approval queue (below) and cannot be combined with `moderationStatus` or `status` (`400 VALIDATION_ERROR`). |
 | GET | `/admin/products/{id}` | Any product, whatever its state. |
-| POST | `/admin/products/{id}/approve` | Body `{ contentRevision }`. `PENDING` to `APPROVED`. Clears `moderationNote`. |
-| POST | `/admin/products/{id}/reject` | Body `{ contentRevision, reason }`, reason required. `PENDING` to `REJECTED`. |
+| POST | `/admin/products/{id}/approve` | Body `{ contentRevision }`. `PENDING` to `APPROVED`, only for a product whose `status` is `PUBLISHED`. Clears `moderationNote`. |
+| POST | `/admin/products/{id}/reject` | Body `{ contentRevision, reason }`, reason required. `PENDING` to `REJECTED`, only for a product whose `status` is `PUBLISHED`. |
 | POST | `/admin/products/{id}/takedown` | Body `{ contentRevision, reason }`, reason required. `APPROVED` to `TAKEN_DOWN`. |
 
 The admin's product view is the seller's view of [section 5.7.2](#572-products) plus `contentRevision`, `moderationRequestedAt`, and `store: { id, name, slug, status }`.
@@ -979,7 +997,9 @@ The admin's product view is the seller's view of [section 5.7.2](#572-products) 
 - If the product's revision is no longer that value, the seller changed the content in between: `409 CONFLICT`, reason `STALE_REVISION`, and nothing changes. The admin reloads and decides again.
 - If the product is not in the state the decision needs (for example approving a product that is not `PENDING`): `409 INVALID_STATE_TRANSITION`.
 
-**The approval queue** (`GET /admin/products?queue=true`; REQ-A-05; D-026, OQ-42) lists the products whose `moderationStatus` is `PENDING` **and** whose `status` is `PUBLISHED`, ordered by the time the product last entered `PENDING`, oldest first. It holds new products once their seller has published them, approved products sent back by an edit (BR-18), and resubmitted products (BR-19). **A product the seller has saved but not yet published is not in the queue**; it appears there when it is published. The queue is a filter only: the plain list with `moderationStatus=PENDING` still shows unpublished ones, and the decision endpoints accept any product in the right moderation state. A rejected or taken-down product is not visible; its seller can correct it ([section 3.3](#33-product-status-and-moderation)).
+**The approval queue** (`GET /admin/products?queue=true`; REQ-A-05; D-026, OQ-42; D-028) lists the products whose `moderationStatus` is `PENDING` **and** whose `status` is `PUBLISHED`, **oldest first by the time the product was submitted for approval** (`moderationRequestedAt`). Publishing a product that is awaiting approval sets that time, so a long-standing draft does not jump the queue when it is published; an edit of a product that is already in the queue does not move it. The queue holds new products once their seller has published them, approved products sent back by an edit (BR-18), and resubmitted products (BR-19). A product the seller has saved but not yet published is not in the queue, and one that is unpublished or archived leaves it without a decision. A rejected or taken-down product is not visible; its seller can correct it ([section 3.3](#33-product-status-and-moderation)).
+
+**No decision on an unpublished product** (D-028). Approve and reject apply only to products that are in the queue: published and awaiting approval. Approving or rejecting a product whose `status` is not `PUBLISHED`, also when an admin opens it directly by id, is `409 INVALID_STATE_TRANSITION` and changes nothing. Takedown is unchanged: it applies to an `APPROVED` product. The plain list (`moderationStatus=PENDING` without `queue=true`) and `GET /admin/products/{id}` still show unpublished products; they can be read, not decided.
 
 #### 5.9.4 Categories
 
@@ -1025,7 +1045,7 @@ Category item for admins: `{ id, name, slug, sortOrder, isActive, isSample, crea
 - These are the **only two settings** (REQ-A-09). There is no moderation switch: a body that carries `requireProductApproval`, or any other key, is `400 VALIDATION_ERROR` with `unrecognized_keys` and changes nothing (BR-17).
 - A value outside its bounds, a fraction, or a non-number is `400 VALIDATION_ERROR`; the stored value does not change and no audit row is written (BR-28; D-025, OQ-16). The boundary values 0, 100,000, 0, and 10,000 are accepted.
 - A change applies to orders created afterwards. Existing seller orders keep the fee and the rate copied at purchase.
-- **The commission rate is a whole number of percent; no decimals** (D-026, OQ-38). Representation chosen here: the field keeps the name and unit DATA_MODEL.md section 6.16 stores, `commissionRateBps`, in the settings and on every seller order, and the settings endpoint accepts **only multiples of 100**. `250` (2.5 percent) is `400 VALIDATION_ERROR` and changes nothing; `0`, `500`, and `10000` are accepted. The presentation layer shows and collects `commissionRateBps / 100` as a whole percent. If the database agent changes the stored unit when writing D-026 into DATA_MODEL.md, this field follows it by a contract change.
+- **The commission rate is a whole number of percent; no decimals** (D-026, OQ-38). The field is `commissionRateBps`, the name and unit DATA_MODEL.md section 6.16 stores, in the settings and on every seller order, and the settings endpoint accepts **only multiples of 100**. `250` (2.5 percent) is `400 VALIDATION_ERROR` and changes nothing; `0`, `500`, and `10000` are accepted. The presentation layer shows and collects `commissionRateBps / 100` as a whole percent.
 
 #### 5.9.7 Summary, reports, and audit log
 
@@ -1049,11 +1069,12 @@ Category item for admins: `{ id, name, slug, sortOrder, isActive, isSample, crea
 }
 ```
 
-- **The range has a timezone because it is two instants** (finding M9): `from` and `to` are ISO 8601 instants with an explicit `Z` or offset, `from` inclusive, `to` exclusive. A calendar day in Asia/Bangkok is converted to instants by the presentation layer. A row belongs to the range by its creation time: the order's for `orderCount` and `paidRevenueSatang`, the user's for `newUserCount`, the store's (the moment of approval) for `newSellerCount`.
+- **The range has a timezone because it is two instants** (finding M9): `from` and `to` are ISO 8601 instants with an explicit `Z` or offset, `from` inclusive, `to` exclusive. A calendar day in Asia/Bangkok is converted to instants by the presentation layer.
+- **Which date places a row in the range.** `orderCount` and `paidRevenueSatang` use **the time the order was paid** (D-028), not the time it was created. `newUserCount` uses the user's creation time and `newSellerCount` the store's (the moment of approval).
 - `paidRevenueSatang` is an **aggregate** and can exceed 32 bits ([section 1.5](#15-money)). It is the **price of the goods only, without the shipping fee** (D-026, OQ-34): the sum of `itemsSubtotalSatang` over seller orders whose order is `PAID` and whose `fulfilmentStatus` is not `CANCELLED`. `PENDING` and `FAILED` orders contribute nothing (BR-21).
 - `orderCount` counts **orders that are paid and not cancelled** (D-026, OQ-34): an order counts once when its `paymentStatus` is `PAID` and at least one of its seller orders is not `CANCELLED`. An order with only some stores' parts cancelled still counts as one order; an order whose every part is cancelled, and a `PENDING` or `FAILED` order, does not count.
 
-`GET /admin/summary` (finding M11). REQ-A-01 requires real figures but **no requirement lists which ones**. `OPEN (owner)`, no question id yet ([section 8.1](#81-open-owner)). Proposed by backend-api from the queues and figures other requirements name, **not in effect**:
+`GET /admin/summary` (finding M11; REQ-A-01; D-028). In effect. All four groups, from real rows:
 
 ```json
 {
@@ -1068,7 +1089,12 @@ Category item for admins: `{ id, name, slug, sortOrder, isActive, isSample, crea
 }
 ```
 
-`orderCount` and `paidRevenueSatang` would follow the same rules as in the report (D-026, OQ-34), over all time; `paidRevenueSatang` would be an aggregate. Which figures the dashboard shows is the open part, not how a figure is computed.
+| Group (D-028) | Fields |
+| --- | --- |
+| Items waiting for review | `pendingApplicationCount`: seller applications with status `PENDING`. `pendingProductCount`: the size of the approval queue of [section 5.9.3](#593-product-moderation-and-contentrevision) (awaiting approval and published) |
+| Users and stores | `userCount`: all users. `storesByStatus`: stores per status |
+| Orders | `orderCount`: over all time, by the rule of the report (paid and not cancelled; D-026, OQ-34) |
+| Sales | `paidRevenueSatang`: over all time, goods only, by the rule of the report. An **aggregate** ([section 1.5](#15-money)) |
 
 Audit entry: `{ id, actorId, action, targetType, targetId, metadata, createdAt }`. `metadata` holds the reason and a before and after summary. No request edits or deletes an entry, and an entry never contains a session token, a password hash, an IP address, or browser details.
 
@@ -1117,84 +1143,62 @@ For consumers who read the earlier draft. Nothing was built against it.
 
 ## 8. Open points
 
-OQ-25 to OQ-50 were answered by the owner in D-026 and are written into this contract as rules; none of them is open any more. OQ-20 (visual details on real pages) is still open and no point of this contract depends on it. OQ-45 and OQ-46 (hover border, wording of the lowered-quantity message) belong to ui-ux-design and frontend; OQ-47 to OQ-50 (log and backup retention, session expiry) touch no endpoint: nothing here exposes logs, backups, or another user's session data.
+The owner's answers in D-025, D-026, and D-028 and the rulings in D-029 are written into this contract as rules. OQ-20 (visual details on real pages) is still open with the owner and no point of this contract depends on it. OQ-45 and OQ-46 belong to ui-ux-design and frontend; OQ-47 to OQ-50 (log and backup retention, session expiry) touch no endpoint: nothing here exposes logs, backups, or another user's session data.
 
 ### 8.1 `OPEN (owner)`
 
-Points that no document and no decision settles. None has a question id yet. Nothing may be built on a guess for any of them.
+**None.** The six points this section listed earlier were answered in D-028 and are now rules:
 
-| # | Point | Contract state until answered | Section |
-| --- | --- | --- | --- |
-| 1 | Which seller endpoints, other than the order endpoints, a seller with a suspended store may still use: reading products and the summary, unpublishing, archiving, adjusting stock | Written as the earlier contract had it: an approved store is required | 5.7.2 |
-| 2 | Which figures the admin dashboard summary (`GET /admin/summary`) shows | Proposed shape, not in effect | 5.9.7 |
-| 3 | Whether a seller may change the store's contact phone | Not editable: REQ-S-02 lists name, description, and logo only | 5.7.1 |
-| 4 | Whether a save that changes only the price, or a stock change, of a rejected or taken-down product counts as a "correction" that resubmits it (disagreement 5 below) | Not defined; clients read `moderationStatus` from the response | 3.3 |
-| 5 | Whether the items of a seller order that was cancelled before the payment failed also return to the cart (disagreement 4 below) | Not defined | 5.5.4 |
-| 6 | Whether a published product that is still waiting for approval counts as "on sale" for the low-stock and sold-out figures; D-026 OQ-33 names drafts, rejected, taken-down, and archived products only | Written as not on sale, because it cannot be bought | 5.7.2, 5.7.4 |
+| Point | Decided (D-028) | Section |
+| --- | --- | --- |
+| What a seller with a suspended store may do besides handling orders | View only: own store, products, and summary. Every write is refused until the store is reinstated | 5.7.1, 5.7.2 |
+| Which figures the admin dashboard summary shows | All four groups; the shape is in effect | 5.9.7 |
+| May a seller change the store's contact phone | Yes, without approval | 5.7.1 |
+| What counts as a "correction" that resubmits a rejected or taken-down product | A change to title, description, category, the set of pictures, or the price. Not stock, SKU, or picture order | 3.3 |
+| Items of a store's part cancelled before the payment failed | They do not return to the cart | 5.5.4 |
+| Is a published product awaiting approval "on sale"; is a product hidden by a suspended store or a switched-off category counted | Not on sale; still counted | 5.7.2, 5.7.4 |
 
 ### 8.2 `OPEN (technical)`
 
 | Point | Settled by | Section |
 | --- | --- | --- |
 | Accepted UUID versions and the normalised form of `Idempotency-Key` | T-032 | 1.3 |
+| A blind resend of a refused checkout cannot be told from the customer's confirmation, because a refused checkout records no key; today only the client rule prevents an order with a quantity the customer has not seen | T-032, with security | 5.5.3 |
+| How the refused checkout stores the lowered quantities while rolling back everything else (savepoint, or validate before taking stock) | T-013, T-032 (D-029 point 2) | 5.5.3 |
+| The report range uses the time an order was paid (D-028); DATA_MODEL.md has no column for that time yet | database, before T-050 | 5.9.7 |
 | Text length limits that no requirement states | Each endpoint's task | 4 |
 | Storage key pattern; caching of file responses; whether an upload request may carry more than one file | T-041 | 5.8 |
 | Exact paths and shapes of the auth library's routes, and how they apply the conventions of section 1 | T-015 | 5.1 |
-| The planned error code `CART_EMPTY` is not in `src/server/errors.ts` | T-032 | 2.3 |
-| Telling the customer that a cap applied when items returned to the cart (D-026, OQ-26) outside the one checkout response that carries `cartReturn`: after a timeout failure, and on a later read. DATA_MODEL.md records nothing about it | database (a stored marker) and T-032 | 5.5.4 |
-| Which request stores a lowered cart quantity (disagreement 6 below) | qa and security, then T-031 | 5.4 |
-| Whether a pure reorder of pictures raises `contentRevision` | database, when D-026 OQ-35 is written into DATA_MODEL.md | 3.3 |
+| The planned error code `CART_EMPTY`, and the `CONFLICT` reasons, are contract only until their tasks add them to the code | T-031, T-032, T-042, T-050 | 2.3 |
+
+Closed since the earlier version: telling the customer later that a returned quantity was cut (not required, D-028; the record is on the order item and `cartReturn` is filled from it), which request stores a lowered cart quantity (D-029), and whether a pure reorder raises `contentRevision` (it does not, DATA_MODEL.md section 4.2).
 
 ### 8.3 Disagreements between documents
 
-Not settled by any decision and not resolved here. Each needs the owning agents or the owner. (The earlier disagreement on picture reordering is decided by D-026 OQ-35 and has moved to section 8.4.)
+**None that needs a decision.** Every disagreement this section listed earlier is ruled on: picture reordering (D-026, OQ-35), what counts as a correction and which items return to the cart (D-028), where a lowered quantity is stored and `storeId` in a seller body (D-029). The `REFUNDED` value and the "creates or activates" wording are no longer in REQUIREMENTS.md.
 
-| # | Subject | One document | The other | What this contract does |
-| --- | --- | --- | --- | --- |
-| 1 | `REFUNDED` | REQUIREMENTS.md payment table lists `PAID` to `REFUNDED` as a later transition | DATA_MODEL.md section 3 removes the value from schema v1 | No response can contain it, true under both for the MVP (section 3) |
-| 2 | Store creation on approval | REQ-A-03: approval "creates or activates" the store | DATA_MODEL.md section 4.1: approval always creates it; there is no second case | Says "creates"; wording only, no behaviour differs (section 5.9.2) |
-| 3 | Who is a "seller" before approval | REQUIREMENTS.md (REQ-S-09 and the "Seller application and store status" section) speaks of pending and rejected sellers and gives one status list for application and store | DATA_MODEL.md section 4.1: such a user is a `CUSTOMER` with no store; store status is `APPROVED` or `SUSPENDED` only | Follows the data model's values, as the brief for this task requires (sections 1.8, 3) |
-| 4 | Which items return to the cart after a failed payment | REQUIREMENTS.md BR-20: every item of the order | DATA_MODEL.md section 7.2 step 5: not the items of a seller order that was cancelled before the failure (after D-026 OQ-41 only an admin can cancel one that early) | Marked, not resolved (section 5.5.4) |
-| 5 | What counts as a "correction" that resubmits a rejected or taken-down product | D-026 OQ-36 and REQUIREMENTS.md Q20: "saving a correction", "any correction"; no resubmission without a change | DATA_MODEL.md section 4.2: only a change to a moderated field; a price-only or stock-only edit does not resubmit | States what is certain (a moderated-field change resubmits, an unchanged save does not) and leaves the price-only and stock-only case undefined (section 3.3) |
-| 6 | Where a lowered cart quantity is stored | TEST_STRATEGY.md (OQ-23 cases): the next cart read stores the lowered quantity | SECURITY.md TM-16: a `GET` never changes state | States what the responses carry and gives a client sequence that is correct under both (sections 5.4, 5.5.3) |
-| 7 | A `storeId` in a seller's request body | TEST_STRATEGY.md (kind K5): it is ignored | This contract and SECURITY.md (strict schemas, TM-04, TM-27): an unknown key is rejected with 400 | Keeps the rejection; in both readings nothing changes and no foreign row is reached (section 1.1) |
+One wording difference remains and changes no behaviour: REQ-S-09 in REQUIREMENTS.md speaks of "pending, rejected, or suspended sellers", while DATA_MODEL.md section 4.1 and this contract treat a user with a pending or rejected application as a `CUSTOMER` with no store (sections 1.8 and 3). Under both, such a user cannot create, publish, or sell.
 
-### 8.4 Documents that do not yet match D-026
+### 8.4 Documents that do not yet match the decisions
 
-D-026 is binding and this contract follows it. The places below still said otherwise when this contract was written on 2026-10-11 (REQUIREMENTS.md and SECURITY.md were being updated by their owners at the same time, so some may already be fixed). Each is for its owner to change; none is a choice left to make.
+Places that still said otherwise when this section was last checked on 2026-10-11, against the committed files. REQUIREMENTS.md and DATA_MODEL.md were being edited by their owners at that moment, so some may already be fixed. Each is for its owner to change; none is a choice left to make.
 
-| D-026 answer | Document and place | What it still says |
+| Decision | Document and place | What it still says |
 | --- | --- | --- |
-| OQ-35: a pure reorder of pictures needs no re-approval | DATA_MODEL.md section 4.2 ("Moderated fields"), section 19 (DM-Q4) | Written for the stricter reading: a reorder counts as a picture change; DM-Q4 listed as open |
-| OQ-35 | REQUIREMENTS.md BR-18, Q25 | "Pictures" without the reorder exception; Q25 listed as open |
-| OQ-35 | TEST_STRATEGY.md R10 | Listed as waiting for the owner |
-| OQ-25 | REQUIREMENTS.md fulfilment section, REQ-C-13, Q21 | Marked open |
-| OQ-26: cap at 99 **and** at available stock; tell the customer | DATA_MODEL.md section 7.2 step 5 | Caps at 99 only; no stock cap; nothing records that a cap applied |
-| OQ-26 | REQUIREMENTS.md REQ-C-12, Q22; TEST_STRATEGY.md R1 | Marked open |
-| OQ-27 | REQUIREMENTS.md payment status table; TEST_STRATEGY.md R3 | The table gives only a provider decline as the trigger of `FAILED`, not the timeout; R3 listed as waiting |
-| OQ-28 | REQUIREMENTS.md REQ-C-10, Q24 | Marked open |
-| OQ-29 | TEST_STRATEGY.md R4 | Listed as waiting |
-| OQ-30: checkout stops and the customer confirms again | REQUIREMENTS.md BR-30, REQ-C-11; TEST_STRATEGY.md R5 | No statement about telling the customer at checkout or confirming again; R5 listed as waiting |
-| OQ-31 | REQUIREMENTS.md Q26; TEST_STRATEGY.md R6 | Marked open |
-| OQ-32 | REQUIREMENTS.md Q27; DATA_MODEL.md section 4.5 and section 19 (DM-Q6); TEST_STRATEGY.md R7 | Marked open |
-| OQ-33: low stock is 1 to 5, sold out is separate, on-sale products only | REQUIREMENTS.md Terms ("Low stock"), BR-25, REQ-S-03 | "Stock of 5 or fewer", which includes 0 and every product |
-| OQ-33 | DATA_MODEL.md section 5 | `stock <= 5` |
-| OQ-33 | TEST_STRATEGY.md OQ-12 cases, R8 | Counts stock 5 and not 6, nothing about 0 or products not on sale; R8 listed as waiting |
-| OQ-34: goods only; order count is paid and not cancelled | DATA_MODEL.md section 4.4 | "and `shippingFeeSatang` where a report includes shipping" |
-| OQ-34 | REQUIREMENTS.md REQ-S-03, REQ-A-08, Q23; TEST_STRATEGY.md R9 | Marked open |
-| OQ-36 | REQUIREMENTS.md BR-19, REQ-S-04, Q20 | Marked open |
-| OQ-37 | REQUIREMENTS.md Q28 | Marked open |
-| OQ-38: whole percent only | REQUIREMENTS.md BR-28, REQ-A-09, Q29 | No whole-number rule; Q29 marked open |
-| OQ-38 | DATA_MODEL.md sections 6.16 and 11 | Any integer of basis points from 0 to 10,000 is valid; no whole-percent rule |
-| OQ-38 | TEST_STRATEGY.md admin settings cases | No case for a rate that is not a whole percent |
-| OQ-39 | REQUIREMENTS.md BR-23, REQ-S-04, Q30 | Marked open |
-| OQ-40: 1,000,000 | DATA_MODEL.md section 11 and section 19 (DM-Q1) | Marked open, "recommended 1,000,000" |
-| OQ-41: seller sees paid orders only | DATA_MODEL.md section 7.2 and section 19 (DM-Q2) | Marked open; only `FAILED` is excluded for certain |
-| OQ-42: queue excludes unpublished products | DATA_MODEL.md section 4.2 and section 19 (DM-Q3) | Marked open |
-| OQ-43, OQ-44 | DATA_MODEL.md section 19 (DM-Q5, DM-Q7) | Marked open |
-| OQ-25 to OQ-39 in general | REQUIREMENTS.md "Open questions awaiting the owner" (Q20 to Q30) | Says none is decided and the recommended defaults are not in effect |
-| OQ-49: session details gone within one day of expiry | DATA_MODEL.md section 6.1 and section 19 | Requires an hourly purge, which is stricter than the answer; not a conflict, but the stated reason is out of date. SECURITY.md SR-07 still lists the point as open |
-| OQ-47, OQ-48, OQ-50 | SECURITY.md SR-06, SR-07, residual risks | Listed as questions; no endpoint depends on them |
+| D-028: what counts as a correction | DATA_MODEL.md section 4.2 and section 19 (DM-Q8); REQUIREMENTS.md BR-19, Q31 | Marked open |
+| D-028: items of a part cancelled before the failure do not return | DATA_MODEL.md section 7.2 and section 19 (DM-Q9); REQUIREMENTS.md BR-20, Q33 | Marked open; BR-20 says "every item" |
+| D-028: awaiting approval is not on sale; hidden by suspension or category is still counted | DATA_MODEL.md section 5 and section 19 (DM-Q10, DM-Q11); REQUIREMENTS.md Q32 | Marked open |
+| D-028: no later notice of a cut quantity is required | DATA_MODEL.md section 7.2 and section 19 (DM-Q12); REQUIREMENTS.md Q34 | Marked open |
+| D-028: hidden cart lines are treated like sold-out lines | REQUIREMENTS.md Q36 | Marked open |
+| D-028: the three Thai texts; the bootstrap script and an existing account | REQUIREMENTS.md Q35, Q37 | Marked open |
+| D-028: payment timeout is 15 minutes | DATA_MODEL.md section 4.3; REQUIREMENTS.md BR-20 | "the configured timeout", no value |
+| D-028: the report range uses the paid date | DATA_MODEL.md section 6.10 | No column records when an order was paid |
+| D-028: publishing sets the submission time that orders the queue | DATA_MODEL.md section 4.2 and section 19 | `moderationRequestedAt` is the time the product last entered `PENDING`; setting it on publish is listed only as a proposal |
+| D-028: no approve or reject on an unpublished product | DATA_MODEL.md section 7.6 (admin moderation guard) | The guard names `moderationStatus` and `contentRevision` only, not `status = 'PUBLISHED'` |
+| D-028: a suspended seller is view-only; contact phone is editable; the admin summary groups | REQUIREMENTS.md REQ-S-02, REQ-S-09, REQ-A-01 | Not stated |
+| D-029 point 1: a `GET` never stores | TEST_STRATEGY.md, OQ-23 cases | "the next cart read returns quantity 3, stores 3" |
+| D-029 point 3: `storeId` in a seller body is rejected | TEST_STRATEGY.md, kind K5 | "a `storeId` sent in the body or query is ignored" |
+| D-026 and D-028 as a whole | TEST_STRATEGY.md R1 to R10 | Listed as waiting for the owner; no cases yet for the whole-percent commission, the sold-out figure, the stock maximum, or the refused checkout that stores a lowered quantity |
 
 ## 9. Review findings resolved here
 
@@ -1216,7 +1220,7 @@ D-026 is binding and this contract follows it. The places below still said other
 | M1 | `payment.isSimulated` and `paymentMethod` are derived from or mapped to `payment.provider` | 1.9, 5.5.1, 5.5.2 |
 | M5 | Every list endpoint is paginated | 1.7 and every table |
 | M9 (timezone) | Ranges are two instants with an explicit offset; UTC in, UTC out | 1.6, 5.9.7 |
-| M11 | Category delete; default address; empty-cart code; failed-payment response; admin list filters; add-to-cart above stock and of a sold-out product (D-026, OQ-28). The `/admin/summary` contents are proposed and still `OPEN (owner)` | 5.9.4, 5.3, 2.3, 5.5.4, 5.9, 5.4, 5.9.7 |
+| M11 | Category delete; default address; empty-cart code; failed-payment response; admin list filters; add-to-cart above stock and of a sold-out product (D-026, OQ-28). The `/admin/summary` contents are the four groups of D-028 | 5.9.4, 5.3, 2.3, 5.5.4, 5.9, 5.4, 5.9.7 |
 
 The status of each finding is recorded in the register, not here.
 
