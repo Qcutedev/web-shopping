@@ -264,6 +264,10 @@ model Product {
   description           String
   sku                   String
   priceSatang           Int
+  // Raw SQL: "Product_stock_check" allows 0 to 1,000,000,000 by design. That is the bound of the
+  // column, not the seller's entry limit of 1,000,000 (BR-34), which is enforced by the guard of
+  // the seller's stock statement and not by the column, so that restored stock is never refused
+  // (docs/DATA_MODEL.md section 11).
   stock                 Int
   status                ProductStatus    @default(DRAFT)
   moderationStatus      ModerationStatus @default(PENDING)

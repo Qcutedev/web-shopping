@@ -28,14 +28,21 @@ const layerPattern = {
   message:
     "Only src/modules, src/server/auth, src/server/health.ts, prisma/seed.ts, scripts, and tests may import src/server/db. Call a module service instead.",
 };
-// Rule 7 allow-list (D-021, owner approved in D-025). prisma/seed.ts is handled in the prisma block.
+// Rule 7 allow-list (D-021, owner approved in D-025). Allowed to import src/server/db; none of
+// them may import the client or a driver.
 const DB_LAYER_IMPORTERS = [
   "src/modules/**",
   "src/server/auth/**",
   "src/server/health.ts",
+  "prisma/seed.ts",
   "scripts/**",
   "tests/**",
 ];
+// The generated client (written by `prisma generate`, git-ignored) imports the Prisma runtime. It
+// is the only thing under prisma/ that does: the seed goes through src/server/db like every other
+// allowed importer, and the CLI configuration (prisma7.config.ts, at the repository root) imports
+// `prisma/config`, which the driver pattern does not cover.
+const GENERATED_CLIENT = "prisma/generated/**";
 const siblingPattern = { ...layerPattern, regex: SIBLING_DB };
 const normalPattern = {
   regex: NOT_NORMAL,
@@ -71,22 +78,24 @@ function importGuard(patterns, message) {
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
-  // Everything except the database layer itself: no database client or driver.
-  // prisma/ is exempt because the generated client and the migration tooling live there.
+  // Everything except the database layer itself and the generated client: no database client or
+  // driver. This includes prisma/seed.ts and anything else written by hand under prisma/.
   {
     files: ALL_CODE,
-    ignores: ["src/server/db/**", "prisma/**"],
+    ignores: ["src/server/db/**", GENERATED_CLIENT],
     rules: importGuard([driverPattern], driverPattern.message),
   },
   // Everything except the allowed importers and the database layer: no src/server/db either.
+  // A later block replaces the rules of an earlier one for the same file, so this block repeats
+  // the driver pattern.
   {
     files: ALL_CODE,
-    ignores: [...DB_LAYER_IMPORTERS, "src/server/db/**", "prisma/**"],
+    ignores: [...DB_LAYER_IMPORTERS, "src/server/db/**", GENERATED_CLIENT],
     rules: importGuard([driverPattern, layerPattern], layerPattern.message),
   },
+  // The generated client may import the Prisma runtime, and nothing in it imports src/server/db.
   {
-    files: ["prisma/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"],
-    ignores: ["prisma/seed.ts"],
+    files: ["prisma/generated/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"],
     rules: importGuard([layerPattern], layerPattern.message),
   },
   // Inside src/server the database layer is a sibling, so short relative paths reach it too.

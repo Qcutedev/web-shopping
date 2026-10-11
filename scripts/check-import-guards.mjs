@@ -43,6 +43,17 @@ const probes = [
   ["src/app/probe.js", "const n = '../server/db'; const db = require(n);", true],
   // In prisma/ only the seed is an allowed importer.
   ["prisma/probe.ts", 'import { db } from "../src/server/db";', true],
+  ["prisma/generated/prisma/probe.ts", 'import { db } from "../../../src/server/db";', true],
+  // The seed goes through the db layer like every other allowed importer (rule 7, CR-18): it may
+  // not import the client, the adapter, the driver, or the generated client. The same holds for
+  // any other hand-written file under prisma/.
+  ["prisma/seed.ts", 'import { PrismaClient } from "@prisma/client";', true],
+  ["prisma/seed.ts", 'import { PrismaPg } from "@prisma/adapter-pg";', true],
+  ["prisma/seed.ts", 'import { Pool } from "pg";', true],
+  ["prisma/seed.ts", 'import { PrismaClient } from "./generated/prisma/client";', true],
+  ["prisma/seed.ts", 'const m = await import("@prisma/client");', true],
+  ["prisma/probe.ts", 'import { PrismaClient } from "@prisma/client";', true],
+  ["prisma/probe.ts", 'import { Role } from "./generated/prisma/enums";', true],
   // Nobody outside the db layer may import the client or a driver, allowed importers included.
   ["src/server/auth/probe.ts", 'import { PrismaClient } from "@prisma/client";', true],
   ["src/server/health.ts", 'import { Pool } from "pg";', true],
@@ -95,8 +106,14 @@ const probes = [
   ["src/app/probe.ts", 'import { logger } from "@/server/logger";', false],
   ["src/app/a/b/probe.tsx", 'import { cn } from "../../../lib/utils";', false],
   ["src/app/probe.ts", 'import fs from "node:fs";', false],
-  ["prisma/seed.ts", 'import { PrismaClient } from "@prisma/client";', false],
   ["src/server/db/probe.ts", 'import { PrismaPg } from "@prisma/adapter-pg";', false],
+  // The generated client is the only thing under prisma/ that may import the Prisma runtime.
+  [
+    "prisma/generated/prisma/probe.ts",
+    'import * as runtime from "@prisma/client/runtime/client";',
+    false,
+  ],
+  ["prisma/generated/prisma/probe.ts", 'import * as $Enums from "./enums";', false],
   [
     "src/server/db/probe.ts",
     'import { PrismaClient } from "../../../prisma/generated/prisma/client";',
