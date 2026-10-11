@@ -8,32 +8,28 @@ Last updated: 2026-10-11
 
 Planning documents and agent definitions are written and the empty Next.js scaffold builds. **No marketplace feature exists yet. Nothing has been deployed.**
 
-## Resume here (handoff written 2026-10-11, second session)
+## Resume here (handoff updated 2026-10-11, third session)
 
-The session stopped when the usage limit was reached (resets 08:20 Asia/Bangkok). Nothing is running; the tree is clean; all work is committed locally on `main` (no remote, nothing pushed). A new session should read CLAUDE.md, this file, DECISIONS.md (D-017 to D-025), PROJECT_PLAN.md, AGENT_WORKFLOW.md, and reviews/T-004-findings.md. The owner's go-ahead for this run was given ("read the docs and continue").
+A new session should read CLAUDE.md, this file, DECISIONS.md (D-017 to D-029), PROJECT_PLAN.md, AGENT_WORKFLOW.md, and reviews/T-004-findings.md. All work is committed locally on `main` (no remote, nothing pushed) unless the list below says otherwise.
 
-Standing rules from the owner (D-019): never guess, park questions here and ask in batches; commit locally after each task passes its checks, never push without being told; stop for owner review at the five milestones. Milestone 1 (foundation plus browsable storefront) is in progress.
+Standing rules from the owner (D-019): never guess, park questions here and ask in batches; commit locally after each task passes its checks, never push without being told; stop for owner review at the five milestones. Run at most two or three agents at a time (owner, third session). Milestone 1 (foundation plus browsable storefront) is in progress.
 
-Before starting, check the machine: Docker Desktop running and `docker compose up -d --wait` (the test database is empty after every container start); `pnpm install --frozen-lockfile`; `pnpm verify` should exit 0 with 1084 passed and 5 expected failures (SEC-020).
+Before starting, check the machine: Docker Desktop running and `docker compose up -d --wait` (the test database is empty after every container start); `pnpm install --frozen-lockfile`; `pnpm verify` should exit 0 with 1191 passed and 0 expected failures.
 
-Done this session (each committed): lint allow-list for rule 7 (55 probes); D-025 answers written into REQUIREMENTS.md (BR-17 to BR-30), DESIGN_SYSTEM.md with tokens, Badge, and QuantityStepper, SECURITY.md (SR-06, SR-07), DATA_MODEL.md (rewritten, 20 sections), TEST_STRATEGY.md, DEPLOYMENT.md; database image pinned by digest; SEC-019 closed, SEC-020 registered.
+Done in the third session (each committed):
 
-Third session (2026-10-11), progress so far. The owner asked for at most two or three agents at a time.
-
-- Step 1 done: the owner answered OQ-25 to OQ-50 (D-026, recommended option each time). Not yet committed.
-- Step 2 in progress: backend-api fixed `readBytesUpTo` (uncommitted; its own `pnpm verify`: exit 0, 1101 passed, 0 expected failures, not yet re-run by the orchestrator); the security re-check of SEC-020 and SEC-008 is running.
-- Step 3 in progress: backend-api is writing API_CONTRACTS.md, now against D-026.
-- D-026 still has to be written into the owning documents: REQUIREMENTS.md (product-requirements, running), then DATA_MODEL.md (database; OQ-35 changes its picture-reorder rule, also OQ-33, OQ-38, OQ-40, OQ-49), TEST_STRATEGY.md (qa; R3 to R9), SECURITY.md and DEPLOYMENT.md (OQ-47 to OQ-50), DESIGN_SYSTEM.md and the primitives (OQ-45, OQ-46).
+- Owner answered OQ-25 to OQ-50 (D-026) and the follow-up questions the agents raised (D-028). Orchestrator rulings D-027 (sessions and suspension) and D-029 (a GET never writes; checkout stores a lowered quantity and stops; `storeId` rejected).
+- SEC-020 fixed and re-checked; SEC-008 re-checked; SEC-021 found, fixed, and re-checked. Open findings: SEC-009 and SEC-010, both Low.
+- API_CONTRACTS.md rewritten for the T-004 findings and D-026; D-026 written into REQUIREMENTS.md (BR-31 to BR-38), DATA_MODEL.md, and SECURITY.md (OQ-47 to OQ-50).
 
 Next steps, in order:
 
-1. ~~Ask the owner the second batch of questions~~ Done, D-026.
-2. backend-api: fix `src/server/http.ts` `readBytesUpTo` for SEC-020 (remedy in SECURITY.md; then turn the 5 `it.fails` in `tests/security/sec019-body-limit-recheck.test.ts` into `it` without touching their bodies), then security re-checks. Must land before the first handler that reads a body.
-3. backend-api: fix API_CONTRACTS.md. It must match DATA_MODEL.md, REQUIREMENTS.md, and D-026, mark undecided points `OPEN (owner)`, and cover B3, B4, B5, S4, S5, S7 to S9, S11 to S15, M1, M5, M9 (timezone), M11, plus the requests in the database and product-requirements reports (store status values, `TAKEN_DOWN`, `contentRevision`, no `REFUNDED`, settings bounds, uploads, `isSample`, failed-payment response).
-4. code-review: check that REQUIREMENTS.md, DATA_MODEL.md, and API_CONTRACTS.md agree (after D-026 is written into all three), and review the T-017 follow-up (commit `66a0cfa`), the T-019 rounds two and three, and the SEC-020 fix. product-requirements: small follow-ups from the database report (REQ-A-03 "creates" the store, payment table without `REFUNDED`), running with the D-026 write-up.
-5. Orchestrator: add BR-17 to BR-30 to the "Covers" columns in PROJECT_PLAN.md; supersede D-004's "revocation on suspension" wording (store suspension does not end sessions, user deactivation does); add script `db:migrate:deploy` with T-013; decide whether Markdown stays excluded from Prettier (`.prettierignore` has `*.md`, so `format:check` proves nothing about docs).
-6. T-013 schema (database), pinning Prisma and widening the driver lint pattern (re-review item N3); then T-023 integration-test harness (qa); then T-011 env validation and health (devops, including SR-01 proxy variables, `APP_URL`, and the SEC-009 refusals); then T-015 auth, T-014 seed, T-016 admin bootstrap, T-018 app shell, T-020 catalog API, T-021 storefront pages, T-072 security headers.
-7. Milestone 1 report to the owner, with OQ-20 shown on real pages.
+1. Write D-028 and D-029 into REQUIREMENTS.md (product-requirements), DATA_MODEL.md (database), and API_CONTRACTS.md (backend-api). Launched in the third session; check `git status` and `git log` to see whether they landed.
+2. Write D-026, D-028, and D-029 into TEST_STRATEGY.md (qa: R1 to R10 answered, cart read does not store, K5 rejected not ignored, new cases listed in the product-requirements report), DEPLOYMENT.md (devops: OQ-47 to OQ-50, hold procedure, 30-day backups, restore ends with session clean-up), and DESIGN_SYSTEM.md plus the primitives (ui-ux-design: OQ-45 hover border in ink, OQ-46 message, the three D-028 texts into `src/i18n/th.ts`).
+3. code-review: check that REQUIREMENTS.md, DATA_MODEL.md, and API_CONTRACTS.md agree, and review the T-017 follow-up (commit `66a0cfa`), the T-019 rounds two and three, and the SEC-020 and SEC-021 fixes (`9c9158b`, `d4ff53e`). Then update the per-item statuses in reviews/T-004-findings.md and close T-004.
+4. Orchestrator: add BR-17 to BR-38 to the "Covers" columns in PROJECT_PLAN.md; add script `db:migrate:deploy` with T-013; decide whether Markdown stays excluded from Prettier (`.prettierignore` has `*.md`, so `format:check` proves nothing about docs).
+5. T-013 schema (database), pinning Prisma and widening the driver lint pattern (re-review item N3); then T-023 integration-test harness (qa); then T-011 env validation and health (devops, including SR-01 proxy variables, `APP_URL`, and the SEC-009 refusals); then T-015 auth (including the scheduled session clean-up, D-029), T-014 seed, T-016 admin bootstrap, T-018 app shell, T-020 catalog API, T-021 storefront pages, T-072 security headers.
+6. Milestone 1 report to the owner, with OQ-20 and OQ-45 shown on real pages.
 
 Known environment limits: six agents in parallel plus one more exhausted the usage limit in about 25 minutes; run fewer at a time. Also: the session cannot edit its own permission settings, so command prompts need the owner's "always allow"; long multi-agent runs can exhaust the usage limit (it happened once; interrupted agents were resumed without loss). Approved design mockups: link in D-018.
 
@@ -97,7 +93,7 @@ Parked questions per D-019. Work that depends on an open question waits; everyth
 
 ### Second batch (raised 2026-10-11 while writing the answers into the documents)
 
-**Answered 2026-10-11:** the owner answered every question in this batch. The answers are in DECISIONS.md D-026 and are binding; the table is kept for the question wording only.
+**Answered 2026-10-11:** the owner answered every question in this batch. The answers are in DECISIONS.md D-026 and are binding; the table is kept for the question wording only. The follow-up questions raised while writing D-026 into the documents (REQUIREMENTS Q31 to Q37, DATA_MODEL DM-Q8 to DM-Q12, API_CONTRACTS section 8.1) were answered the same day: D-028. **No owner question is open except OQ-20.**
 
 | Id | Question | Source | Blocks |
 | --- | --- | --- | --- |
@@ -132,7 +128,7 @@ The full review register is [reviews/T-004-findings.md](reviews/T-004-findings.m
 
 ## Security findings
 
-Registered in [SECURITY.md](SECURITY.md). State on 2026-10-11 after three re-checks: 0 Critical, 0 High open. Fixed and re-checked by the security agent: SEC-001 to SEC-007, SEC-011 to SEC-019. Open Medium: SEC-020 (backend-api; memory held by `readBytesUpTo` grows with the number of chunks, about 24 MB for a 100 KB body sent in one-byte chunks; not reachable today because no handler reads a body; 5 `it.fails` tests reproduce it). Open Low: SEC-008 (image now pinned by digest in commit `af7acf8`, security re-check pending; no update bot until T-070), SEC-009 (placeholder credentials; the fix lands in `src/server/env.ts` with T-011), SEC-010 (dev-only `pnpm audit` advisory in `eslint-config-next`, no patched version, production tree clean). The secret scan was a manual pattern search; no dedicated scanner is installed. Nothing calls these utilities yet, so caller-side rules are unverified.
+Registered in [SECURITY.md](SECURITY.md). State on 2026-10-11 after the third session: 21 findings, 19 fixed and re-checked by the security agent, 0 Critical, High, or Medium open. Open Low: SEC-009 (placeholder credentials; the fix lands in `src/server/env.ts` with T-011) and SEC-010 (dev-only `pnpm audit` advisory in `eslint-config-next`, no patched version, production tree clean). Fixed this session: SEC-020 (body reader memory), SEC-008 (image pinned by digest), SEC-021 (body reader could read without end). The secret scan was a manual pattern search; no dedicated scanner is installed. Nothing calls the server utilities yet, so caller-side rules are unverified.
 
 ## Tasks
 
@@ -141,7 +137,7 @@ Registered in [SECURITY.md](SECURITY.md). State on 2026-10-11 after three re-che
 | T-001 | Install prerequisites | VERIFIED | `node -v`, `pnpm -v`, `docker info` succeed; versions in D-020; database reachable through T-012 |
 | T-002 | Initialise git | VERIFIED | Commit `65357c3`; `git status` clean afterwards; no env files tracked |
 | T-003 | Verify delegation | VERIFIED | ui-ux-design agent rewrote DESIGN_SYSTEM.md to the approved direction (D-018) and returned the standard report; orchestrator confirmed the diff touches only that file and the acceptance greps hold. Raised OQ-01 to OQ-03 |
-| T-004 | Review planning documents | IN PROGRESS | Second session 2026-10-11: findings fixed in REQUIREMENTS.md, DATA_MODEL.md, TEST_STRATEGY.md, DEPLOYMENT.md, SECURITY.md, and the lint allow-list (B1). Remaining: API_CONTRACTS.md (backend-api, not started), the cross-document check by code-review, and updating the per-item statuses in the register. Earlier: Both reviews returned 2026-10-11. Orchestrator-owned findings fixed (plan dependencies, ownership table, D-022 to D-024); REQUIREMENTS.md updated by product-requirements. Still open: findings owned by database, backend-api, qa, security, and 16 owner questions (OQ-04 to OQ-19). Register: reviews/T-004-findings.md |
+| T-004 | Review planning documents | IN PROGRESS | Second session 2026-10-11: findings fixed in REQUIREMENTS.md, DATA_MODEL.md, TEST_STRATEGY.md, DEPLOYMENT.md, SECURITY.md, and the lint allow-list (B1). Third session: API_CONTRACTS.md rewritten (commit `3f4e508`); D-026 written into REQUIREMENTS.md, DATA_MODEL.md, SECURITY.md. Remaining: D-028 and D-029 into those documents, TEST_STRATEGY.md and DEPLOYMENT.md, the cross-document check by code-review, and updating the per-item statuses in the register. Earlier: Both reviews returned 2026-10-11. Orchestrator-owned findings fixed (plan dependencies, ownership table, D-022 to D-024); REQUIREMENTS.md updated by product-requirements. Still open: findings owned by database, backend-api, qa, security, and 16 owner questions (OQ-04 to OQ-19). Register: reviews/T-004-findings.md |
 | T-010 | Scaffold | VERIFIED | Re-review 2026-10-11: APPROVE. Follow-ups closed the same day (non-normal import paths, non-literal require, `prisma/` exemption; probes now 42 of 42); still open: widen the driver pattern when T-013 picks the Prisma output path and adapter (re-review item N3). History: | 2026-10-11 `pnpm verify` exit 0 on the scaffold. Code review 2026-10-11: CHANGES REQUIRED (import guard bypassed by relative, dynamic, and `.js` imports). Fixed by the orchestrator: guards match by regular expression, cover JS files and dynamic imports, deny `src/server/db` everywhere except `src/modules`; `scripts/check-import-guards.mjs` (27 of 27 probes) runs in `pnpm lint`; `noUncheckedIndexedAccess` enabled. `pnpm verify` exit 0 on the integrated tree; re-review running. Scripts `test:integration`, `test:e2e`, `db:*`, `admin:bootstrap` are defined but their tooling is not installed yet |
 | T-011 | Env validation, health | NOT STARTED | Needs T-013 |
 | T-012 | Compose databases | VERIFIED | Code review APPROVE and security review (no Critical or High; SEC-008, SEC-009 Low open) 2026-10-11. devops agent report 2026-10-11; orchestrator re-ran `docker compose ps` (both healthy) and a query in each database: PostgreSQL 18.6, UTF8, UTC. Dev on 127.0.0.1:5432 (named volume), test on 127.0.0.1:5433 (tmpfs). No `.env` exists or is tracked. Code review pending. Open for T-013: Thai sort order under the default `en_US.utf8` collation |
@@ -209,6 +205,8 @@ Registered in [SECURITY.md](SECURITY.md). State on 2026-10-11 after three re-che
 | 2026-10-11 | `pnpm verify` (after second T-019 fix round) | exit 0; import-guard probes 42 of 42; 16 test files, 948 passed, 0 failed, 0 expected failures; build succeeded |
 | 2026-10-11 | `pnpm verify` (after SEC-019 fix) | exit 0; import-guard probes 42 of 42; 16 test files, 1050 passed, 0 failed, 0 expected failures; build succeeded |
 | 2026-10-11 | `pnpm verify` (second session, after D-025 follow-ups) | exit 0; import-guard probes 55 of 55; 18 test files, 1084 passed, 5 expected failures (SEC-020), 0 unexpected; build succeeded |
+| 2026-10-11 | `pnpm verify` (third session, after the SEC-020 fix and re-check) | exit 0; import-guard probes 55 of 55; 19 test files, 1136 passed, 2 expected failures (SEC-021), 0 unexpected; build succeeded |
+| 2026-10-11 | `pnpm verify` (third session, after the SEC-021 fix and re-check) | exit 0; import-guard probes 55 of 55; 19 test files, 1191 passed, 0 failed, 0 expected failures; build succeeded |
 | 2026-10-11 | `pnpm audit` / `pnpm audit --prod` (run by security agent) | 1 high in a dev-only dependency (SEC-010) / no known vulnerabilities |
 
 No integration, E2E, or security scan has been run yet.
@@ -229,3 +227,4 @@ No integration, E2E, or security scan has been run yet.
 | 2026-10-10 | Node, Docker Desktop, and gh installed by the user; pnpm enabled; git initialised. B-01 and B-03 resolved; B-02 narrowed to missing WSL. |
 | 2026-10-11 | WSL installed by the user; Docker daemon confirmed running. B-02 resolved. Build work paused at the user's request. |
 | 2026-10-11 | Second session: rule 7 lint allow-list, D-025 answers written into six documents and the UI primitives, SEC-019 closed, SEC-020 and questions OQ-25 to OQ-50 raised. Stopped on the usage limit before API_CONTRACTS.md. |
+| 2026-10-11 | Third session: owner answers D-026 and D-028, rulings D-027 and D-029; SEC-020 and SEC-021 fixed and re-checked, SEC-008 re-checked; API_CONTRACTS.md rewritten; D-026 written into REQUIREMENTS.md, DATA_MODEL.md, SECURITY.md. |
