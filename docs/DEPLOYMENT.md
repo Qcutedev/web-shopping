@@ -176,7 +176,7 @@ These bind whichever hosting setup is chosen. None has been exercised, because n
 
 ## Environment variables
 
-Built in T-011 and exercised on the developer machine on 2026-10-12. `src/server/env.ts` is the one place that reads the application's variables, and the tables below are its rules. `.env.example` holds a local placeholder for every variable of the first table.
+Built in T-011 and exercised on the developer machine on 2026-10-12. `src/server/env.ts` is the one place that reads the application's variables, and the tables below are its rules. `.env.example` holds a local placeholder for every variable of the first table except two, which are deliberately absent from it: `NODE_ENV`, which the framework sets and which must not be written in `.env`, and `PGPASSWORD`, which this project does not use.
 
 ### Variables the server validates
 
@@ -186,10 +186,11 @@ Built in T-011 and exercised on the developer machine on 2026-10-12. `src/server
 | `APP_URL` | An absolute `http` or `https` URL. The public origin; its scheme, host, and port are the allowed origin of the `Origin` check | Refused: required | no |
 | `DATABASE_URL` | A `postgresql://` or `postgres://` URL | Refused: required | yes (the local value in `.env.example` is a throwaway, not a secret) |
 | `DATABASE_URL_TEST` | Not read by the application. Used by the integration tests, locally and in CI. Its only rule is the production refusal below | Nothing happens | no (throwaway) |
+| `PGPASSWORD` | Not used by this project: the password belongs in `DATABASE_URL`. The database driver reads the variable by itself as the password when the URL carries none, so it has one rule, the production refusal below | Nothing happens | yes |
 | `TRUSTED_PROXY_HOPS` | One digit, `0` to `5`: the number of operator-controlled reverse proxies in front of the application (SR-01). `1.0`, `+1`, `true`, and a value with a blank are refused; there is no on/off switch for trusting a proxy | `0`, except in production (below) | no |
 | `TRUSTED_CLIENT_IP_HEADER` | A header name matching `^[A-Za-z0-9-]{1,64}$`: a single-value header that the hosting platform's proxy always overwrites with the client address (SR-01). Not `X-Forwarded-For`, `Forwarded`, `Cookie`, `Authorization`, or `Host`, in any letter case. Refused when `TRUSTED_PROXY_HOPS` is greater than 0 | No header is trusted | no |
 | `PAYMENT_TIMEOUT_MINUTES` | An integer from `1` to `1440`, written in digits only: how long an order may await payment before the sweep fails it (D-028). It is configuration so that tests can shorten it (DATA_MODEL.md section 4.3) | `15` | no |
-| `LOG_LEVEL` | `debug`, `info`, `warn`, or `error` | `info` | no |
+| `LOG_LEVEL` | `debug`, `info`, `warn`, or `error`. Lines below the level are not written. Where it takes effect today is limited; see "What `LOG_LEVEL` reaches" below | `info` | no |
 
 How the rules are applied:
 
@@ -201,17 +202,32 @@ Refusals that apply only when `NODE_ENV=production`:
 
 | Variable | Refused when | Why |
 | --- | --- | --- |
-| `DATABASE_URL` | It contains one of the two local placeholder passwords of `.env.example` and `docker-compose.yml` | SEC-009 |
+| `DATABASE_URL` | It contains one of the two local placeholder passwords of `.env.example` and `docker-compose.yml`, as written or in a form the database driver turns into one (below) | SEC-009, SEC-025 |
+| `PGPASSWORD` | It contains one of the two placeholder passwords, as written | SEC-025 |
 | `DATABASE_URL_TEST` | It is set at all | SEC-009 |
 | `TRUSTED_PROXY_HOPS` | It is not set. `0` is accepted, but it must be written | SR-01: no silent default |
 
-One warning, also only when `NODE_ENV=production`: if no proxy is trusted (`TRUSTED_PROXY_HOPS=0` and no `TRUSTED_CLIENT_IP_HEADER`), the server writes one `warn` line at start saying that every per-address rate limit is shared by all clients (SR-01). The server starts.
+How the placeholder rule reads `DATABASE_URL` (SEC-025). The database driver does not use the variable as written: it parses it as a URL, percent-decodes the password, prefers a `password` query parameter to the password in front of the host, and falls back to `PGPASSWORD` when the URL has no password. The rule therefore looks for the two placeholders in:
+
+- the whole text as written (this also finds a placeholder outside the password, for example in the user name);
+- the whole text with every well-formed escape (`%` and two hexadecimal digits) decoded, so `local%5Fdev_only_not_a_secret` is refused like the plain spelling, in whatever part of the URL it stands;
+- the user name, the password, and every `password` query parameter as the URL parser gives them, again as written and decoded. The parser drops tabs and line breaks, so a placeholder split by one is found here.
+
+An escape that is not well formed (`%ZZ`, a `%` at the end) is not a refusal by itself and cannot make the validation throw; the well-formed escapes beside it are still decoded and judged. `PGPASSWORD` is judged as written, because the driver uses it as written. As with every rule, the refusal names the variable (`DATABASE_URL` or `PGPASSWORD`) and a fixed rule text and never a value. Not covered: a password file (`PGPASSFILE`), which the driver itself calls deprecated, and a decoding other than the one percent-decoding the driver does (a placeholder that is escaped twice in front of the host is a different password to the driver and is accepted).
+
+One warning, also only when `NODE_ENV=production`: if no proxy is trusted (`TRUSTED_PROXY_HOPS=0` and no `TRUSTED_CLIENT_IP_HEADER`), the server writes one `warn` line at start saying that every per-address rate limit is shared by all clients (SR-01). The server starts. This line is written before `LOG_LEVEL` is applied, so `LOG_LEVEL=error` does not silence it (observed, below).
 
 A consequence on a developer machine: `pnpm start` runs with `NODE_ENV=production` and reads the local `.env`, so it is refused, as intended (observed, below). Local work uses `pnpm dev`. Never copy `.env.example` or `docker-compose.yml` to a staging or production host; the refusals above are the check behind that instruction, and they act only where `NODE_ENV=production`.
 
+What `LOG_LEVEL` reaches (measured on 2026-10-12, Next.js 16.4.0; **the setting is only partly effective, open**):
+
+- After a successful validation, `loadEnvAtStartup` hands the validated level to the process-wide logger with `setLogLevel` of `src/server/logger.ts`. The two start-up lines (the validation failure and the SR-01 warning) are written before that, at the logger's level of that moment (`info`), so no `LOG_LEVEL` can hide them, and a failed validation leaves the level alone.
+- **It does not reach the logger that request handlers use.** The framework compiles the start-up hook and the route handlers separately, and each of the two gets its own copy of `src/server/logger.ts`, with its own level. The hook sets the level of its copy; the copy in the handlers stays at `info`. Observed in production mode and in development mode: with `LOG_LEVEL=warn`, the `info` line of the health check ("Health endpoint") was still written. In the build output the logger's code is present twice, once in the chunk of the hook and once in the chunk of the route.
+- Until that is fixed, treat `LOG_LEVEL` as having no effect on request logging: every handler logs at `info`. The fix belongs in `src/server/logger.ts` (owner backend-api): keep the level in one place per process, on `globalThis`, as `src/server/db/client.ts` does for the database client.
+- When it is fixed: `LOG_LEVEL=error` will drop every `warn` line, among them the one for a request body that broke off (SECURITY.md SR-05 item 10) and the rate limiter's saturation warning. `warn` is the highest level recommended for a deployed environment.
+
 Validated but not used by any code yet:
 
-- `LOG_LEVEL`: the process-wide logger in `src/server/logger.ts` is created at level `info` and does not read the validated value. Setting `LOG_LEVEL=debug` changes nothing today (request to backend-api).
 - `PAYMENT_TIMEOUT_MINUTES`: the sweep that reads it lands with T-032.
 - `TRUSTED_PROXY_HOPS`, `TRUSTED_CLIENT_IP_HEADER`, and the origin of `APP_URL`: no handler reads them yet; the first handlers that rate-limit or change state will.
 - `DATABASE_URL`: the database layer (`src/server/db`) still reads the variable itself and creates its client on first use (D-033 point 1). `readDatabaseUrl` in `src/server/env.ts` is the function for it to call, with the production refusal included; the change belongs to the database owner (CR-23).
@@ -240,7 +256,9 @@ What a failure looks like. One JSON log line on stdout, then the process ends wi
 {"component":"env","issues":[{"variable":"APP_URL","rule":"is required"}],"level":"error","timestamp":"...","message":"Environment validation failed. The server cannot start."}
 ```
 
-The line and the error name each variable and the rule it broke. They never contain a value, of a refused variable or of any other: every rule text is a constant of `src/server/env.ts`. After that line the framework prints the same error with a stack trace on stderr; it holds the same names and rules.
+The line and the error name each variable and the rule it broke. They never contain a value, of a refused variable or of any other: every rule text is a constant of `src/server/env.ts`. The JSON line on stdout is the report to rely on: the exit waits for it. After it the framework starts to print the same error with a stack trace on stderr, with the same names and rules and no value, but the exit does not wait for stderr, so that text may be cut off or missing. In the runs below it was complete each time.
+
+The exit is requested when standard output reports that the line was taken. If it never reports (a pipe that nobody reads), the process ends anyway after 2 seconds, still with exit code 1 (unit test with a write that never reports back; not reproduced with a real blocked pipe).
 
 Why the hook ends the process itself (measured with Next.js 16.4.0 on 2026-10-12): when `register` throws, `next dev` exits with code 1 on its own, but `next start` printed the error, reported `Ready`, stayed up, and answered every request, the health endpoint included, with `500 Internal Server Error`. A process that stays up is not restarted or reported as failed by whatever supervises it. `src/instrumentation.ts` therefore ends the process with exit code 1 after the log line is written. In both modes the framework prints `Ready` before the hook has run; that line is not evidence that the configuration is valid. The health endpoint is.
 
@@ -259,7 +277,22 @@ On the developer machine (Windows 11, Next.js 16.4.0). Each server was started d
 | The two production-mode runs above, before the hook ended the process itself | The process stayed up and answered `/api/health` with `500` and the body `Internal Server Error`. This is the framework behaviour the hook now covers |
 | `pnpm build` with `APP_URL`, `DATABASE_URL`, `DATABASE_URL_TEST`, `TRUSTED_PROXY_HOPS`, `PAYMENT_TIMEOUT_MINUTES`, and `LOG_LEVEL` empty | Exit 0. In the route table `/api/health` is dynamic (rendered on demand), not prerendered |
 
-Not run: a production-mode start that passes validation and reaches the local database. The only password the local databases accept is the published placeholder, which production mode refuses by design. The `200` answer was therefore observed in development mode only; in production mode the endpoint was observed answering `503` ("Health endpoint"). The first production-mode `200` will be on staging (release procedure step 6). Also not run: a build on a machine with no `.env` file at all; the variables were emptied in the process environment instead.
+Not run with the two local databases of `docker-compose.yml`: a production-mode start that passes validation and reaches one of them. The only password they accept is the published placeholder, which production mode refuses by design. A production-mode `200` was observed later the same day against a throwaway database (next table). Also not run: a build on a machine with no `.env` file at all; the variables were emptied in the process environment instead.
+
+### Runs on 2026-10-12, after the follow-ups (SEC-025, SEC-026, `LOG_LEVEL`)
+
+Same machine and method, on the build of `pnpm verify`. The servers were started from Git Bash, because Windows PowerShell 5.1 deletes a variable that is assigned an empty string and `.env` then fills it again. No value of any variable appeared in any output; each log was searched for the password of its run.
+
+| Run | Result |
+| --- | --- |
+| Development mode with the local `.env` | Started. `GET /api/health`: `200`, `{"status":"ok","database":"up"}`, `cache-control: no-store`, `x-request-id` |
+| Development mode, `APP_URL` empty | Log line `"variable":"APP_URL","rule":"is required"`; exit code 1 |
+| Production mode, `DATABASE_URL_TEST` empty, `DATABASE_URL` with the development placeholder written as `local%5Fdev_only_not_a_secret` | Refused: `DATABASE_URL` "must not contain a local placeholder password from .env.example when NODE_ENV=production"; exit code 1; no request was answered. Before the fix this start reported `Ready` and answered `/api/health` with `200` (SECURITY.md SEC-025) |
+| Production mode, `DATABASE_URL_TEST` empty, `DATABASE_URL` without a password, `PGPASSWORD` set to the development placeholder | Refused: `PGPASSWORD` "must not hold a local placeholder password from .env.example when NODE_ENV=production"; exit code 1; no request was answered |
+| Production mode, `DATABASE_URL_TEST` empty, `DATABASE_URL` with an invented password and a closed local port, `LOG_LEVEL=error` | Started. The SR-01 `warn` line was written. Health requests: see "Health endpoint" |
+| Production mode against a throwaway PostgreSQL container (the image of `docker-compose.yml`, published on `127.0.0.1` only, a password generated for the run, removed afterwards with its volume), `DATABASE_URL_TEST` empty | Started; with the container running, `GET /api/health`: `200`, `{"status":"ok","database":"up"}`. **This is the first `200` observed in production mode.** It is a local run, not a deployment |
+
+The throwaway container is not part of the repository's set-up; it existed for these runs only. How end-to-end tests are to reach a database in production mode is an open question (code-review finding CR-49); these runs show one way that works and decide nothing.
 
 ## Hosting options to decide
 
@@ -561,7 +594,7 @@ The health endpoint is built (T-011). Every other row is a plan.
 
 What it does and does not do:
 
-- The body is the whole answer in both cases. It holds no version, no configuration, no host name, and no error text. The cause of a failure goes to the server log only, as one `error` line with `component: "health"`, the request id, a `reason` (`error` or `timeout`), and for an error its class name, its code, and its message clipped to 300 characters. The logger masks credentials in that text.
+- The body is the whole answer in both cases. It holds no version, no configuration, no host name, and no error text. The cause of a failure goes to the server log only ("What the health check logs" below).
 - Every response carries `Cache-Control: no-store` and an `X-Request-Id` that the server generated. A request id sent by the client is not used.
 - It is never prerendered and never cached: the handler runs for every request and never during `next build`.
 - The wait for the database is bounded at 2 seconds. A database that does not answer cannot hang the caller.
@@ -569,6 +602,16 @@ What it does and does not do:
 - It reads no environment variable. When `DATABASE_URL` is not set, the check reports the database as down and the log line says that the variable is not set (unit test; in a running server that case does not occur, because the server ends at start).
 - A `200` says that the process answers and the database answers a trivial query. It says nothing about migrations, about the scheduled jobs, or about any page.
 - When the environment is invalid the server has ended at start ("Environment variables"), so the endpoint does not answer at all.
+
+What the health check logs (SECURITY.md SEC-026). The endpoint is public and not rate limited, so the log follows the outage and the clock, not the number of requests:
+
+- A failure writes one `error` line with `component: "health"`, a `reason`, and `failedChecks`. The reasons: `error` (the query failed; the line also has the error's class name, its code, and its message clipped to 300 characters, in which the logger masks credentials), `timeout` (no answer within 2 seconds; the line has `timeoutMs`), and `internal` (the check itself failed; not expected to happen).
+- Requests that shared one failed query produce one line for all of them, not one each.
+- At most one failure line is written in 30 seconds, whatever the reason. Failed checks in between write nothing and are counted; `failedChecks` on a line is the number of checks that failed since the previous failure line, the one that wrote the line included.
+- When the database answers again after a failure line, one `info` line is written: "Health check recovered: the database answers again.", with the `failedChecks` that no line had reported yet. No such line is written when no failure line preceded it. A database that goes up and down therefore writes at most one `error` and one `info` line in 30 seconds.
+- The request id on a line is that of the first check the line reports. Every response still carries its own `X-Request-Id`, so most `503` responses of an outage have a request id that is in no log line.
+- For alerting: one `error` line with `component: "health"` means an outage began or is going on; the absence of further lines within 30 seconds does not mean it ended. The recovery line, or a `200` from the endpoint, does. Mind that the recovery line is `info`.
+- None of this changes the response: every caller gets its `503` or `200` exactly as before, within the same 2 seconds.
 
 Runs on 2026-10-12 on the developer machine, with both local databases up (`docker compose ps`: `db-dev` and `db-test` healthy). The servers were started and stopped as described in "Environment variables".
 
@@ -578,7 +621,18 @@ Runs on 2026-10-12 on the developer machine, with both local databases up (`dock
 | Production mode, `DATABASE_URL` pointing at a closed local port | `503` | `{"status":"unavailable","database":"down"}` | 0.67 s, then 0.005 s | the same |
 | Production mode, `DATABASE_URL` pointing at an address that never answers | `503` | `{"status":"unavailable","database":"down"}` | 2.61 s, then 2.00 s | the same |
 
-In the two `503` runs the server log held one `error` line per request (`reason: "error"` with `Can't reach database server` for the closed port; `reason: "timeout"`, `timeoutMs: 2000` for the silent address) and the response body held none of it. Not run: a `200` in production mode (see the note under the runs in "Environment variables"), and the endpoint against any deployed environment.
+In the two `503` runs the server log held one `error` line per request (`reason: "error"` with `Can't reach database server` for the closed port; `reason: "timeout"`, `timeoutMs: 2000` for the silent address) and the response body held none of it. That was the behaviour before SEC-026 was fixed; the runs below replace it.
+
+Runs on 2026-10-12 after the SEC-026 fix, production mode (`next start`), started as described in "Environment variables":
+
+| Run | Responses | Lines of the health check in the server log |
+| --- | --- | --- |
+| `DATABASE_URL` pointing at a closed local port; 20 requests one after another, then 20 at the same moment, then 1 | `503` with `{"status":"unavailable","database":"down"}` every time, `cache-control: no-store` and an `x-request-id` | 1 `error` line (`reason: "error"`, `failedChecks: 1`, `Can't reach database server`); before the fix this was one line per request |
+| The same with `LOG_LEVEL=error` | the same | the same 1 `error` line |
+| A throwaway database, stopped when the server started: 10 requests; then the database started: 10 requests | `503` ten times, then `200` with `{"status":"ok","database":"up"}` ten times | 1 `error` line, then 1 `info` line "Health check recovered: the database answers again." with `failedChecks: 10` (the ten requests of the run; the `error` line itself came from the request with which the run script waited for the server to listen) |
+| The same with `LOG_LEVEL=warn`, in production mode and in development mode | the same | The same 2 lines. The `info` line should not have been written at this level: `LOG_LEVEL` does not reach the handlers' logger ("What `LOG_LEVEL` reaches") |
+
+Not run: the 30-second interval with a real clock (a second `error` line after 30 seconds of outage; covered by unit tests with an injected clock), the `timeout` reason after the fix, and the endpoint against any deployed environment.
 
 Known limit: the database layer sets no pool size and no connection or query timeout of its own (code-review finding CR-23, owner database). The 2-second bound is kept by the health check alone; the query underneath may go on waiting until the driver gives up.
 

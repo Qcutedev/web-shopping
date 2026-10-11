@@ -21,7 +21,17 @@
  * up, and answers every request with 500. A process that stays up is not restarted or reported
  * as failed by whatever supervises it, so an invalid configuration ends the process here, with
  * exit code 1, after the log line that names the variables has been written.
+ *
+ * The exit waits for that line, but not for ever. It is requested from the callback of an empty
+ * write that is queued behind the line. If standard output never reports that write (a pipe
+ * nobody reads, a stream that was destroyed), a timer ends the process after
+ * EXIT_FALLBACK_MS all the same (review finding CR-44). The timer is not unref'd: it must keep
+ * the process alive until it fires, and it is cleared when the callback comes first.
  */
+
+/** How long the exit waits for standard output before it happens anyway. */
+const EXIT_FALLBACK_MS = 2_000;
+
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     if (process.env.NEXT_PHASE === "phase-production-build") return;
@@ -32,8 +42,12 @@ export async function register(): Promise<void> {
       loadEnvAtStartup();
     } catch (error) {
       process.exitCode = 1;
+      const fallback = setTimeout(() => process.exit(1), EXIT_FALLBACK_MS);
       // The empty write is queued behind the log line, so the exit waits for that line.
-      process.stdout.write("", () => process.exit(1));
+      process.stdout.write("", () => {
+        clearTimeout(fallback);
+        process.exit(1);
+      });
       // Still thrown: until the exit happens, the framework must not treat the hook as done.
       throw error;
     }

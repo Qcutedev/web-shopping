@@ -26,7 +26,7 @@
 import { z } from "zod";
 
 import { type ClientAddressConfig, MAX_TRUSTED_PROXY_HOPS } from "./client-address";
-import { type Logger, type LogLevel, logger as defaultLogger } from "./logger";
+import { type Logger, type LogLevel, logger as defaultLogger, setLogLevel } from "./logger";
 
 export type NodeEnv = "development" | "test" | "production";
 
@@ -83,6 +83,8 @@ export const ENV_RULES = {
   databaseUrl: "must be a postgresql:// or postgres:// URL",
   databaseUrlPlaceholder:
     "must not contain a local placeholder password from .env.example when NODE_ENV=production",
+  pgPasswordPlaceholder:
+    "must not hold a local placeholder password from .env.example when NODE_ENV=production",
   databaseUrlTestInProduction: "must not be set when NODE_ENV=production",
   trustedProxyHops: `must be an integer from 0 to ${MAX_TRUSTED_PROXY_HOPS}`,
   trustedProxyHopsExplicit: "must be set explicitly when NODE_ENV=production",
@@ -144,6 +146,9 @@ const SCHEMAS = {
     }),
   // A string of one digit, so that "1.0", " 1", "+1", "0x1", and "true" are all refused. SR-01
   // forbids a boolean "trust proxy" switch; no such variable exists and none is accepted here.
+  // The pattern is one character class, "[0-MAX]", which is right only while
+  // MAX_TRUSTED_PROXY_HOPS is a single digit (0 to 9). A case in env.test.ts fails if the
+  // constant ever leaves that range; the pattern must be rewritten in the same change.
   TRUSTED_PROXY_HOPS: z
     .string()
     .regex(new RegExp(`^[0-${MAX_TRUSTED_PROXY_HOPS}]$`), { error: ENV_RULES.trustedProxyHops })
@@ -199,11 +204,65 @@ function read<Name extends VariableName>(
   return undefined;
 }
 
-/** SEC-009, first half: the published local passwords are refused when `NODE_ENV=production`. */
-function checkDatabaseUrlForProduction(databaseUrl: string | undefined, issues: EnvIssue[]): void {
-  if (databaseUrl === undefined) return;
-  if (LOCAL_PLACEHOLDER_PASSWORDS.some((placeholder) => databaseUrl.includes(placeholder))) {
+function containsPlaceholder(text: string): boolean {
+  return LOCAL_PLACEHOLDER_PASSWORDS.some((placeholder) => text.includes(placeholder));
+}
+
+/**
+ * Replaces every well-formed escape (`%` and two hexadecimal digits) with the character of that
+ * byte and leaves everything else as it is. It cannot throw, unlike `decodeURIComponent`, which
+ * refuses a string with one broken escape as a whole. The placeholders are plain ASCII, so a
+ * byte-by-byte reading finds them however the bytes around them decode.
+ */
+function decodeEscapes(text: string): string {
+  return text.replace(/%([0-9A-Fa-f]{2})/g, (_match, hex: string) =>
+    String.fromCharCode(Number.parseInt(hex, 16)),
+  );
+}
+
+/**
+ * True when a published local password is in `databaseUrl`, as written or in a form the
+ * database driver turns into it (SEC-025). The driver does not use the variable as written: it
+ * parses it as a URL, percent-decodes the password in front of the host, and prefers a
+ * `password` query parameter to it. Where a string holds a broken escape the driver still
+ * decodes some of the well-formed ones, so every well-formed escape is decoded here.
+ *
+ * Looked at, each as written and with its escapes decoded: the whole text (this is the test
+ * that also finds a placeholder in places the URL parser does not name), and, as the URL parser
+ * gives them (it drops tabs and line breaks), the user name, the password, and every `password`
+ * query parameter.
+ */
+function hasPlaceholderPassword(databaseUrl: string): boolean {
+  const texts = [databaseUrl];
+  try {
+    const url = new URL(databaseUrl);
+    texts.push(url.username, url.password, ...url.searchParams.getAll("password"));
+  } catch {
+    // Not a URL: the rule `databaseUrl` has reported that. The text is still judged as written.
+  }
+  return texts.some(
+    (text) => containsPlaceholder(text) || containsPlaceholder(decodeEscapes(text)),
+  );
+}
+
+/**
+ * SEC-009, first half, with SEC-025: the published local passwords are refused when
+ * `NODE_ENV=production`, in `DATABASE_URL` and in `PGPASSWORD`. The driver falls back to
+ * `PGPASSWORD` when the URL carries no password, and it takes that variable as written, so it
+ * is judged as written. It is the one use this file makes of `PGPASSWORD`; the application does
+ * not read it otherwise. Each refusal names the variable and a fixed rule, never a value.
+ */
+function checkDatabaseUrlForProduction(
+  source: EnvSource,
+  databaseUrl: string | undefined,
+  issues: EnvIssue[],
+): void {
+  if (databaseUrl !== undefined && hasPlaceholderPassword(databaseUrl)) {
     issues.push({ variable: "DATABASE_URL", rule: ENV_RULES.databaseUrlPlaceholder });
+  }
+  const pgPassword = raw(source, "PGPASSWORD");
+  if (pgPassword !== undefined && containsPlaceholder(pgPassword)) {
+    issues.push({ variable: "PGPASSWORD", rule: ENV_RULES.pgPasswordPlaceholder });
   }
 }
 
@@ -236,7 +295,7 @@ export function parseEnv(source: EnvSource): Env {
 
   if (nodeEnv === "production") {
     // SEC-009: nothing of the local set-up may reach a deployed environment.
-    checkDatabaseUrlForProduction(databaseUrl, issues);
+    checkDatabaseUrlForProduction(source, databaseUrl, issues);
     if (raw(source, "DATABASE_URL_TEST") !== undefined) {
       issues.push({ variable: "DATABASE_URL_TEST", rule: ENV_RULES.databaseUrlTestInProduction });
     }
@@ -272,16 +331,17 @@ export function parseEnv(source: EnvSource): Env {
 }
 
 /**
- * Validates `DATABASE_URL` alone, with the SEC-009 refusal, and returns it. For the database
- * layer and for scripts that need the database and nothing else: creating the client must not
- * depend on `APP_URL` or the proxy variables being set. Not kept between calls, because the
- * integration harness points the variable at a different database per worker.
+ * Validates `DATABASE_URL` alone, with the SEC-009 refusals (the one of `PGPASSWORD` included,
+ * SEC-025), and returns it. For the database layer and for scripts that need the database and
+ * nothing else: creating the client must not depend on `APP_URL` or the proxy variables being
+ * set. Not kept between calls, because the integration harness points the variable at a
+ * different database per worker.
  */
 export function readDatabaseUrl(source: EnvSource = process.env): string {
   const issues: EnvIssue[] = [];
   const nodeEnv = read(source, "NODE_ENV", issues);
   const databaseUrl = read(source, "DATABASE_URL", issues);
-  if (nodeEnv === "production") checkDatabaseUrlForProduction(databaseUrl, issues);
+  if (nodeEnv === "production") checkDatabaseUrlForProduction(source, databaseUrl, issues);
   if (issues.length > 0 || databaseUrl === undefined) throw new EnvValidationError(issues);
   return databaseUrl;
 }
@@ -311,6 +371,19 @@ function trustsNoProxy(config: ClientAddressConfig): boolean {
  * throws, so that a misconfigured server stops at start instead of failing at a later request.
  *
  * In production it also writes the one warning SR-01 requires when no proxy is trusted.
+ *
+ * Last, it hands the validated `LOG_LEVEL` to the process-wide logger (`setLogLevel`), whichever
+ * logger this call itself was given. The order is deliberate: the two lines above are written
+ * at the logger's level of that moment, `info` in a process that has just started, and the
+ * configured level applies to everything after them. `LOG_LEVEL=error` therefore cannot silence
+ * the SR-01 warning, which SR-01 requires at every start, and a failed validation leaves the
+ * level alone.
+ *
+ * Known limit, measured with Next.js 16.4.0 on 2026-10-12 in production and in development
+ * mode: the framework compiles the start-up hook and the route handlers separately, and each
+ * gets its own copy of src/server/logger.ts. This call sets the level of the hook's copy only;
+ * the handlers' copy stays at its default. The remedy is in the logger (one level per process,
+ * kept on `globalThis`), not here; see docs/DEPLOYMENT.md, "What `LOG_LEVEL` reaches".
  */
 export function loadEnvAtStartup(options: { logger?: Logger } = {}): Env {
   const log = options.logger ?? defaultLogger;
@@ -332,5 +405,6 @@ export function loadEnvAtStartup(options: { logger?: Logger } = {}): Env {
       { component: "env" },
     );
   }
+  setLogLevel(env.logLevel);
   return env;
 }

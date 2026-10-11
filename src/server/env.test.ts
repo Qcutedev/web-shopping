@@ -1,13 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { assertClientAddressConfig } from "./client-address";
+import { assertClientAddressConfig, MAX_TRUSTED_PROXY_HOPS } from "./client-address";
 import {
   DEFAULT_PAYMENT_TIMEOUT_MINUTES,
   ENV_RULES,
   type EnvIssue,
   type EnvSource,
   EnvValidationError,
-  loadEnvAtStartup,
   MAX_PAYMENT_TIMEOUT_MINUTES,
   parseEnv,
   PAYMENT_SWEEP_INTERVAL_MS,
@@ -46,6 +45,8 @@ function issuesOf(env: EnvSource): EnvIssue[] {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   vi.resetModules();
 });
 
@@ -272,6 +273,199 @@ describe("parseEnv: production refusals (SEC-009)", () => {
   });
 });
 
+// SEC-025: the driver does not use the variable as written. It percent-decodes the password,
+// prefers a `password` query parameter, and falls back to PGPASSWORD when the URL has none.
+describe("parseEnv: the placeholder in the form the driver will use (SEC-025)", () => {
+  const PLACEHOLDERS = ["local_dev_only_not_a_secret", "local_test_only_not_a_secret"] as const;
+  const PLACEHOLDER_ISSUE = { variable: "DATABASE_URL", rule: ENV_RULES.databaseUrlPlaceholder };
+  const PGPASSWORD_ISSUE = { variable: "PGPASSWORD", rule: ENV_RULES.pgPasswordPlaceholder };
+
+  /** Every character written as an escape. */
+  function fullyEncoded(text: string): string {
+    return Array.from(
+      text,
+      (character) => `%${character.charCodeAt(0).toString(16).padStart(2, "0")}`,
+    ).join("");
+  }
+
+  /** Spellings that do not contain the placeholder as written and decode to it. */
+  function spellings(placeholder: string): string[] {
+    return [
+      placeholder.replace("_", "%5F"),
+      placeholder.replace("_", "%5f"),
+      placeholder.replaceAll("_", "%5F"),
+      `%6C${placeholder.slice(1)}`,
+      fullyEncoded(placeholder),
+    ];
+  }
+
+  function refusedByBoth(env: EnvSource, expected: EnvIssue[]): void {
+    expect(issuesOf(env)).toEqual(expected);
+    let thrown: unknown;
+    try {
+      readDatabaseUrl(env);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(EnvValidationError);
+    expect((thrown as EnvValidationError).issues).toEqual(expected);
+  }
+
+  it.each(PLACEHOLDERS)("refuses %s percent-encoded in front of the host", (placeholder) => {
+    for (const spelling of spellings(placeholder)) {
+      expect(spelling).not.toContain(placeholder);
+      refusedByBoth(
+        production({ DATABASE_URL: `postgresql://shop_app:${spelling}@db.example.test:5432/shop` }),
+        [PLACEHOLDER_ISSUE],
+      );
+    }
+  });
+
+  it.each(PLACEHOLDERS)(
+    "refuses %s percent-encoded in the password query parameter",
+    (placeholder) => {
+      for (const spelling of spellings(placeholder)) {
+        for (const url of [
+          `postgresql://shop_app@db.example.test/shop?password=${spelling}`,
+          `postgresql://shop_app:Zq7canaryPw@db.example.test/shop?schema=public&password=${spelling}`,
+          // The driver uses the last of two parameters with the same name.
+          `postgresql://shop_app@db.example.test/shop?password=Zq7canaryPw&password=${spelling}`,
+        ]) {
+          refusedByBoth(production({ DATABASE_URL: url }), [PLACEHOLDER_ISSUE]);
+        }
+      }
+    },
+  );
+
+  it("refuses an encoded placeholder beside an escape that is not well formed, without throwing", () => {
+    // The driver still decodes the well-formed escapes of such a string, so they are judged too.
+    for (const url of [
+      "postgresql://shop_app:local%5Fdev_only_not_a_secret%ZZ@db.example.test/shop",
+      "postgresql://shop_app:%E0%A4%A@db.example.test/shop?password=local%5Ftest_only_not_a_secret",
+      "postgresql://shop_app:local%5Fdev_only_not_a_secret%@db.example.test/shop",
+      "postgresql://shop_app:%local%5Fdev_only_not_a_secret@db.example.test/shop",
+    ]) {
+      refusedByBoth(production({ DATABASE_URL: url }), [PLACEHOLDER_ISSUE]);
+    }
+  });
+
+  it("an escape that is not well formed is not a refusal by itself, and nothing is thrown", () => {
+    for (const password of ["%", "%ZZ", "100%", "%E0%A4%A", "a%2", "%C3%28", "%ff%fe"]) {
+      const url = `postgresql://shop_app:${password}Zq7canaryPw@db.example.test/shop`;
+      expect(parseEnv(production({ DATABASE_URL: url })).databaseUrl).toBe(url);
+      expect(readDatabaseUrl(production({ DATABASE_URL: url }))).toBe(url);
+    }
+  });
+
+  it("refuses a placeholder that the URL parser puts together by dropping a tab or a line break", () => {
+    for (const blank of ["\t", "\n", "\r"]) {
+      const url = `postgresql://shop_app:local_dev${blank}_only_not_a_secret@db.example.test/shop`;
+      expect(url).not.toContain("local_dev_only_not_a_secret");
+      refusedByBoth(production({ DATABASE_URL: url }), [PLACEHOLDER_ISSUE]);
+    }
+  });
+
+  it("reports the variable once, however many forms of the placeholder it holds", () => {
+    const url =
+      "postgresql://shop_app:local_dev_only_not_a_secret@db.example.test/shop?password=local%5Ftest_only_not_a_secret";
+    refusedByBoth(production({ DATABASE_URL: url }), [PLACEHOLDER_ISSUE]);
+  });
+
+  it.each(PLACEHOLDERS)("refuses a PGPASSWORD that contains %s", (placeholder) => {
+    for (const value of [placeholder, `x${placeholder}`, `${placeholder}1`]) {
+      refusedByBoth(
+        production({
+          DATABASE_URL: "postgresql://shop_app@db.example.test/shop",
+          PGPASSWORD: value,
+        }),
+        [PGPASSWORD_ISSUE],
+      );
+      // Whether or not the URL carries a password of its own.
+      refusedByBoth(production({ PGPASSWORD: value }), [PGPASSWORD_ISSUE]);
+    }
+  });
+
+  it("reports DATABASE_URL and PGPASSWORD together, each by its own name", () => {
+    refusedByBoth(
+      production({
+        DATABASE_URL: "postgresql://shop_app:local%5Fdev_only_not_a_secret@db.example.test/shop",
+        PGPASSWORD: "local_test_only_not_a_secret",
+      }),
+      [PLACEHOLDER_ISSUE, PGPASSWORD_ISSUE],
+    );
+  });
+
+  it("accepts any other PGPASSWORD, and an empty one, in production", () => {
+    // The driver does not decode this variable, so an escaped spelling in it is another password.
+    for (const value of [
+      "Zq7canaryPw",
+      "local_dev",
+      "local%5Fdev_only_not_a_secret",
+      "",
+      undefined,
+    ]) {
+      expect(parseEnv(production({ PGPASSWORD: value })).nodeEnv).toBe("production");
+      expect(readDatabaseUrl(production({ PGPASSWORD: value }))).toBe(DATABASE_URL);
+    }
+  });
+
+  it("applies none of it outside production", () => {
+    for (const nodeEnv of ["development", "test", undefined]) {
+      const env = source({
+        NODE_ENV: nodeEnv,
+        DATABASE_URL: "postgresql://marketplace:local%5Fdev_only_not_a_secret@127.0.0.1:5432/dev",
+        PGPASSWORD: "local_dev_only_not_a_secret",
+      });
+      expect(() => parseEnv(env)).not.toThrow();
+      expect(() => readDatabaseUrl(env)).not.toThrow();
+    }
+  });
+
+  it("keeps accepting a password that only resembles a placeholder", () => {
+    for (const password of ["local%5Fother", "p%40ss%3Aword", "local_dev", "not_a_secret_1"]) {
+      const url = `postgresql://shop_app:${password}@db.example.test/shop?password=${password}`;
+      expect(parseEnv(production({ DATABASE_URL: url })).databaseUrl).toBe(url);
+    }
+  });
+
+  it("puts no value, encoded or decoded, into the error or the start-up log line", async () => {
+    const canary = "Zq7canary";
+    const env = production({
+      DATABASE_URL: `postgresql://shop_app:${canary}local%5Fdev_only_not_a_secret@db.example.test/shop?password=${canary}%6Cocal_test_only_not_a_secret`,
+      PGPASSWORD: `${canary}local_dev_only_not_a_secret`,
+    });
+    const error = failure(env);
+    const everything = JSON.stringify([error.message, error.issues, error.stack, { ...error }]);
+    for (const value of [canary, "example.test", "_not_a_secret", "%5F", "%6C", "shop_app"]) {
+      expect(everything).not.toContain(value);
+    }
+    expect(error.message).toContain(`- PGPASSWORD ${ENV_RULES.pgPasswordPlaceholder}`);
+
+    for (const name of [
+      "DATABASE_URL_TEST",
+      "TRUSTED_CLIENT_IP_HEADER",
+      "PAYMENT_TIMEOUT_MINUTES",
+      "LOG_LEVEL",
+    ]) {
+      vi.stubEnv(name, undefined);
+    }
+    for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
+    vi.resetModules();
+    const { loadEnvAtStartup: load } = await import("./env");
+    const lines: string[] = [];
+    const logger = createLogger({ level: "debug", write: (line) => lines.push(line) });
+    expect(() => load({ logger })).toThrow();
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0] ?? "{}")).toMatchObject({
+      level: "error",
+      issues: [PLACEHOLDER_ISSUE, PGPASSWORD_ISSUE],
+    });
+    for (const value of [canary, "example.test", "_not_a_secret", "%5F", "%6C", "shop_app"]) {
+      expect(lines[0]).not.toContain(value);
+    }
+  });
+});
+
 describe("parseEnv: TRUSTED_PROXY_HOPS (SR-01)", () => {
   it.each(["0", "1", "2", "3", "4", "5"])("accepts %s", (value) => {
     const env = parseEnv(source({ TRUSTED_PROXY_HOPS: value }));
@@ -286,6 +480,23 @@ describe("parseEnv: TRUSTED_PROXY_HOPS (SR-01)", () => {
       ]);
     },
   );
+
+  // CR-50: the pattern in env.ts is one character class, "[0-MAX]". That is right only while
+  // the maximum is a single digit; this case goes red the day SR-01 raises it to 10 or more.
+  it("is validated by a one-digit pattern, which holds only while the maximum is one digit", () => {
+    expect(Number.isInteger(MAX_TRUSTED_PROXY_HOPS)).toBe(true);
+    expect(MAX_TRUSTED_PROXY_HOPS).toBeGreaterThanOrEqual(0);
+    expect(MAX_TRUSTED_PROXY_HOPS).toBeLessThanOrEqual(9);
+    const highest = String(MAX_TRUSTED_PROXY_HOPS);
+    expect(parseEnv(source({ TRUSTED_PROXY_HOPS: highest })).trustedProxy.trustedProxyHops).toBe(
+      MAX_TRUSTED_PROXY_HOPS,
+    );
+    for (const value of [String(MAX_TRUSTED_PROXY_HOPS + 1), `${highest}0`, `0${highest}`]) {
+      expect(issuesOf(source({ TRUSTED_PROXY_HOPS: value }))).toEqual([
+        { variable: "TRUSTED_PROXY_HOPS", rule: ENV_RULES.trustedProxyHops },
+      ]);
+    }
+  });
 
   it("defaults to 0 outside production", () => {
     expect(parseEnv(source()).trustedProxy.trustedProxyHops).toBe(0);
@@ -581,6 +792,33 @@ describe("getEnv and import", () => {
     vi.stubEnv("APP_URL", APP_URL);
     expect(getEnv().appOrigin).toBe(APP_URL);
   });
+
+  it("refuses to run in a browser, before it reads any variable", async () => {
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("APP_URL", APP_URL);
+    vi.stubEnv("DATABASE_URL", DATABASE_URL);
+    vi.stubEnv("TRUSTED_PROXY_HOPS", undefined);
+    vi.stubEnv("TRUSTED_CLIENT_IP_HEADER", undefined);
+    vi.stubEnv("PAYMENT_TIMEOUT_MINUTES", undefined);
+    vi.stubEnv("LOG_LEVEL", undefined);
+    vi.resetModules();
+    const { getEnv, EnvValidationError: FreshError } = await import("./env");
+    vi.stubGlobal("window", {});
+    let thrown: unknown;
+    try {
+      getEnv();
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown).not.toBeInstanceOf(FreshError);
+    expect((thrown as Error).message).toBe(
+      "src/server/env.ts was loaded in a browser. It is server-only.",
+    );
+    // The guard is the only thing in the way: the same environment is accepted on a server.
+    vi.unstubAllGlobals();
+    expect(getEnv().appOrigin).toBe(APP_URL);
+  });
 });
 
 describe("loadEnvAtStartup", () => {
@@ -603,6 +841,7 @@ describe("loadEnvAtStartup", () => {
       TRUSTED_CLIENT_IP_HEADER: undefined,
       PAYMENT_TIMEOUT_MINUTES: undefined,
       LOG_LEVEL: undefined,
+      PGPASSWORD: undefined,
       ...overrides,
     };
     for (const [name, value] of Object.entries(values)) vi.stubEnv(name, value);
@@ -677,7 +916,110 @@ describe("loadEnvAtStartup", () => {
     expect(lines).toEqual([]);
   });
 
-  it("is exported for the start-up hook", () => {
-    expect(typeof loadEnvAtStartup).toBe("function");
+  it("passes on an error that is not a validation error unchanged, and logs nothing", async () => {
+    stubValid();
+    const { loadEnvAtStartup: load, EnvValidationError: FreshError } = await import("./env");
+    const { getLogLevel } = await import("./logger");
+    const { lines, logger } = capture();
+    // The one other error `getEnv` can throw: its browser guard.
+    vi.stubGlobal("window", {});
+    let thrown: unknown;
+    try {
+      load({ logger });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown).not.toBeInstanceOf(FreshError);
+    expect((thrown as Error).message).toContain("server-only");
+    expect(lines).toEqual([]);
+    expect(getLogLevel()).toBe("info");
+  });
+
+  describe("LOG_LEVEL reaches the process-wide logger", () => {
+    /** Lines the process-wide logger writes to stdout while `action` runs. */
+    function stdoutLines(action: () => void): Record<string, unknown>[] {
+      const chunks: string[] = [];
+      const write = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+        chunks.push(String(chunk));
+        return true;
+      });
+      try {
+        action();
+      } finally {
+        write.mockRestore();
+      }
+      return chunks
+        .join("")
+        .split("\n")
+        .filter((line) => line !== "")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+    }
+
+    it.each(["debug", "info", "warn", "error"] as const)(
+      "sets the level %s after a successful validation",
+      async (level) => {
+        stubValid({ LOG_LEVEL: level });
+        const { loadEnvAtStartup: load } = await import("./env");
+        const { getLogLevel, logger: processLogger } = await import("./logger");
+        expect(getLogLevel()).toBe("info");
+        expect(load({ logger: capture().logger }).logLevel).toBe(level);
+        expect(getLogLevel()).toBe(level);
+        // The level acts on the logger every module shares, and on a child of it.
+        const written = stdoutLines(() => {
+          processLogger.debug("d");
+          processLogger.info("i");
+          processLogger.child({ requestId: "req-12345678" }).warn("w");
+          processLogger.error("e");
+        });
+        const all = ["debug", "info", "warn", "error"];
+        expect(written.map((line) => line.level)).toEqual(all.slice(all.indexOf(level)));
+      },
+    );
+
+    it("keeps the default level info when LOG_LEVEL is not set", async () => {
+      stubValid();
+      const { loadEnvAtStartup: load } = await import("./env");
+      const { getLogLevel } = await import("./logger");
+      load({ logger: capture().logger });
+      expect(getLogLevel()).toBe("info");
+    });
+
+    it("leaves the level alone when the validation fails, so the error line is written", async () => {
+      stubValid({ LOG_LEVEL: "error", APP_URL: undefined });
+      const { loadEnvAtStartup: load, EnvValidationError: FreshError } = await import("./env");
+      const { getLogLevel } = await import("./logger");
+      let thrown: unknown;
+      const written = stdoutLines(() => {
+        try {
+          load();
+        } catch (error) {
+          thrown = error;
+        }
+      });
+      expect(thrown).toBeInstanceOf(FreshError);
+      expect(getLogLevel()).toBe("info");
+      expect(written).toHaveLength(1);
+      expect(written[0]).toMatchObject({
+        level: "error",
+        issues: [{ variable: "APP_URL", rule: ENV_RULES.required }],
+      });
+    });
+
+    // SR-01 requires the warning at start. It is written before LOG_LEVEL takes effect, so that
+    // LOG_LEVEL=error cannot silence it; every later `warn` line is then dropped as configured.
+    it("writes the SR-01 warning even with LOG_LEVEL=error, and only then applies the level", async () => {
+      stubValid({ NODE_ENV: "production", TRUSTED_PROXY_HOPS: "0", LOG_LEVEL: "error" });
+      const { loadEnvAtStartup: load } = await import("./env");
+      const { getLogLevel, logger: processLogger } = await import("./logger");
+      const written = stdoutLines(() => {
+        load();
+      });
+      expect(written).toHaveLength(1);
+      expect(written[0]).toMatchObject({ level: "warn", component: "env" });
+      expect(String(written[0]?.message)).toContain("every per-address rate limit is shared");
+      expect(getLogLevel()).toBe("error");
+      expect(stdoutLines(() => processLogger.warn("after the start"))).toEqual([]);
+    });
   });
 });

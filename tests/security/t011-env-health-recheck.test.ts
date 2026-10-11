@@ -289,7 +289,7 @@ describe("SEC-025 the placeholder check reads the raw text, not the password the
     }
   });
 
-  it.fails("SEC-025 a percent-encoded placeholder password is refused in production", () => {
+  it("SEC-025 a percent-encoded placeholder password is refused in production", () => {
     for (const placeholder of [DEV_PLACEHOLDER, TEST_PLACEHOLDER]) {
       for (const spelling of spellings(placeholder)) {
         const source = production({ DATABASE_URL: url(spelling) });
@@ -299,25 +299,22 @@ describe("SEC-025 the placeholder check reads the raw text, not the password the
     }
   });
 
-  it.fails(
-    "SEC-025 a percent-encoded placeholder in the password query parameter is refused",
-    () => {
-      for (const placeholder of [DEV_PLACEHOLDER, TEST_PLACEHOLDER]) {
-        for (const spelling of spellings(placeholder)) {
-          for (const candidate of [
-            `postgresql://marketplace@${HOST}/marketplace?password=${spelling}`,
-            url(REAL, `?schema=public&password=${spelling}`),
-          ]) {
-            const source = production({ DATABASE_URL: candidate });
-            expect(() => parseEnv(source), candidate).toThrow(EnvValidationError);
-            expect(() => readDatabaseUrl(source), candidate).toThrow(EnvValidationError);
-          }
+  it("SEC-025 a percent-encoded placeholder in the password query parameter is refused", () => {
+    for (const placeholder of [DEV_PLACEHOLDER, TEST_PLACEHOLDER]) {
+      for (const spelling of spellings(placeholder)) {
+        for (const candidate of [
+          `postgresql://marketplace@${HOST}/marketplace?password=${spelling}`,
+          url(REAL, `?schema=public&password=${spelling}`),
+        ]) {
+          const source = production({ DATABASE_URL: candidate });
+          expect(() => parseEnv(source), candidate).toThrow(EnvValidationError);
+          expect(() => readDatabaseUrl(source), candidate).toThrow(EnvValidationError);
         }
       }
-    },
-  );
+    }
+  });
 
-  it.fails("SEC-025 a placeholder password supplied through PGPASSWORD is refused", () => {
+  it("SEC-025 a placeholder password supplied through PGPASSWORD is refused", () => {
     for (const placeholder of [DEV_PLACEHOLDER, TEST_PLACEHOLDER]) {
       const source = production({
         DATABASE_URL: `postgresql://marketplace@${HOST}:5432/marketplace`,
@@ -389,24 +386,21 @@ describe("T-011 health check: what a caller can make it write", () => {
   // SEC-026 (OPEN, Low). The endpoint is public and has no rate limit. While the database is
   // down, every request writes one error-level line: the probe is shared, the line is not, and a
   // probe that fails at once (a refused connection) is started again for the next request.
-  it.fails(
-    "SEC-026 an outage is logged once, not once for every caller of the public endpoint",
-    async () => {
-      const { lines, log } = recording();
-      const check = createHealthCheck({
-        probe: () => Promise.reject(Object.assign(new Error("down"), { code: "ECONNREFUSED" })),
-        logger: log,
-        // The clock does not move: everything below happens within one instant of one outage.
-        now: () => 1_000,
-      });
-      await Promise.all(Array.from({ length: 50 }, () => check()));
-      for (let request = 0; request < 200; request += 1) await check();
-      const errors = lines.filter(
-        (line) => (JSON.parse(line) as { level: string }).level === "error",
-      );
-      expect(errors.length).toBeGreaterThanOrEqual(1);
-      expect(errors.length).toBeLessThanOrEqual(2);
-      expect(lines.length).toBeLessThanOrEqual(2);
-    },
-  );
+  it("SEC-026 an outage is logged once, not once for every caller of the public endpoint", async () => {
+    const { lines, log } = recording();
+    const check = createHealthCheck({
+      probe: () => Promise.reject(Object.assign(new Error("down"), { code: "ECONNREFUSED" })),
+      logger: log,
+      // The clock does not move: everything below happens within one instant of one outage.
+      now: () => 1_000,
+    });
+    await Promise.all(Array.from({ length: 50 }, () => check()));
+    for (let request = 0; request < 200; request += 1) await check();
+    const errors = lines.filter(
+      (line) => (JSON.parse(line) as { level: string }).level === "error",
+    );
+    expect(errors.length).toBeGreaterThanOrEqual(1);
+    expect(errors.length).toBeLessThanOrEqual(2);
+    expect(lines.length).toBeLessThanOrEqual(2);
+  });
 });
