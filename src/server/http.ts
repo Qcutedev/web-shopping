@@ -245,6 +245,28 @@ function contentLengthAllows(request: Request, maxBytes: number): boolean {
 const INITIAL_BODY_BUFFER_BYTES = 4_096;
 
 /**
+ * How many chunks with no bytes one body may contain before the read is refused (SR-05 item 9,
+ * SEC-021). Fixed, whatever the byte limit of the call: together with the byte limit it bounds
+ * the number of reads of one body to `maxBytes + MAX_EMPTY_BODY_CHUNKS + 2`.
+ */
+export const MAX_EMPTY_BODY_CHUNKS = 200_000;
+
+/**
+ * The length of a typed array as the engine knows it, read through the built-in getter of
+ * `%TypedArray%.prototype`. A subclass of `Uint8Array` can define a `byteLength` of its own
+ * that reports anything (SEC-021); it cannot change what this returns, which is also the number
+ * of bytes that `set` copies. No code of the chunk runs.
+ */
+const realByteLength: (chunk: Uint8Array) => number = (() => {
+  const getter = Object.getOwnPropertyDescriptor(
+    Object.getPrototypeOf(Uint8Array.prototype) as object,
+    "byteLength",
+  )?.get;
+  if (getter === undefined) throw new TypeError("The typed array length getter is missing.");
+  return (chunk: Uint8Array): number => Reflect.apply(getter, chunk, []) as number;
+})();
+
+/**
  * Reads the body as a stream with a running byte count and stops as soon as the count passes
  * `maxBytes` (`Content-Length` can be absent or untrue). At most one chunk beyond the limit is
  * taken from the stream; the rest is cancelled, not buffered. Returns undefined when the body
@@ -258,8 +280,17 @@ const INITIAL_BODY_BUFFER_BYTES = 4_096;
  *   - a chunk that is not a `Uint8Array` cannot be counted. It is a server fault: the stream is
  *     cancelled and a TypeError is thrown at once (a 500 through `errorResponse`). The message
  *     names nothing of the chunk;
- *   - a cancellation is started and never awaited, so neither answer waits for a source that
- *     does not confirm it.
+ *   - a cancellation is started and never awaited, so no answer waits for a source that does
+ *     not confirm it.
+ *
+ * The read ends (SR-05 item 9, SEC-021):
+ *   - the count uses the real length of each chunk (`realByteLength`), never the `byteLength`
+ *     the chunk reports, so the count and the copy always agree and a subclass that reports
+ *     `NaN` or too little is counted for what it holds;
+ *   - chunks with no bytes are counted over the whole body. One more than
+ *     MAX_EMPTY_BODY_CHUNKS is a server fault like a chunk that is not bytes (no body that
+ *     arrives from the network is made of them): the stream is cancelled and a TypeError is
+ *     thrown.
  *
  * The result is a view of the buffer, exactly as long as the body.
  */
@@ -274,6 +305,7 @@ async function readBytesUpTo(
   };
   let buffer = new Uint8Array(Math.min(maxBytes, INITIAL_BODY_BUFFER_BYTES));
   let total = 0;
+  let emptyChunks = 0;
   for (;;) {
     const result = await reader.read();
     if (result.done) break;
@@ -283,8 +315,16 @@ async function readBytesUpTo(
       cancel();
       throw new TypeError("readJsonBody: the request body produced a chunk that is not bytes.");
     }
-    if (chunk.byteLength === 0) continue;
-    const needed = total + chunk.byteLength;
+    const chunkBytes = realByteLength(chunk);
+    if (chunkBytes === 0) {
+      emptyChunks += 1;
+      if (emptyChunks > MAX_EMPTY_BODY_CHUNKS) {
+        cancel();
+        throw new TypeError("readJsonBody: the request body produced too many empty chunks.");
+      }
+      continue;
+    }
+    const needed = total + chunkBytes;
     if (needed > maxBytes) {
       cancel();
       return undefined;

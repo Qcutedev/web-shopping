@@ -1,20 +1,23 @@
 /**
  * Independent re-check of the fix for SEC-020 (rule SR-05 item 8 in docs/SECURITY.md): the
  * rewritten `readBytesUpTo` in src/server/http.ts copies a body into one buffer that grows up to
- * the limit. Owner: security agent.
+ * the limit. Also the reproduction of SEC-021, which that re-check found, and the re-check of its
+ * fix (rule SR-05 item 9). Owner: security agent.
  *
- *   it(...)        behaviour that was checked on 2026-10-11 and holds. A failure is a regression.
- *   it.fails(...)  an OPEN finding (SEC-021). The body asserts the SECURE behaviour, which the
- *                  code does not have yet, so the assertion fails and Vitest reports the test as
- *                  passed ("expected fail"). When the owner fixes the code the test turns red;
- *                  the owner may then change `it.fails` to `it` without touching the body, and
- *                  the security agent re-checks. Nobody else may edit an assertion, skip, or
- *                  delete these.
+ *   it(...)  behaviour that was checked on 2026-10-11 and holds. A failure is a regression.
+ *
+ * SEC-021 is FIXED (re-checked 2026-10-11). Its two reproductions, in the block "SEC-021 a body
+ * can be read without end", were `it.fails` while the finding was open. The owner of the code
+ * changed them to `it` with the fix and did not touch a body: the committed file with only
+ * `it.fails(` replaced by `it(`, put through Prettier, was that file. They are now regression
+ * tests, and so is every other case here; nobody but the security agent may edit an assertion,
+ * a threshold, or a timeout in them, or skip or delete them. No finding is open in this file.
  *
  * The five reproductions of SEC-020 itself are in `sec019-body-limit-recheck.test.ts`. The cases
  * here are the ones a single growing buffer can get wrong: the copy (offsets, growth, the cap at
  * the limit), the exact boundary at every size where the buffer grows, what counts as bytes, and
- * the memory held by many requests at once and over a real connection.
+ * the memory held by many requests at once and over a real connection; and, for SR-05 item 9,
+ * the allowance of empty chunks and the length a chunk is counted with.
  *
  * `readJsonBody` is called directly, and once behind a plain `node:http` server on the loopback
  * interface. No route handler exists, so nothing here goes through the framework.
@@ -34,6 +37,7 @@ import { AppError } from "../../src/server/errors";
 import {
   DEFAULT_JSON_BODY_LIMIT_BYTES,
   errorResponse,
+  MAX_EMPTY_BODY_CHUNKS,
   MAX_JSON_BODY_LIMIT_BYTES,
   readJsonBody,
 } from "../../src/server/http";
@@ -572,61 +576,325 @@ describe("SEC-020 re-check: memory is in proportion to the limit", () => {
 });
 
 // ---------------------------------------------------------------------------
-// OPEN finding registered by the re-check of the SEC-020 fix. Owner of the code: backend-api.
+// Finding registered by the re-check of the SEC-020 fix and FIXED the same day (re-checked).
+// These two were its reproductions and are now regression tests. Owner of the code: backend-api.
 // ---------------------------------------------------------------------------
 
 describe("SEC-021 a body can be read without end when its chunks add nothing to the count", () => {
-  it.fails(
-    "a long run of empty chunks is refused instead of being read for ever",
-    async () => {
-      // 500,000 chunks of no bytes, then a valid one-byte document. A body of at most 102,400
-      // bytes never needs more chunks than that; the run stands for one that does not end.
-      const run = 500_000;
+  it("a long run of empty chunks is refused instead of being read for ever", async () => {
+    // 500,000 chunks of no bytes, then a valid one-byte document. A body of at most 102,400
+    // bytes never needs more chunks than that; the run stands for one that does not end.
+    const run = 500_000;
+    let pulls = 0;
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          pulls += 1;
+          if (pulls > run) {
+            controller.enqueue(encode("1"));
+            controller.close();
+          } else controller.enqueue(new Uint8Array(0));
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    // Secure: the read is refused long before the run ends. Any bound up to twice the byte
+    // limit satisfies this test.
+    await rejection(readJsonBody(post(body)));
+    expect(pulls).toBeLessThanOrEqual(2 * DEFAULT_JSON_BODY_LIMIT_BYTES);
+  }, 60_000);
+
+  it("a chunk whose reported length is not a number does not switch the limit off", async () => {
+    // A subclass passes `instanceof Uint8Array` and reports its own `byteLength`.
+    class Uncounted extends Uint8Array {
+      override get byteLength(): number {
+        return Number.NaN;
+      }
+    }
+    let pulls = 0;
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          pulls += 1;
+          if (pulls > 400) controller.close();
+          else controller.enqueue(new Uncounted(1_000).fill(0x20));
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    // 400,000 bytes against a limit of 10,000.
+    await rejection(readJsonBody(post(body), { maxBytes: 10_000 }));
+    // Secure: stop at the first chunk that cannot be counted, or at the latest at the limit.
+    expect(pulls).toBeLessThanOrEqual(11);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Re-check of the SEC-021 fix (SR-05 item 9), 2026-10-11.
+// ---------------------------------------------------------------------------
+
+describe("SEC-021 re-check: the allowance of empty chunks is fixed, exact, and never reset", () => {
+  const empty = (): Uint8Array => new Uint8Array(0);
+  function* empties(count: number): Generator<Uint8Array> {
+    for (let sent = 0; sent < count; sent += 1) yield empty();
+  }
+
+  it("the allowance is the number SR-05 item 9 states", () => {
+    // Raising it is a change of the rule, decided in docs/SECURITY.md, not in the code.
+    expect(MAX_EMPTY_BODY_CHUNKS).toBe(200_000);
+  });
+
+  it("exactly the allowance is read, and one empty chunk more is refused at that chunk", async () => {
+    for (const maxBytes of [1, 1_000, DEFAULT_JSON_BODY_LIMIT_BYTES, MAX_JSON_BODY_LIMIT_BYTES]) {
+      const allowed = streamed(
+        (function* () {
+          yield* empties(200_000);
+          yield encode("7");
+        })(),
+      );
+      expect(await readJsonBody(allowed.request, { maxBytes }), `limit ${maxBytes}`).toBe(7);
+      expect(allowed.taken.cancelled).toBe(false);
+
+      // An endless run: the count of pulls shows where the reader stopped.
+      const refused = streamed(
+        (function* () {
+          for (;;) yield empty();
+        })(),
+      );
+      const error = await rejection(readJsonBody(refused.request, { maxBytes }));
+      expect(error).toBeInstanceOf(TypeError);
+      expect(error).not.toBeInstanceOf(AppError);
+      expect(refused.taken, `limit ${maxBytes}`).toEqual({ pulls: 200_001, cancelled: true });
+      // Nothing more is asked of the source afterwards.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(refused.taken.pulls).toBe(200_001);
+    }
+  }, 60_000);
+
+  it("the refusal is a server fault that carries nothing and waits for nothing", async () => {
+    const marker = "QZXVMARKER";
+    const hanging = streamed(
+      (function* () {
+        yield encode(`"${marker}`);
+        for (;;) yield empty();
+      })(),
+      JSON_HEADERS,
+      () => new Promise(() => undefined),
+    );
+    const pending = readJsonBody(hanging.request);
+    pending.catch(() => undefined);
+    expect(await settlesWithin(pending, 5_000)).toBe("settled");
+    const error = await rejection(pending);
+    expect(error).toBeInstanceOf(TypeError);
+    expect(String(error)).not.toContain(marker);
+    expect((error as Error).cause).toBeUndefined();
+    expect(hanging.taken).toEqual({ pulls: 200_002, cancelled: true });
+    const lines: string[] = [];
+    const log = createLogger({ level: "debug", write: (line) => lines.push(line) });
+    const response = errorResponse(error, { requestId: REQUEST_ID, logger: log });
+    expect(response.status).toBe(500);
+    expect(await response.text()).not.toContain(marker);
+    expect(lines).toHaveLength(1);
+    expect(lines.join("\n")).not.toContain(marker);
+  }, 60_000);
+
+  it("bytes between the empty chunks do not start the count again", async () => {
+    // Alternating without end: an empty chunk, then one byte. Under the 1 MiB limit the empty
+    // chunks run out first, at the 200,001st of them, which is pull 400,001.
+    const alternating = (): Generator<Uint8Array> =>
+      (function* () {
+        for (;;) {
+          yield empty();
+          yield Uint8Array.of(0x20);
+        }
+      })();
+    const byCount = streamed(alternating());
+    const fault = await rejection(
+      readJsonBody(byCount.request, { maxBytes: MAX_JSON_BODY_LIMIT_BYTES }),
+    );
+    expect(fault).toBeInstanceOf(TypeError);
+    expect(byCount.taken).toEqual({ pulls: 400_001, cancelled: true });
+    // Under a small limit the bytes run out first: 413 at byte 1,001, which is pull 2,002.
+    const byBytes = streamed(alternating());
+    expect((await appError(readJsonBody(byBytes.request, { maxBytes: 1_000 }))).status).toBe(413);
+    expect(byBytes.taken).toEqual({ pulls: 2_002, cancelled: true });
+    // Runs of any shape add up: 199,999, then 1 after a byte, then 1 more after another byte.
+    const bursts = streamed(
+      (function* () {
+        yield* empties(199_999);
+        yield Uint8Array.of(0x20);
+        yield empty();
+        yield Uint8Array.of(0x20);
+        yield empty();
+        yield encode("7");
+      })(),
+    );
+    expect(await rejection(readJsonBody(bursts.request))).toBeInstanceOf(TypeError);
+    expect(bursts.taken).toEqual({ pulls: 200_003, cancelled: true });
+  }, 60_000);
+
+  it("no body is read in more than its byte limit plus the allowance plus two reads", async () => {
+    // The worst a source can do: every permitted empty chunk and every permitted byte, alone.
+    for (const maxBytes of [1, 5_000, DEFAULT_JSON_BODY_LIMIT_BYTES]) {
+      const worst = streamed(
+        (function* () {
+          yield* empties(200_000);
+          for (;;) yield Uint8Array.of(0x37);
+        })(),
+      );
+      expect((await appError(readJsonBody(worst.request, { maxBytes }))).status).toBe(413);
+      expect(worst.taken.pulls).toBe(200_000 + maxBytes + 1);
+      expect(worst.taken.pulls).toBeLessThanOrEqual(maxBytes + MAX_EMPTY_BODY_CHUNKS + 2);
+    }
+  }, 60_000);
+});
+
+describe("SEC-021 re-check: a chunk is counted with the length it has, not the one it reports", () => {
+  /** A `Uint8Array` subclass whose own `byteLength` and `length` report `reported`. */
+  function lying(reported: () => number): new (bytes: ArrayLike<number>) => Uint8Array {
+    return class Lying extends Uint8Array {
+      override get byteLength(): number {
+        return reported();
+      }
+      override get length(): number {
+        return reported();
+      }
+    };
+  }
+
+  const REPORTS: [string, () => number][] = [
+    ["NaN", () => Number.NaN],
+    ["zero", () => 0],
+    ["one", () => 1],
+    ["minus one", () => -1],
+    ["a negative fraction", () => -0.5],
+    ["minus infinity", () => Number.NEGATIVE_INFINITY],
+    ["infinity", () => Number.POSITIVE_INFINITY],
+    ["more than any limit", () => 2 ** 40],
+    ["a text", () => "12" as unknown as number],
+    ["nothing", () => undefined as unknown as number],
+  ];
+
+  it.each(REPORTS)(
+    "a chunk that reports %s is stopped by its real bytes",
+    async (_name, report) => {
+      const Lying = lying(report);
       let pulls = 0;
       const body = new ReadableStream<Uint8Array>(
         {
           pull(controller) {
             pulls += 1;
-            if (pulls > run) {
-              controller.enqueue(encode("1"));
-              controller.close();
-            } else controller.enqueue(new Uint8Array(0));
+            controller.enqueue(new Lying(new Uint8Array(1_000).fill(0x20)));
           },
         },
         { highWaterMark: 0 },
       );
-      // Secure: the read is refused long before the run ends. Any bound up to twice the byte
-      // limit satisfies this test.
-      await rejection(readJsonBody(post(body)));
-      expect(pulls).toBeLessThanOrEqual(2 * DEFAULT_JSON_BODY_LIMIT_BYTES);
+      // 1,000 real bytes per chunk against 10,000: the eleventh chunk is the one over the limit.
+      expect((await appError(readJsonBody(post(body), { maxBytes: 10_000 }))).status).toBe(413);
+      expect(pulls).toBe(11);
     },
-    60_000,
   );
 
-  it.fails(
-    "a chunk whose reported length is not a number does not switch the limit off",
-    async () => {
-      // A subclass passes `instanceof Uint8Array` and reports its own `byteLength`.
-      class Uncounted extends Uint8Array {
-        override get byteLength(): number {
-          return Number.NaN;
-        }
+  it.each(REPORTS)("a chunk that reports %s is copied for what it holds", async (_name, report) => {
+    const Lying = lying(report);
+    const { text, value } = documentOf(9_000);
+    const chunks = split(encode(text), 700).map((part) => new Lying(part));
+    // Exactly the limit: one byte less or more in the count would refuse or cut the body.
+    expect(await readJsonBody(streamed(chunks).request, { maxBytes: 9_000 })).toBe(value);
+    const over = streamed([...chunks, new Lying([0x20])]);
+    expect((await appError(readJsonBody(over.request, { maxBytes: 9_000 }))).status).toBe(413);
+  });
+
+  it("no code of a subclass runs while its chunk is counted and copied", async () => {
+    const asked: string[] = [];
+    class Loud extends Uint8Array {
+      override get byteLength(): number {
+        asked.push("byteLength");
+        throw new Error("byteLength was asked");
       }
-      let pulls = 0;
-      const body = new ReadableStream<Uint8Array>(
-        {
-          pull(controller) {
-            pulls += 1;
-            if (pulls > 400) controller.close();
-            else controller.enqueue(new Uncounted(1_000).fill(0x20));
-          },
-        },
-        { highWaterMark: 0 },
-      );
-      // 400,000 bytes against a limit of 10,000.
-      await rejection(readJsonBody(post(body), { maxBytes: 10_000 }));
-      // Secure: stop at the first chunk that cannot be counted, or at the latest at the limit.
-      expect(pulls).toBeLessThanOrEqual(11);
-    },
-  );
+      override get length(): number {
+        asked.push("length");
+        throw new Error("length was asked");
+      }
+      override get byteOffset(): number {
+        asked.push("byteOffset");
+        throw new Error("byteOffset was asked");
+      }
+      override [Symbol.iterator](): never {
+        asked.push("iterator");
+        throw new Error("the chunk was iterated");
+      }
+      override subarray(): never {
+        asked.push("subarray");
+        throw new Error("subarray was called");
+      }
+      override set(): never {
+        asked.push("set");
+        throw new Error("set was called");
+      }
+      override slice(): never {
+        asked.push("slice");
+        throw new Error("slice was called");
+      }
+    }
+    const chunks = [new Loud(encode('{"quantity"')), new Loud(0), new Loud(encode(":2}"))];
+    expect(await readJsonBody(streamed(chunks).request, { maxBytes: 14 })).toEqual({ quantity: 2 });
+    expect(asked).toEqual([]);
+  });
+
+  it("a chunk with no bytes that reports a length is an empty chunk", async () => {
+    const Lying = lying(() => 1_000);
+    const padded = [new Lying([]), encode("7"), new Lying([]), new Lying([])];
+    expect(await readJsonBody(streamed(padded).request, { maxBytes: 1 })).toBe(7);
+    const endless = streamed(
+      (function* () {
+        for (;;) yield new Lying([]);
+      })(),
+    );
+    expect(await rejection(readJsonBody(endless.request))).toBeInstanceOf(TypeError);
+    expect(endless.taken).toEqual({ pulls: 200_001, cancelled: true });
+  }, 60_000);
+
+  it("a chunk whose memory was taken away or shrunk counts as what is left of it", async () => {
+    // Detached: the bytes were transferred elsewhere, the view is empty.
+    const detached = encode("999");
+    structuredClone(detached.buffer, { transfer: [detached.buffer as ArrayBuffer] });
+    expect(await readJsonBody(streamed([detached, encode("7")]).request, { maxBytes: 1 })).toBe(7);
+
+    // A view on a buffer that can be resized (not in this project's TypeScript library yet).
+    const Resizable = ArrayBuffer as unknown as new (
+      bytes: number,
+      options: { maxByteLength: number },
+    ) => ArrayBuffer & { resize(bytes: number): void };
+    const tracking = new Uint8Array(new Resizable(2, { maxByteLength: 64 }));
+    tracking.set([0x31, 0x32]);
+    expect(await readJsonBody(streamed([tracking]).request, { maxBytes: 2 })).toBe(12);
+    const shrunkBuffer = new Resizable(8, { maxByteLength: 64 });
+    const outOfBounds = new Uint8Array(shrunkBuffer, 4, 4).fill(0x39);
+    shrunkBuffer.resize(2);
+    expect(await readJsonBody(streamed([outOfBounds, encode("7")]).request, { maxBytes: 1 })).toBe(
+      7,
+    );
+  });
+
+  it("an object that only passes for bytes is a server fault with nothing read after it", async () => {
+    // Fails closed. These pass `instanceof Uint8Array` and have no bytes the engine knows of.
+    const impostors: [string, () => unknown][] = [
+      ["a Proxy of bytes", () => new Proxy(encode("7"), {})],
+      [
+        "an object with the prototype of bytes",
+        () => Object.create(Uint8Array.prototype) as unknown,
+      ],
+    ];
+    for (const [name, make] of impostors) {
+      const { request, taken } = streamed([encode(" "), make(), encode("7")]);
+      const error = await rejection(readJsonBody(request));
+      expect(error, name).toBeInstanceOf(TypeError);
+      expect(error, name).not.toBeInstanceOf(AppError);
+      expect(taken.pulls, name).toBe(2);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(taken.pulls, name).toBe(2);
+      expect(errorResponse(error, { requestId: REQUEST_ID }).status, name).toBe(500);
+    }
+  });
 });
