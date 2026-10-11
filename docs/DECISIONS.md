@@ -34,6 +34,7 @@ Decisions marked `PROPOSED` are not yet validated against the installed stack; e
 | D-024 | 2026-10-11 | Every status transition is a conditional update | ACCEPTED |
 | D-025 | 2026-10-11 | Owner answers to open questions OQ-01 to OQ-19 and OQ-21 to OQ-24 | ACCEPTED |
 | D-026 | 2026-10-11 | Owner answers to open questions OQ-25 to OQ-50 | ACCEPTED |
+| D-027 | 2026-10-11 | Sessions end on logout and user deactivation, not on store suspension (supersedes part of D-004) | ACCEPTED |
 
 ## Details
 
@@ -180,6 +181,9 @@ On 2026-10-11 (third session) the owner answered OQ-25 to OQ-50, choosing the re
 | OQ-48 | 90 days is a maximum, not a promise that logs are available that long. It covers every copy, including log backups. Exception: log lines that are evidence in an open security investigation may be kept until the investigation is closed, limited to the relevant lines, with a written record of what is kept and why. |
 | OQ-49 | The IP address and browser details of an expired session must be gone within one day of expiry (a daily clean-up is enough). |
 | OQ-50 | Database backups are kept 30 days. |
+
+### D-027 When sessions are revoked
+Supersedes one phrase of D-004 ("server-side revocation on logout, deactivation, and suspension"); the rest of D-004 stands. Sessions are deleted on logout and when a user is deactivated. Suspending a store does **not** end its owner's sessions: BR-14 requires a suspended store's seller to stay able to log in and fulfil existing orders. The store status is read from the database on every request instead. Detail: DATA_MODEL.md section 6.1.
 
 ## Pending decisions for the user
 
