@@ -36,7 +36,7 @@ One owner per path. An agent that needs a change outside its paths requests it i
 | `prisma/**` (including generated client output), `src/server/db/**` | database |
 | `src/server/auth/**`, `src/app/api/auth/**`, the request middleware or proxy file, `scripts/bootstrap-admin.ts` | auth |
 | `src/modules/**`, `src/app/api/v1/**`, `src/app/api/files/**`, `src/server/**` (other) | backend-api |
-| `src/server/env.ts`, `src/server/health.ts`, `src/app/api/health/**` | devops |
+| `src/server/env.ts`, `src/server/health.ts`, `src/app/api/health/**`, `src/instrumentation.ts` | devops |
 | `src/app/(storefront)/**`, `src/app/seller/**`, `src/app/admin/**`, `src/app/layout.tsx`, root `error`, `not-found`, and `loading` files, `public/**`, `src/components/**` (except `ui`), `src/i18n/**`, `src/lib/**` (except `utils.ts`) | frontend |
 | `src/components/ui/**`, `src/lib/utils.ts`, `src/app/globals.css`, Tailwind theme, `docs/DESIGN_SYSTEM.md` | ui-ux-design |
 | `tests/**` (except `tests/security`), `e2e/**`, `vitest.integration.config.*`, Playwright config, `docs/TEST_STRATEGY.md` | qa |
