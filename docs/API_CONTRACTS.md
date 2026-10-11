@@ -1,6 +1,6 @@
 # API Contracts
 
-Owner: backend-api agent. This is the **planned** contract, corrected on 2026-10-11 after the T-004 planning review ([reviews/T-004-findings.md](reviews/T-004-findings.md)) the owner answers in [DECISIONS.md](DECISIONS.md) D-025, D-026, and D-028, and the technical rulings in D-029. **No endpoint is implemented yet.** Once an endpoint is built, the Zod schemas in `src/modules/<domain>/schema.ts` are authoritative for it and this document must match them.
+Owner: backend-api agent. This is the **planned** contract, corrected on 2026-10-11 after the T-004 planning review ([reviews/T-004-findings.md](reviews/T-004-findings.md)) the owner answers in [DECISIONS.md](DECISIONS.md) D-025, D-026, and D-028, and the technical rulings in D-029, and corrected again the same day after the cross-document check, for the technical rulings in D-031. **No endpoint is implemented yet.** Once an endpoint is built, the Zod schemas in `src/modules/<domain>/schema.ts` are authoritative for it and this document must match them.
 
 What this document must agree with, and which one wins when a name or value is in question:
 
@@ -11,11 +11,11 @@ What this document must agree with, and which one wins when a name or value is i
 | Security rules (SR), threat controls (TM) | [SECURITY.md](SECURITY.md) |
 | Decisions (D) and owner answers (OQ-01 to OQ-19 and OQ-21 to OQ-24 in D-025; OQ-25 to OQ-50 in D-026) | [DECISIONS.md](DECISIONS.md) |
 
-**D-026, D-028, and D-029 are binding and newer than parts of the other documents.** Where another document has not yet been updated to one of them, this contract follows the decision and cites it; the places known to lag are listed in [section 8.4](#84-documents-that-do-not-yet-match-the-decisions).
+**D-026, D-028, D-029, and D-031 are binding and newer than parts of the other documents.** Where another document has not yet been updated to one of them, this contract follows the decision and cites it; the places known to lag are listed in [section 8.4](#84-documents-that-do-not-yet-match-the-decisions).
 
 Markers used below:
 
-- **`OPEN (owner)`**: the point waits for an owner answer that no document and no decision gives. The behaviour is not defined and nothing may be built on a guess (D-019). After D-028 no such point remains in this contract.
+- **`OPEN (owner)`**: the point waits for an owner answer that no document and no decision gives. The behaviour is not defined and nothing may be built on a guess (D-019). One such point is listed in [section 8.1](#81-open-owner).
 - **`OPEN (technical)`**: not an owner matter; settled by the named task.
 - **`DISAGREEMENT`**: two documents say different things and no decision settles it. The contract does not pick a side. None remains ([section 8.3](#83-disagreements-between-documents)).
 
@@ -28,10 +28,11 @@ All open points are collected in [section 8](#8-open-points).
 - Base path: `/api/v1`. JSON request and response bodies, `Content-Type: application/json` (the upload endpoint uses `multipart/form-data`).
 - Authentication: session cookie set by the auth handler at `/api/auth/*`. No bearer tokens in the MVP.
 - Mutations (`POST`, `PATCH`, `PUT`, `DELETE`) require an `Origin` header matching the application origin.
-- Mutation bodies reject unknown keys (strict objects). A body that carries `userId`, `storeId`, `sellerId`, `role`, `isActive`, `isSample`, `slug`, `status`, `moderationStatus`, a price, a total, or a fee where the endpoint's schema does not list that key is therefore rejected with `400 VALIDATION_ERROR` and changes nothing.
+- Mutation bodies reject unknown keys (strict objects). A body that carries `userId`, `storeId`, `sellerId`, `role`, `isActive`, `isSample`, `slug`, `status`, `moderationStatus`, a price, a total, a discount, or a fee where the endpoint's schema does not list that key is therefore rejected with `400 VALIDATION_ERROR`, and nothing is created or changed (D-029 point 3 for `storeId`; D-031 point 3 for amounts). An amount sent by a client is never used, and it is not silently dropped either: the request that carries it is refused.
 - Unknown query parameters are not interpreted. A `storeId`, `userId`, or `role` in a query string never widens or changes what the caller may see.
 - The acting user, role, and store always come from the session, never from the request (CLAUDE.md rules 2 and 6).
 - `GET` and `HEAD` never change state (SECURITY.md TM-16).
+- The order in which a request is checked, and so which refusal it gets when more than one applies, is in [section 1.8](#18-access-levels-and-404-against-403).
 
 Decided by the orchestrator on 2026-10-11:
 
@@ -39,7 +40,7 @@ Decided by the orchestrator on 2026-10-11:
 - **Origin.** A mutation whose `Origin` header is missing, is `null`, or is anything other than exactly the application origin (scheme, host, and port of `APP_URL`) is rejected with `403 FORBIDDEN`, whatever its content type. `GET` and `HEAD` are not checked.
 - **Content type.** Each mutation accepts exactly one content type: `application/json`, or `multipart/form-data` for the upload endpoint only. A mutation that receives any other content type is rejected with `415 UNSUPPORTED_MEDIA_TYPE` before the body is read. Only the media type is compared, without regard to letter case or parameters, so `application/json; charset=utf-8` is accepted. A request with no `Content-Type` is rejected the same way, **also when the mutation has no body** ([section 1.2](#12-mutations-without-a-body)).
 - **Body size.** A JSON request body may be at most 102,400 bytes (100 KiB), counted in bytes, not characters (security rule SR-05 in [SECURITY.md](SECURITY.md)). A larger body is rejected with `413 PAYLOAD_TOO_LARGE`, the generic message, and empty `details`. The request is refused before the body is read when its `Content-Length` exceeds the limit or is not a plain decimal number; a body sent without a length, or with an untrue one, is refused as soon as the bytes read pass the limit. An endpoint may raise its limit up to 1,048,576 bytes (1 MiB) and then says so in its entry in this document, in the Notes column, as `Body limit: <n> bytes`; an entry that says nothing has the default. No endpoint raises it so far. Uploads have their own limits ([section 5.8](#58-uploads-and-files)) and are not read as JSON.
-- **JSON body.** A body that is not valid JSON (an empty body included) is rejected with `400 VALIDATION_ERROR` and exactly one field error, `{ "path": "", "code": "invalid_json", "message": "..." }`. Nothing of the body is echoed.
+- **JSON body.** A body that is not valid JSON (an empty body included) is rejected with `400 VALIDATION_ERROR` and exactly one field error, `{ "path": "", "code": "invalid_json", "message": "..." }`. Nothing of the body is echoed. JSON on the wire is UTF-8: a body whose bytes are not valid UTF-8 is rejected in exactly the same way, with `invalid_json`, and is never repaired or read with replacement characters. **Planned, not implemented yet:** `readJsonBody` decodes leniently today, so such a body is refused only when the decoded text fails to parse; the code change follows in a later task ([section 1.10](#110-where-the-conventions-are-implemented)).
 - **Required headers.** A missing or malformed required request header is rejected with `400 VALIDATION_ERROR` and a field error whose `path` is the header name as this document spells it and whose `code` is `invalid_header`. So far this applies to `Idempotency-Key` on `POST /checkout`: `{ "path": "Idempotency-Key", "code": "invalid_header", "message": "..." }`.
 - **Caching.** Every envelope response, success or error, is sent with `Cache-Control: no-store` unless the endpoint's entry in this document says otherwise. Only public endpoints whose response does not depend on who is asking may be documented as cacheable; none is so far. Error responses are always `no-store`.
 
@@ -85,7 +86,7 @@ Determined by the documents:
 ### 1.5 Money
 
 - Every money field is an **integer number of satang** and its name ends in `Satang` (BR-01, D-005). This includes query parameters ([section 5.2](#52-catalog): `minPriceSatang`, `maxPriceSatang`; finding S13). No endpoint accepts or returns THB as a decimal. Formatting to THB is the presentation layer's job.
-- The client never sends a price, a line total, a fee, or an order total for its own purchase; the server computes them from database values inside the transaction (CLAUDE.md rule 3). The only money a client ever sends is a seller's product price, an admin's shipping-fee setting, and the catalog price filter.
+- The client never sends a price, a line total, a fee, or an order total for its own purchase; the server computes them from database values inside the transaction (CLAUDE.md rule 3). A body that carries one is refused as an unknown key ([section 1.1](#11-transport); D-031 point 3). The only money a client ever sends is a seller's product price, an admin's shipping-fee setting, and the catalog price filter.
 - Bounds (DATA_MODEL.md section 11): product price 100 to 100,000,000 satang (BR-02); quantity 1 to 99 (BR-03); order grand total at most 2,000,000,000 satang (BR-04); flat shipping fee 0 to 100,000 satang (BR-28).
 - **Stored amounts fit in 32 bits. Aggregates do not** (finding S15). A field that is a **sum across rows** (a seller's sales total, admin revenue, any report figure) is still integer satang with a name ending in `Satang`, is sent as a JSON number, and **can exceed 2,147,483,647**: two orders at the BR-04 cap are enough. The server sends such a value only after checking that it is a safe integer (below 2^53). Clients must not hold it in a 32-bit integer type. Aggregate fields are marked "aggregate" where they appear.
 - The commission rate is not money. It is carried as an integer number of basis points, `commissionRateBps` (100 basis points are 1 percent), the name and unit DATA_MODEL.md section 6.16 stores. The rate is always a **whole number of percent** (D-026, OQ-38), so every value is a multiple of 100 from 0 to 10,000.
@@ -127,14 +128,29 @@ Facts behind the table:
 - The role changes from `CUSTOMER` to `SELLER` exactly once, when the application is approved, and never changes back. A suspended seller is still a `SELLER`.
 - `ADMIN` is written only by the bootstrap script (BR-26).
 
-How a request is refused, in this order:
+**The order of refusals** (D-031 point 4). A request is checked in the order below and the first check that fails gives the answer; no later check is made. A request that is both not permitted and invalid is therefore answered as not permitted.
 
-| Case | Response |
-| --- | --- |
-| No valid session on anything but a `public` endpoint. A deactivated user has no session (REQ-A-02) | `401 UNAUTHENTICATED` |
-| The caller's role is not the one the endpoint needs (a customer or admin on a `seller` endpoint, a customer or seller on an `admin` endpoint) | `403 FORBIDDEN` |
-| Role `SELLER` with a `SUSPENDED` store on an endpoint whose access is `seller` | `403 SELLER_NOT_APPROVED` |
-| The role is right, but the resource named by an id belongs to another user or another store | `404 NOT_FOUND` |
+| Step | Check | Refusal | Reads the body |
+| --- | --- | --- | --- |
+| 1 | Mutations only: the `Origin` header ([section 1.1](#11-transport)) | `403 FORBIDDEN` | No |
+| 2 | Mutations only: the `Content-Type` header, also on a mutation without a body ([sections 1.1](#11-transport) and [1.2](#12-mutations-without-a-body)) | `415 UNSUPPORTED_MEDIA_TYPE` | No |
+| 3 | Identity: a valid session, on anything but a `public` endpoint. A deactivated user has no session (REQ-A-02) | `401 UNAUTHENTICATED` | No |
+| 4 | Role: the caller's role is the one the endpoint needs (a customer or admin on a `seller` endpoint, a customer or seller on an `admin` endpoint). Only the role is checked here, not the status of the store | `403 FORBIDDEN` | No |
+| 5 | Rate limit, on the endpoints of [section 6](#6-rate-limits-initial-values-tune-after-testing) | `429 RATE_LIMITED` | No |
+| 6 | The body is read, within its size limit ([section 1.1](#11-transport); for the upload, [section 5.8](#58-uploads-and-files)) | `413 PAYLOAD_TOO_LARGE` | Yes |
+| 7 | Validation: the body is valid JSON and matches its schema; the path parameters, the query, and the required headers match theirs | `400 VALIDATION_ERROR` | Yes |
+| 8 | In the service: role `SELLER` with a `SUSPENDED` store on an endpoint whose access is `seller` | `403 SELLER_NOT_APPROVED` | |
+| 9 | In the service: the resource named by an id does not exist, or belongs to another user or another store | `404 NOT_FOUND` | |
+| 10 | In the service: every other outcome the endpoint's entry defines | `409`, `422` | |
+
+- **Steps 1 to 5 use only the headers and the session.** The server does not read or parse a body for a caller it is going to refuse: an anonymous caller gets `401` and a caller with the wrong role gets `403` whatever the body contains, valid or not, and however large it is.
+- **Origin and content type come first**, where sections 1.1 and 1.2 put them: neither needs the body or the session, so a cross-site or mistyped request costs nothing. An anonymous mutation from a foreign origin is `403 FORBIDDEN`, not `401`, and one with no `Content-Type` is `415`, not `401`.
+- **A `public` endpoint skips steps 3 and 4.** The endpoints that take a body from an anonymous caller (register and login, [section 5.1](#51-auth-handled-by-the-auth-library)) are therefore limited by rate, at step 5, before the body is read. One limit cannot be: the per-email limit of sign-in needs the email, which is in the body. How it is applied is confirmed in T-015 with the rest of the auth library's routes ([section 8.2](#82-open-technical)).
+- **A `GET` or `HEAD` skips steps 1, 2, and 6.** Its path parameters and query are validated at step 7, after identity and role: an anonymous request with an invalid query to a protected endpoint is `401`, not `400`.
+- **`429` falls at step 5**: after the caller is known and has the right role, because the limits other than sign-in and sign-up are counted per user, and before the body is read. A request refused at steps 1 to 4 uses none of the allowance; a request that reaches step 5 uses one, whatever happens to it afterwards.
+- **`413` falls at step 6**, after steps 1 to 5 and before `400`, in both of its forms: a `Content-Length` that exceeds the limit or is not a plain decimal number, refused before a byte is read, and a body that passes the limit while it is being read. A body that is too large and also not valid JSON is `413`. The upload's checks on the file (its type and content, `415`; its size, `413`; [section 5.8](#58-uploads-and-files)) are made here as well, while the multipart body is read.
+- **Store state before ownership, both after validation.** A suspended seller who names another store's product in a write to a `seller` endpoint gets `403 SELLER_NOT_APPROVED`, not `404`; a suspended seller who sends an invalid body to one gets `400`.
+- **Not implemented yet.** No handler exists, and the handler pattern written in `src/server/http.ts` still reads the body before it resolves the caller. It is changed in a later task and reviewed by security (D-031 point 4; [section 1.10](#110-where-the-conventions-are-implemented)).
 
 **Not found over forbidden** (D-015; finding S14). This applies to **every** endpoint that names a resource by id, in the path or in the body, whether or not its entry repeats it: a resource owned by another customer or another store is answered exactly like a resource that does not exist, with `404 NOT_FOUND`, the same message, and no change to anything. Entries carry the note "Else 404" as a reminder, not as the definition. A `404` caused by an id in the body names the kind of thing that was not found in `details.resource` (for example `"address"` or `"upload"`), never whether it exists.
 
@@ -163,7 +179,8 @@ No route handler exists yet, so "implemented" below means that a tested helper e
 | Origin | `assertSameOrigin(request, allowedOrigin)` (`http.ts`). The allowed origin is an argument; reading and validating `APP_URL` belongs to `src/server/env.ts` (devops) | Helper implemented; no handler calls it yet |
 | Content type | `assertContentType(request, expected)` (`http.ts`); `readJsonBody` calls it for JSON; a handler without a body calls it directly ([section 1.2](#12-mutations-without-a-body)) | Helper implemented; no handler calls it yet |
 | Body size | `readJsonBody(request, { maxBytes })` (`http.ts`): default `DEFAULT_JSON_BODY_LIMIT_BYTES`, ceiling `MAX_JSON_BODY_LIMIT_BYTES`; a larger `maxBytes` throws. The upload limits belong to the upload task | Implemented for JSON; uploads planned |
-| JSON body | `readJsonBody(request)` (`http.ts`), `invalidJsonBody` (`errors.ts`) | Implemented |
+| JSON body | `readJsonBody(request)` (`http.ts`), `invalidJsonBody` (`errors.ts`) | Implemented for a body that is not valid JSON. **Planned**: refusing a body that is not valid UTF-8 ([section 1.1](#11-transport)); the helper decodes leniently today |
+| Order of refusals ([section 1.8](#18-access-levels-and-404-against-403)) | The handler pattern documented in `http.ts`; the guards belong to auth (`src/server/auth/**`) | **Planned**: the documented pattern still reads the body before it resolves the caller (D-031 point 4) |
 | Required headers | `invalidHeader(name, message)` (`errors.ts`) builds the error. Reading and checking `Idempotency-Key` itself is part of the checkout task (T-032) | Error mapping implemented; the header check is planned |
 | Envelopes, error codes, caching | `ok`, `created`, `paginated`, `errorResponse`, `parseInput` (`http.ts`); `AppError` and the code table (`errors.ts`) | Implemented, except the code marked "planned" in [section 2.3](#23-error-codes) |
 | Rate limits | `rateLimiter.consume(subject, RATE_LIMITS.<RULE>)` (`rate-limit.ts`) | Limiter implemented; no handler calls it yet |
@@ -195,7 +212,7 @@ Decided by the orchestrator on 2026-10-11:
 - An error envelope always contains all four keys. `details` is always an object; it is the empty object `{}` when there is nothing to report, never `null` and never absent.
 - On `VALIDATION_ERROR`, `details.fields` is an array of `{ "path": string, "code": string, "message": string }`, capped at 50 entries (further errors are not reported).
   - `path` is the location of the offending value: property names and array indexes joined with `.`, and the empty string for the request root (for example unknown keys on the body). A `.` or `\` inside a property name is escaped with a backslash, so the key `a.b` is reported as `a\.b` and `b` nested in `a` as `a.b`. Limitation: an array index and a property name made of the same digits look the same (`items.0`), and so do the root and a property whose name is the empty string.
-  - `code` is the schema issue code, for example `invalid_type`, `too_small`, or `unrecognized_keys`. Two codes do not come from a schema: `invalid_json` (the body is not valid JSON; `path` is the empty string and it is the only entry) and `invalid_header` (a required header is missing or malformed; `path` is the header name, for example `Idempotency-Key`).
+  - `code` is the schema issue code, for example `invalid_type`, `too_small`, or `unrecognized_keys`. Two codes do not come from a schema: `invalid_json` (the body is not valid JSON, or is not valid UTF-8, [section 1.1](#11-transport); `path` is the empty string and it is the only entry) and `invalid_header` (a required header is missing or malformed; `path` is the header name, for example `Idempotency-Key`).
   - `message` is developer-facing English.
   - `path` and `message` are at most 200 characters each; a longer value is cut and ends with `...`. The rejected value itself is never echoed.
 - The message of `INTERNAL_ERROR` is always the same fixed text, its `details` is always `{}`, and its response carries nothing about the cause.
@@ -250,13 +267,13 @@ A body that is not valid JSON, and a missing or malformed `Idempotency-Key` (dec
 
 | HTTP | Code | When | `details` | State |
 | --- | --- | --- | --- | --- |
-| 400 | `VALIDATION_ERROR` | Request body, query, path parameter, or required header fails its schema, or the body is not valid JSON | `fields` ([section 2.2](#22-error-envelope)) | Implemented |
+| 400 | `VALIDATION_ERROR` | Request body, query, path parameter, or required header fails its schema, or the body is not valid JSON or not valid UTF-8 | `fields` ([section 2.2](#22-error-envelope)) | Implemented, except the refusal of a body that is not valid UTF-8 (**planned**, [section 1.1](#11-transport)) |
 | 401 | `UNAUTHENTICATED` | No valid session | `{}` | Implemented |
 | 403 | `FORBIDDEN` | Role not allowed for this endpoint; missing, `null`, or foreign `Origin` on a mutation | `{}` | Implemented |
 | 403 | `SELLER_NOT_APPROVED` | Role `SELLER` with a `SUSPENDED` store on an endpoint that needs an `APPROVED` store ([section 1.8](#18-access-levels-and-404-against-403)) | `{}` | Implemented |
 | 404 | `NOT_FOUND` | Missing, not visible to the public, or owned by someone else | `{}`, or `{ "resource": "..." }` when an id in the body was not found | Implemented |
 | 409 | `INSUFFICIENT_STOCK` | Checkout: at least one cart line cannot be bought, and every such line fails only on stock. Cart write: the product is sold out (D-026, OQ-28) | `items` ([section 5.5.3](#553-checkout-refused-because-a-line-cannot-be-bought)) | Implemented |
-| 409 | `PRODUCT_UNAVAILABLE` | Checkout: at least one cart line cannot be bought for a reason other than stock. Cart write: the product is from the caller's own store (BR-16) | `items` ([section 5.5.3](#553-checkout-refused-because-a-line-cannot-be-bought)) | Implemented |
+| 409 | `PRODUCT_UNAVAILABLE` | Checkout: at least one cart line cannot be bought for a reason other than stock. Cart write: the product is from the caller's own store (BR-16), or a quantity change on a line whose product is hidden (BR-38; [section 5.4](#54-cart)) | `items` ([section 5.5.3](#553-checkout-refused-because-a-line-cannot-be-bought)) | Implemented |
 | 409 | `CART_EMPTY` | Checkout with no cart, or a cart with no lines (D-023 point 3) | `{}` | **Planned**: not in `errors.ts` yet; added with T-032 |
 | 409 | `INVALID_STATE_TRANSITION` | A status change that the state tables do not allow from the current state, including one that lost a race to another request (D-024) | `{}` | Implemented |
 | 409 | `CONFLICT` | Any other conflict with existing data; the cases are listed below | `{ "reason": "..." }` | Implemented |
@@ -321,7 +338,7 @@ No response in this contract can contain `REFUNDED`: DATA_MODEL.md section 3 has
 | `PENDING` | `PROCESSING` | Seller | Only when the order's `paymentStatus` is `PAID` |
 | `PROCESSING` | `SHIPPED` | Seller | Creates the shipment; `carrierName` and `trackingNumber` are optional and seller-entered. Simulated: no carrier is contacted |
 | `SHIPPED` | `DELIVERED` | Seller or admin | The only exit from `SHIPPED` (BR-29). Simulated: no carrier confirmation |
-| `PENDING`, `PROCESSING` | `CANCELLED` | Seller or admin | Allowed whether or not the order is paid (BR-21). Restores stock once |
+| `PENDING`, `PROCESSING` | `CANCELLED` | Seller or admin | Restores stock once. Allowed when the order is already `PAID` (BR-21). A seller can cancel only a seller order whose order is `PAID`, because a seller does not see one before that (BR-35; [section 5.7.3](#573-seller-orders)); an admin can cancel whatever the payment status |
 | `PENDING` | `CANCELLED` | System | The order's payment failed ([section 5.5.4](#554-failed-payment)) |
 
 `DELIVERED` and `CANCELLED` are final. Customers have no cancel endpoint (REQUIREMENTS Q4).
@@ -332,7 +349,7 @@ No response in this contract can contain `REFUNDED`: DATA_MODEL.md section 3 has
 | --- | --- | --- | --- |
 | `CANCELLED` | `PAID` | `REFUND_OUTSIDE_SYSTEM` | Shown as "ยกเลิกแล้ว คืนเงินนอกระบบ". The payment stays `PAID`; no refund record, amount, or status exists (BR-21) |
 | `CANCELLED` | `FAILED` | `PAYMENT_FAILED` | The payment failed; nothing was charged |
-| `CANCELLED` | `PENDING` | `BEFORE_PAYMENT` | Cancelled before the payment finished |
+| `CANCELLED` | `PENDING` | `BEFORE_PAYMENT` | Cancelled by an admin before the payment finished; a seller cannot (BR-35) |
 
 **Stock is restored at most once per order item** across payment failure, seller cancel, and admin cancel (BR-15, D-023; finding B5). Consequences for callers:
 
@@ -359,17 +376,17 @@ Two independent fields. Approval is always required and cannot be switched off: 
 | From | To | Trigger |
 | --- | --- | --- |
 | (new) | `PENDING` | Product created |
-| `PENDING` | `APPROVED` | Admin approves |
-| `PENDING` | `REJECTED` | Admin rejects, reason required |
-| `APPROVED` | `TAKEN_DOWN` | Admin takes down, reason required |
+| `PENDING` | `APPROVED` | Admin approves. Only when `status` is `PUBLISHED` (D-028; [section 5.9.3](#593-product-moderation-and-contentrevision)) |
+| `PENDING` | `REJECTED` | Admin rejects, reason required. Only when `status` is `PUBLISHED` (D-028; [section 5.9.3](#593-product-moderation-and-contentrevision)) |
+| `APPROVED` | `TAKEN_DOWN` | Admin takes down, reason required. No condition on `status` |
 | `APPROVED` | `PENDING` | The seller changes a moderated field (BR-18) |
-| `REJECTED`, `TAKEN_DOWN` | `PENDING` | The seller saves a correction (BR-19; D-026, OQ-36) |
+| `REJECTED`, `TAKEN_DOWN` | `PENDING` | The seller saves a correction: a change to a moderated field or to the price (BR-19; D-026, OQ-36; D-028) |
 
-- **Moderated fields** (BR-18): `title`, `description`, `categoryId`, and the **set** of pictures. A change to one of them on an `APPROVED` product returns it to `PENDING`, and it is not visible until approved again. A save in which none of them differs from the stored value changes nothing in moderation.
-- **Not moderated:** `priceSatang`, `stock`, `sku`, and `status`. A change applies at once and leaves the `moderationStatus` of an `APPROVED` or `PENDING` product alone (for a `REJECTED` or `TAKEN_DOWN` product see "Resubmission" below). One request that changes a moderated field and the price does both: the price is stored and the product returns to `PENDING`.
+- **Moderated fields** (BR-18): `title`, `description`, `categoryId`, and the **set** of pictures. A change to one of them on an `APPROVED` product returns it to `PENDING`, and it is not visible until approved again. A change to one of them raises `contentRevision` by one, whatever the product's `moderationStatus` ([section 5.9.3](#593-product-moderation-and-contentrevision)). A save in which none of them differs from the stored value changes nothing in moderation, apart from the price-only resubmission below.
+- **Not moderated:** `priceSatang`, `stock`, `sku`, and `status`. A change applies at once and leaves the `moderationStatus` and the `contentRevision` of an `APPROVED` or `PENDING` product alone (for a `REJECTED` or `TAKEN_DOWN` product see "Resubmission" below). One request that changes a moderated field and the price does both: the price is stored and the product returns to `PENDING`.
 - **No seller request sets `moderationStatus`.** The key is unknown in every seller body.
 - **Picture order** (D-026, OQ-35). Changing only the **order** of a product's pictures, or which one is first, is **not** a picture change: `moderationStatus` stays as it is and the new order shows at once. Only adding, removing, or replacing a picture is a picture change. In terms of the request: an `imageKeys` array that holds the same keys as before in another order needs no approval; one that holds a different set of keys does. A pure reorder also leaves `contentRevision` and the product's place in the approval queue as they are (DATA_MODEL.md section 4.2).
-- **Resubmission** (BR-19; D-026, OQ-36). There is **no separate "submit again" endpoint** and no request that resubmits a product unchanged. Saving a correction to a `REJECTED` or `TAKEN_DOWN` product through `PATCH /seller/products/{id}` returns it to `PENDING` automatically; a save in which nothing differs from the stored values does not. **What counts as a correction** (D-028): a change to `title`, `description`, `categoryId`, the set of pictures, or **`priceSatang`**. A change only to stock, to `sku`, or to the order of the pictures does **not** resubmit the product. The price is a correction only in this case: on an `APPROVED` product a price change still takes effect at once and needs no approval (BR-18). A price-only resubmission leaves `contentRevision` as it is, because the moderated content is the same.
+- **Resubmission** (BR-19; D-026, OQ-36). There is **no separate "submit again" endpoint** and no request that resubmits a product unchanged. Saving a correction to a `REJECTED` or `TAKEN_DOWN` product through `PATCH /seller/products/{id}` returns it to `PENDING` automatically; a save in which nothing differs from the stored values does not. **What counts as a correction** (D-028): a change to `title`, `description`, `categoryId`, the set of pictures, or **`priceSatang`**. A change only to stock, to `sku`, or to the order of the pictures does **not** resubmit the product. The price is a correction only in this case: on an `APPROVED` product a price change still takes effect at once and needs no approval (BR-18). **Every resubmission raises `contentRevision` by one, also when only the price changed** (D-031 point 2; DATA_MODEL.md section 4.2; [section 5.9.3](#593-product-moderation-and-contentrevision)). The price is still not a moderated field; the revision rises because the save changes what the admin is asked to decide on, so that an approve sent from a screen opened before the rejection cannot put a price the admin never saw on sale.
 - `moderationNote` holds the reason of the last rejection or takedown. The owning seller and admins can read it; it is cleared on approval.
 
 ### 3.4 Visibility and "can be bought"
@@ -523,7 +540,8 @@ Rules for the two writes:
 - `quantity` is an integer from 1 to 99 (BR-03); anything else is `400 VALIDATION_ERROR`. Adding to an existing line so that its quantity would pass 99 is rejected the same way (field `quantity`) and the line is unchanged, because REQ-C-10 rejects any quantity outside 1 to 99.
 - A `productId` that does not exist, or whose product is not visible, is `404 NOT_FOUND`; no line is created. A hidden product is answered exactly like a missing one.
 - A product from the caller's own store is `409 PRODUCT_UNAVAILABLE` with one entry in `details.items` whose `reason` is `OWN_STORE` and whose `cartItemId` is `null`; no line is created (BR-16; finding S14).
-- **A sold-out product is refused** (D-026, OQ-28; finding M11). Adding a visible product whose stock is 0, or setting the quantity of a line whose product is sold out, is `409 INSUFFICIENT_STOCK`; no line is created and an existing line is unchanged. `details.items` has one entry in the shape of [section 5.5.3](#553-checkout-refused-because-a-line-cannot-be-bought): `{ "cartItemId": null or the line id, "productId": "...", "reason": "INSUFFICIENT_STOCK", "requestedQuantity": 2, "availableStock": 0 }`.
+- **A line whose product is hidden refuses a quantity change** (BR-38; D-028). `PATCH /cart/items/{itemId}` on the caller's own line whose product is not visible ([section 3.4](#34-visibility-and-can-be-bought)) is `409 PRODUCT_UNAVAILABLE`, and the line is unchanged. `details.items` has one entry in the shape of [section 5.5.3](#553-checkout-refused-because-a-line-cannot-be-bought): `{ "cartItemId": the line id, "productId": "...", "reason": "NOT_AVAILABLE", "requestedQuantity": 2, "availableStock": null }`, where `requestedQuantity` is the quantity sent. The answer says no more than the cart read says about that line (`unbuyableReason: "NOT_AVAILABLE"`, below): not which condition hides the product, and not its stock or its price. It is the same answer when the hidden product also has no stock, so a hidden line is never answered as sold out. It is not `404`, because the line is the caller's own and the caller already sees it in the cart; `DELETE /cart/items/{itemId}` on it always succeeds. The `quantity` is validated first: a value outside 1 to 99 is `400` ([section 1.8](#18-access-levels-and-404-against-403)). `POST /cart/items` names a product, not a line, so for a hidden product it stays `404 NOT_FOUND` as above, also when the caller already has a line for that product; the line is unchanged.
+- **A sold-out product is refused** (D-026, OQ-28; finding M11). Adding a visible product whose stock is 0, or setting the quantity of a line whose product is sold out, is `409 INSUFFICIENT_STOCK`; no line is created and an existing line is unchanged. `details.items` has one entry in the shape of [section 5.5.3](#553-checkout-refused-because-a-line-cannot-be-bought): `{ "cartItemId": null or the line id, "productId": "...", "reason": "INSUFFICIENT_STOCK", "requestedQuantity": 2, "availableStock": 0 }`. Sold out has two names on purpose, and nothing is renamed: a refusal says `reason: "INSUFFICIENT_STOCK"` with `availableStock: 0`, in the vocabulary of the checkout refusal, and the cart read says `unbuyableReason: "SOLD_OUT"`. A client treats the two as the same condition and shows the sold-out text for both.
 - **More than is in stock is lowered, not refused** (D-026, OQ-28). When the resulting quantity of the line (the quantity sent, plus what the line already holds for an add) is above the product's stock and the stock is at least 1, the request **succeeds**, the line is stored with a quantity equal to the stock, and the response says so with `quantityLowered: true`.
 
 Response of both writes: `201` when `POST /cart/items` created a line, `200` otherwise. `data` is the line in the shape of an item of `GET /cart` below, plus `requestedQuantity`:
@@ -577,7 +595,7 @@ Response of both writes: `201` when `POST /cart/items` created a line, `200` oth
 
 - No price is stored in the cart; `unitPriceSatang` is the product's current price and every total is computed by the server (REQ-C-10).
 - `shippingFeeSatang` is the current flat fee from the settings, once per store group; it is a **simulated flat rate** (BR-08). `shippingTotalSatang` is the fee multiplied by the number of store groups that have at least one buyable line.
-- `buyable` is `false`, and the line **blocks checkout** (BR-22), in two cases, told apart by `unbuyableReason`: `"SOLD_OUT"` (the product is visible and its stock is 0) and `"NOT_AVAILABLE"` (the product is hidden: unpublished, archived, awaiting approval, rejected, taken down, its store suspended, its owner deactivated, or its category switched off; the response does not say which). `unbuyableReason` is `null` on a buyable line. For a `NOT_AVAILABLE` line `unitPriceSatang`, `lineTotalSatang`, and `stock` are `null`; the title stays so the customer can recognise the line and remove it.
+- `buyable` is `false`, and the line **blocks checkout** (BR-22), in two cases, told apart by `unbuyableReason`: `"SOLD_OUT"` (the product is visible and its stock is 0) and `"NOT_AVAILABLE"` (the product is hidden: unpublished, archived, awaiting approval, rejected, taken down, its store suspended, its owner deactivated, or its category switched off; the response does not say which). `unbuyableReason` is `null` on a buyable line. The names differ from the `reason` values of a refused cart write or checkout on purpose ([section 5.5.3](#553-checkout-refused-because-a-line-cannot-be-bought)), and a client maps them like this: `"SOLD_OUT"` here is `reason: "INSUFFICIENT_STOCK"` with `availableStock: 0` there; `"NOT_AVAILABLE"` is `reason: "NOT_AVAILABLE"` in both; and `INSUFFICIENT_STOCK` with an `availableStock` of 1 or more is not an unbuyable line at all but a lowered one (`quantityLowered`). For a `NOT_AVAILABLE` line `unitPriceSatang`, `lineTotalSatang`, and `stock` are `null`; the title stays so the customer can recognise the line and remove it.
 - **A line that cannot be bought stays in the cart** (D-026, OQ-29, for a sold-out product; D-028, for a hidden one, which is treated the same way). It is returned with `buyable: false` and its `unbuyableReason`, is **not counted in any total**, cannot be bought, and stays until the customer removes it. Nothing removes it automatically, and it becomes buyable again by itself if the product comes back.
 - `canCheckout` is `true` only when the cart has at least one line and every line is buyable.
 - **Quantity above stock** (BR-30; D-026, OQ-30). When a line's stored quantity is above the product's stock and the stock is at least 1, the cart response carries the lowered quantity (equal to the stock), the totals use it, and `quantityLowered` is `true` so the customer is told on the cart page. A client is never shown a quantity above stock without `quantityLowered`.
@@ -604,22 +622,26 @@ There is **no** endpoint to pay, retry, cancel, or refund an order as a customer
 - `addressId`: one of the caller's own addresses. Any other id is `404 NOT_FOUND` with `details.resource` `"address"`, and no order is created.
 - `paymentMethod`: `"MOCK"` is the only value. It selects the provider and is recorded as `payment.provider`; it is not a separate stored field (finding M1). **This is a mock payment: no money moves.**
 - `mockOutcome`: optional, `"SUCCESS"` (default) or `"FAIL"`. It exists only to exercise the failure path of the mock provider and is rejected when a real provider is configured.
-- Any other key, including any price, total, fee, quantity, `storeId`, or `userId`, is an unknown key: `400 VALIDATION_ERROR`. What is bought is the caller's cart as the server reads it.
+- Any other key, including any price, total, discount, fee, quantity, `storeId`, or `userId`, is an unknown key: `400 VALIDATION_ERROR`, and nothing is created or changed (D-031 point 3; [section 1.1](#11-transport)). A client amount is never used, and a request that carries one is refused, not accepted at the server's amounts. What is bought is the caller's cart as the server reads it.
 
-What checkout does, in one transaction (D-023): it locks the caller's cart, returns the existing order if the key was used before, refuses an empty cart, takes stock for every line with a statement that also requires the line to be buyable and returns the price charged, computes the totals from those prices and the current settings, refuses a total above the cap, writes the order with one seller order per store and the copies listed in [section 5.5.2](#552-response), and empties the cart. The payment is then completed in a second guarded transaction.
+**A checkout that succeeds is atomic** (CLAUDE.md rule 5; D-023). In one database transaction it locks the caller's cart, returns the existing order if the key was used before, refuses an empty cart, takes stock for every line with a statement that also requires the line to be buyable and returns the price charged, computes the totals from those prices and the current settings, refuses a total above the cap, writes the order with one seller order per store and the copies listed in [section 5.5.2](#552-response), and empties the cart. Either all of that is committed or none of it is: there is never an order without its stock taken, and never stock taken without an order. The payment is then completed in a second guarded transaction.
 
-Refusals. In every one of them no order exists, no stock changed, and nothing was charged. The cart is as it was, with one exception: a checkout refused because a quantity is above the stock stores the lowered quantity ([section 5.5.3](#553-checkout-refused-because-a-line-cannot-be-bought)).
+**A checkout that is refused promises an outcome, not a mechanism** (D-029 point 2; D-031 point 5). In every refusal no order exists, this request has left the stock unchanged, and nothing was charged. The cart is as it was, with one exception: a checkout refused because a quantity is above the stock stores the lowered quantity ([section 5.5.3](#553-checkout-refused-because-a-line-cannot-be-bought)). How the server reaches that outcome, including how many transactions it uses, is not part of this contract and no client or test may rely on it; it is validated in T-013 and chosen in T-032 ([section 8.2](#82-open-technical), item 8.2-2).
+
+The first four rows are in the order of [section 1.8](#18-access-levels-and-404-against-403). The rows after them are outcomes of the service and are not listed in the order in which they are evaluated.
 
 | Case | Response |
 | --- | --- |
+| Guest | `401 UNAUTHENTICATED` |
+| Over the rate limit | `429 RATE_LIMITED` |
 | Missing or malformed `Idempotency-Key` | `400 VALIDATION_ERROR`, `invalid_header` |
 | Invalid body | `400 VALIDATION_ERROR` |
-| Guest | `401 UNAUTHENTICATED` |
 | `addressId` not the caller's | `404 NOT_FOUND` |
 | No cart, or no lines (finding M11). This is also what the second of two checkouts of one cart with different keys receives | `409 CART_EMPTY` |
 | A line cannot be bought (BR-22) | `409 PRODUCT_UNAVAILABLE` or `409 INSUFFICIENT_STOCK`, [section 5.5.3](#553-checkout-refused-because-a-line-cannot-be-bought) |
 | Grand total above 2,000,000,000 satang (BR-04) | `422 ORDER_LIMIT_EXCEEDED` |
-| Over the rate limit | `429 RATE_LIMITED` |
+
+No status or code exists for an answer that asks the client to try the same checkout again; whether one is needed depends on the mechanism chosen in T-032 ([section 8.2](#82-open-technical), item 8.2-3).
 
 #### 5.5.2 Response
 
@@ -670,7 +692,8 @@ The same shape is the item of `GET /orders` and the body of `GET /orders/{id}`.
 
 - **Copies taken at purchase** (BR-09). `productTitle`, `productSku`, `unitPriceSatang`, and `image` on an item; `shippingAddress` on the order; `storeName`, `shippingFeeSatang`, and the commission rate on a seller order. A later edit of the product, the address, the store name, or the settings never changes them. `storeName` is the store's name **as it was at purchase** (D-025, OQ-18); `storeSlug` is for linking only and never changes.
 - **An order's picture cannot be deleted** (finding S7). `image` is the picture that was the product's primary one at purchase. Editing a product's pictures, or deleting or archiving the product, never removes that file: no endpoint deletes an upload, and the cleanup of [section 5.8](#58-uploads-and-files) cannot touch one an order item references. `image` is `null` only when the product had no picture at purchase.
-- `payment.isSimulated` is derived from `payment.provider` (finding M1). `payment.failureReason` is `null` unless the payment failed; then it is a short code, for example `SIMULATED_DECLINE` or `TIMEOUT`.
+- `payment.isSimulated` is derived from `payment.provider` (finding M1). `payment.failureReason` is `null` unless the payment failed; then it is a short code. Two values are named so far: `SIMULATED_DECLINE` (the mock provider declined) and `TIMEOUT` (the order was still `PENDING` after 15 minutes). **The list is not closed**: DATA_MODEL.md sections 6.13 and 7.2 give the same two values "for example" and define no enum. Closing it is `OPEN (technical)` ([section 8.2](#82-open-technical), item 8.2-5); until it is closed a client treats a value it does not know as a failed payment with no specific reason.
+- `createdAt` is the only time on the order itself. No field carries the time the order was paid; whether one should is with the owner ([section 8.1](#81-open-owner), item 8.1-1).
 - `shippingTotalSatang` equals the flat fee multiplied by the number of seller orders (BR-08). `grandTotalSatang` is `itemsSubtotalSatang + shippingTotalSatang`.
 - The commission rate is recorded on each seller order but is **not** in the customer's response; the seller's and the admin's views carry `commissionRateBps` ([section 5.7.3](#573-seller-orders)). Nothing is deducted from any amount (BR-13).
 - `shipment` is `null` until the seller order is `SHIPPED`; then `{ "carrierName": "...", "trackingNumber": "...", "isSimulated": true, "shippedAt": "...", "deliveredAt": null }`, with `carrierName` and `trackingNumber` `null` when the seller entered none.
@@ -701,12 +724,14 @@ No partial purchase (BR-22; D-025, OQ-09; finding S4). If **any** line of the ca
 | `reason` | Meaning | `availableStock` |
 | --- | --- | --- |
 | `NOT_AVAILABLE` | The product is not visible ([section 3.4](#34-visibility-and-can-be-bought)). The response does not say which condition failed | `null` |
-| `INSUFFICIENT_STOCK` | Visible, but its stock is below the line's quantity; 0 when sold out | the current stock |
+| `INSUFFICIENT_STOCK` | Visible, but its stock is below the line's quantity; 0 when sold out. With `availableStock: 0` this is the condition the cart read calls `unbuyableReason: "SOLD_OUT"` ([section 5.4](#54-cart)); the two names are deliberate and a client treats them as the same | the current stock |
 | `OWN_STORE` | The product belongs to the caller's own store (BR-16) | `null` |
 
 The `code` is `INSUFFICIENT_STOCK` when every listed line has the reason `INSUFFICIENT_STOCK`, and `PRODUCT_UNAVAILABLE` otherwise. Both are `409` and both carry the same `details.items`. This settles the shape of `details.items` that the earlier version left open.
 
-**Checkout stops so the customer confirms again** (D-026, OQ-30; D-029 point 2). When a line's quantity is found to be above the stock at the moment the order is placed, the order is **not** placed with a lowered quantity. The checkout is refused as above, creates no order, takes no stock, and charges nothing. It does one thing: **for every `INSUFFICIENT_STOCK` line whose `availableStock` is at least 1, the refused request itself stores that lower quantity on the cart line.** This is the only state a refused checkout changes; lines that cannot be bought at all (sold out, `NOT_AVAILABLE`, `OWN_STORE`) are left as they are. How the transaction does this (a savepoint, or validating before taking stock) is `OPEN (technical)` for T-013 and T-032.
+**Checkout stops so the customer confirms again** (D-026, OQ-30; D-029 point 2). When a line's quantity is found to be above the stock at the moment the order is placed, the order is **not** placed with a lowered quantity. The checkout is refused as above: no order is created, the stock is left unchanged, and nothing is charged. It does one thing: **for every `INSUFFICIENT_STOCK` line whose `availableStock` is at least 1, the refused request itself stores that lower quantity on the cart line.** This is the only state a refused checkout changes; lines that cannot be bought at all (sold out, `NOT_AVAILABLE`, `OWN_STORE`) are left as they are. By the time the refusal is sent, the lowered quantities are stored.
+
+That is the whole promise, and it is an outcome (D-029 point 2). **The mechanism is not part of this contract** (D-031 point 5): whether the server validates before it takes stock, uses a savepoint, or runs an attempt and then a separate refusal transaction (DATA_MODEL.md section 7.1) is validated in T-013 and chosen in T-032 ([section 8.2](#82-open-technical), item 8.2-2). All three are admissible as long as the outcome above holds and a checkout that succeeds stays atomic ([section 5.5.1](#551-request)).
 
 The refusal carries what the customer must see before confirming:
 
@@ -720,7 +745,7 @@ The refusal carries what the customer must see before confirming:
 - The confirming request is a new customer decision and **should carry a new key**. The server also accepts the old one, because it cannot tell them apart.
 - A repeat of the refused request with the same key is therefore **not** answered with the same refusal: it is a fresh checkout of the cart as it now is, and it can succeed with the quantities the first attempt lowered.
 - For that reason a client **must not resend a checkout automatically** after a `409`, and must treat a checkout whose response was lost as unknown: it reads `GET /cart` first. An empty cart means the order was placed, and resending with the same key returns it. A cart with `quantityLowered` lines or changed totals means the attempt was refused, and the customer must be shown the cart before anything is sent again.
-- `OPEN (technical)` for T-032, with security: nothing on the server distinguishes a blind resend of a refused checkout from the customer's confirmation, so the rule above is kept by the client only ([section 8.2](#82-open-technical)).
+- `OPEN (technical)`, item 8.2-1 of [section 8.2](#82-open-technical), for backend-api and security to rule on before T-032 starts (D-031 point 6): nothing on the server distinguishes a blind resend of a refused checkout from the customer's confirmation, so the rule above is kept by the client only, and a client that breaks it can place an order for a quantity the customer has not seen. A guard on the server would need something stored (the refusal itself, a revision of the cart, or a confirmation value the client sends back), which is an additive migration and a contract change. **No outcome is decided**: neither whether there will be a guard, nor what a blind resend would then be answered with. Until the ruling, the three bullets above describe what the server does.
 
 #### 5.5.4 Failed payment
 
@@ -990,12 +1015,21 @@ Every path below requires `ADMIN`. A guest gets `401`, a customer or seller `403
 
 The admin's product view is the seller's view of [section 5.7.2](#572-products) plus `contentRevision`, `moderationRequestedAt`, and `store: { id, name, slug, status }`.
 
-**`contentRevision`** (DATA_MODEL.md section 4.2) is an integer, 1 or more, that increases by one with every change to a moderated field. It exists so that an admin decides on **the content they were shown**:
+**`contentRevision`** (DATA_MODEL.md section 4.2; D-031 point 2) is an integer, 1 or more. One seller save raises it by one, in exactly two cases:
+
+1. the save changes a **moderated field** (`title`, `description`, `categoryId`, or the set of pictures; [section 3.3](#33-product-status-and-moderation)), whatever the product's `moderationStatus`;
+2. the save **resubmits** the product, that is, moves it from `REJECTED` or `TAKEN_DOWN` to `PENDING`. This is the only case in which a change of the price alone raises it (D-028; D-031 point 2).
+
+Nothing else raises it: not a price change on an `APPROVED` or `PENDING` product, not a change of stock, of `sku`, or of the order of the pictures, not a save in which nothing differs, not publishing, unpublishing, or archiving, and not an admin decision. As one rule: **every seller save that changes what an admin is asked to decide on raises the revision; nothing else does.**
+
+It exists so that an admin decides on **what they were shown**:
 
 - Every admin product response carries `contentRevision`.
 - Every decision sends back the `contentRevision` the admin saw. It is required; a missing or non-integer value is `400 VALIDATION_ERROR`.
-- If the product's revision is no longer that value, the seller changed the content in between: `409 CONFLICT`, reason `STALE_REVISION`, and nothing changes. The admin reloads and decides again.
-- If the product is not in the state the decision needs (for example approving a product that is not `PENDING`): `409 INVALID_STATE_TRANSITION`.
+- If the product's revision is no longer that value, the seller changed a moderated field, or resubmitted the product, in between: `409 CONFLICT`, reason `STALE_REVISION`, and nothing changes. The admin reloads and decides again.
+- **The stale approve after a price-only resubmission** (D-031 point 2). An admin screen opened before a product was rejected or taken down holds the earlier revision and the earlier price. When the seller then changes only the price, the product is `PENDING` again, at a revision one higher. An approve sent from that old screen is `409 CONFLICT`, reason `STALE_REVISION`: the product does not go on sale at a price the admin never saw.
+- If the product is not in the state the decision needs (for example approving a product that is not `PENDING`): `409 INVALID_STATE_TRANSITION`. Which of the two codes is answered when the revision **and** the state both differ is `OPEN (technical)` ([section 8.2](#82-open-technical), item 8.2-6).
+- Known consequence, accepted with D-025 OQ-05 (DATA_MODEL.md section 4.2): the price of a `PENDING` product can change without raising the revision, so an admin can approve a waiting product whose price changed after they opened it.
 
 **The approval queue** (`GET /admin/products?queue=true`; REQ-A-05; D-026, OQ-42; D-028) lists the products whose `moderationStatus` is `PENDING` **and** whose `status` is `PUBLISHED`, **oldest first by the time the product was submitted for approval** (`moderationRequestedAt`). Publishing a product that is awaiting approval sets that time, so a long-standing draft does not jump the queue when it is published; an edit of a product that is already in the queue does not move it. The queue holds new products once their seller has published them, approved products sent back by an edit (BR-18), and resubmitted products (BR-19). A product the seller has saved but not yet published is not in the queue, and one that is unpublished or archived leaves it without a decision. A rejected or taken-down product is not visible; its seller can correct it ([section 3.3](#33-product-status-and-moderation)).
 
@@ -1016,7 +1050,7 @@ Category item for admins: `{ id, name, slug, sortOrder, isActive, isSample, crea
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| GET | `/admin/orders` | Paginated, newest first. Filters: `paymentStatus`, `fulfilmentStatus` (orders with at least one seller order in that status), `storeId`, `userId`, `orderNumber` (exact), `from`, `to` (on the order's creation time, [section 1.6](#16-time)). |
+| GET | `/admin/orders` | Paginated, newest first. Filters: `paymentStatus`, `fulfilmentStatus` (orders with at least one seller order in that status), `storeId`, `userId`, `orderNumber` (exact), `from`, `to` (on the order's creation time, [section 1.6](#16-time)). There is no filter on the time an order was paid ([section 8.1](#81-open-owner), item 8.1-1). |
 | GET | `/admin/orders/{id}` | The whole order with every seller order. |
 | POST | `/admin/seller-orders/{id}/status` | Body `{ to }` where `to` is `CANCELLED` or `DELIVERED`; any other value is `400 VALIDATION_ERROR`. |
 
@@ -1070,7 +1104,7 @@ Category item for admins: `{ id, name, slug, sortOrder, isActive, isSample, crea
 ```
 
 - **The range has a timezone because it is two instants** (finding M9): `from` and `to` are ISO 8601 instants with an explicit `Z` or offset, `from` inclusive, `to` exclusive. A calendar day in Asia/Bangkok is converted to instants by the presentation layer.
-- **Which date places a row in the range.** `orderCount` and `paidRevenueSatang` use **the time the order was paid** (D-028), not the time it was created. `newUserCount` uses the user's creation time and `newSellerCount` the store's (the moment of approval).
+- **Which date places a row in the range.** `orderCount` and `paidRevenueSatang` use **the time the order was paid** (D-028), not the time it was created. That time is stored as `Order.paidAt` (DATA_MODEL.md section 6.10). It is used here to place a row in the range and is **not returned by any endpoint and not offered as a filter**: whether it should be is with the owner ([section 8.1](#81-open-owner), item 8.1-1). An order created before midnight and paid after it is therefore in the report of the later day and in the admin order list, which filters by creation time, of the earlier one. `newUserCount` uses the user's creation time and `newSellerCount` the store's (the moment of approval).
 - `paidRevenueSatang` is an **aggregate** and can exceed 32 bits ([section 1.5](#15-money)). It is the **price of the goods only, without the shipping fee** (D-026, OQ-34): the sum of `itemsSubtotalSatang` over seller orders whose order is `PAID` and whose `fulfilmentStatus` is not `CANCELLED`. `PENDING` and `FAILED` orders contribute nothing (BR-21).
 - `orderCount` counts **orders that are paid and not cancelled** (D-026, OQ-34): an order counts once when its `paymentStatus` is `PAID` and at least one of its seller orders is not `CANCELLED`. An order with only some stores' parts cancelled still counts as one order; an order whose every part is cancelled, and a `PENDING` or `FAILED` order, does not count.
 
@@ -1118,7 +1152,7 @@ Audit entry: `{ id, actorId, action, targetType, targetId, metadata, createdAt }
 
 Decided by the orchestrator on 2026-10-11: "per IP" in this table means per client address as derived by security rule SR-01 in [SECURITY.md](SECURITY.md): an IPv4 address, an IPv6 /64 network, or the single shared subject `unknown` when no trusted proxy is configured. It is never taken from a header the client controls. With the default configuration all clients therefore share one per-address allowance.
 
-Each line of the table is its own rule with its own counter (sign-in has two: per address and per email), so using up one limit never consumes another. A refused request gets `429 RATE_LIMITED` with `Retry-After`. The limiter also refuses new subjects while a rule's in-process store is full (SR-02); that refusal is the same `429`, with a `Retry-After` of at most 60 seconds. The limiter is in-process and correct for a single instance only (D-012).
+Each line of the table is its own rule with its own counter (sign-in has two: per address and per email), so using up one limit never consumes another. A refused request gets `429 RATE_LIMITED` with `Retry-After`. A limit is applied at step 5 of the order in [section 1.8](#18-access-levels-and-404-against-403): after the caller is identified and the role is checked, and **before the body is read**. Sign-up and sign-in are public and take a body from an anonymous caller, so their per-address limits are applied before that body is read (D-031 point 4); the per-email limit of sign-in can be applied only once the email has been read, and how is confirmed in T-015. The limiter also refuses new subjects while a rule's in-process store is full (SR-02); that refusal is the same `429`, with a `Retry-After` of at most 60 seconds. The limiter is in-process and correct for a single instance only (D-012).
 
 ## 7. What changed from the earlier version
 
@@ -1143,11 +1177,19 @@ For consumers who read the earlier draft. Nothing was built against it.
 
 ## 8. Open points
 
-The owner's answers in D-025, D-026, and D-028 and the rulings in D-029 are written into this contract as rules. OQ-20 (visual details on real pages) is still open with the owner and no point of this contract depends on it. OQ-45 and OQ-46 belong to ui-ux-design and frontend; OQ-47 to OQ-50 (log and backup retention, session expiry) touch no endpoint: nothing here exposes logs, backups, or another user's session data.
+The owner's answers in D-025, D-026, and D-028 and the rulings in D-029 and D-031 are written into this contract as rules. Every open item below has an id (`8.1-n`, `8.2-n`) so that other documents can cite it. The ids are stable: an item keeps its id when the table is reordered, and the id of a closed item is not given to another. OQ-20 (visual details on real pages) is still open with the owner and no point of this contract depends on it. OQ-45 and OQ-46 belong to ui-ux-design and frontend; OQ-47 to OQ-50 (log and backup retention, session expiry) touch no endpoint: nothing here exposes logs, backups, or another user's session data.
 
 ### 8.1 `OPEN (owner)`
 
-**None.** The six points this section listed earlier were answered in D-028 and are now rules:
+**One point waits for the owner.** It was found by the cross-document check and has not been put to the owner yet; the orchestrator parks it in [STATUS.md](STATUS.md). Until it is answered nothing is built on a guess (D-019).
+
+| Id | Question for the owner | Why it arises | What the contract does meanwhile | Section |
+| --- | --- | --- | --- | --- |
+| 8.1-1 | Should order pages show the time an order was paid, and should the admin order list be filterable by paid date so it can be matched against the report (which is by paid date, D-028)? | The time is stored (`Order.paidAt`, DATA_MODEL.md section 6.10) and the report places an order in its range by it. The order shapes carry only `createdAt`, and the `from` and `to` filters of `GET /admin/orders` use the creation time, so an admin cannot see through the API why an order falls in a report range | Nothing is exposed: no response carries the paid time and no filter uses it | 5.5.2, 5.7.3, 5.9.5, 5.9.7 |
+
+Two further questions are parked with the owner in STATUS.md and are **not** open points of this contract, because the contract's behaviour does not wait on them: the Thai text on a hidden cart line (REQUIREMENTS.md Q38; the API carries `unbuyableReason: "NOT_AVAILABLE"`, never the text), and the confirmation that "view only" for a suspended store also refuses editing the store profile, uploading, and deleting a product ([section 5.7.2](#572-products) follows that shared reading; if the owner allows any of the three, its entry changes).
+
+The six points this section listed earlier were answered in D-028 and are now rules:
 
 | Point | Decided (D-028) | Section |
 | --- | --- | --- |
@@ -1160,45 +1202,41 @@ The owner's answers in D-025, D-026, and D-028 and the rulings in D-029 are writ
 
 ### 8.2 `OPEN (technical)`
 
-| Point | Settled by | Section |
-| --- | --- | --- |
-| Accepted UUID versions and the normalised form of `Idempotency-Key` | T-032 | 1.3 |
-| A blind resend of a refused checkout cannot be told from the customer's confirmation, because a refused checkout records no key; today only the client rule prevents an order with a quantity the customer has not seen | T-032, with security | 5.5.3 |
-| How the refused checkout stores the lowered quantities while rolling back everything else (savepoint, or validate before taking stock) | T-013, T-032 (D-029 point 2) | 5.5.3 |
-| The report range uses the time an order was paid (D-028); DATA_MODEL.md has no column for that time yet | database, before T-050 | 5.9.7 |
-| Text length limits that no requirement states | Each endpoint's task | 4 |
-| Storage key pattern; caching of file responses; whether an upload request may carry more than one file | T-041 | 5.8 |
-| Exact paths and shapes of the auth library's routes, and how they apply the conventions of section 1 | T-015 | 5.1 |
-| The planned error code `CART_EMPTY`, and the `CONFLICT` reasons, are contract only until their tasks add them to the code | T-031, T-032, T-042, T-050 | 2.3 |
+| Id | Point | Settled by | Section |
+| --- | --- | --- | --- |
+| 8.2-1 | **Blind resend of a refused checkout.** It cannot be told from the customer's confirmation, because a refused checkout records no key; today only the client rule prevents an order with a quantity the customer has not seen. A guard on the server would be an additive migration (a stored refusal, a cart revision, or a confirmation value) and a contract change. No outcome is decided | backend-api and security, before T-032 starts (D-031 point 6) | 5.5.3 |
+| 8.2-2 | **Mechanism of the refused checkout.** The contract fixes the outcome only (no order, stock unchanged, the lowered quantity stored, the customer resubmits; D-029 point 2). Admissible candidates: validating before taking stock, a savepoint, or an attempt transaction followed by a separate refusal transaction (DATA_MODEL.md section 7.1). A checkout that succeeds stays atomic under each | T-013 validates the candidates; T-032 chooses (D-031 point 5) | 5.5.1, 5.5.3 |
+| 8.2-3 | **An answer that says "try again".** DATA_MODEL.md section 7.1 has its recommended shape end, in a rare race, with "a retryable conflict". No status or code for such an answer exists in section 2.3 and none is reserved. If the shape chosen under 8.2-2 can give that answer, it gets a code in section 2.3, and a row in section 5.5.1, before T-032 starts | backend-api, before T-032 starts (D-031 point 5) | 2.3, 5.5.1 |
+| 8.2-4 | Accepted UUID versions and the normalised form of `Idempotency-Key` | T-032 | 1.3 |
+| 8.2-5 | **The closed list of `payment.failureReason` values.** This contract and DATA_MODEL.md sections 6.13 and 7.2 both name `SIMULATED_DECLINE` and `TIMEOUT` "for example"; neither defines the list or says whether it is an enum | database and backend-api, before T-032 starts | 5.5.2, 5.5.4 |
+| 8.2-6 | Which code an admin decision gets when the `contentRevision` **and** the state both differ from what the decision needs: `409 CONFLICT` with `STALE_REVISION`, or `409 INVALID_STATE_TRANSITION`. Recommended by backend-api, not in effect: the revision is compared first, so `STALE_REVISION` | backend-api, in T-050 | 5.9.3 |
+| 8.2-7 | Text length limits that no requirement states | Each endpoint's task | 4 |
+| 8.2-8 | Storage key pattern; caching of file responses; whether an upload request may carry more than one file; what an extra form field on the upload request (for example `storeId`) does, since the strict-object rule of section 1.1 is written for JSON bodies | T-041, with security | 5.8 |
+| 8.2-9 | Exact paths and shapes of the auth library's routes, how they apply the conventions of section 1, and how the per-email limit of sign-in is applied given that the email is in the body | T-015 | 1.8, 5.1, 6 |
+| 8.2-10 | The planned error code `CART_EMPTY`, and the `CONFLICT` reasons, are contract only until their tasks add them to the code | T-031, T-032, T-042, T-050 | 2.3 |
+| 8.2-11 | Two conventions are contract only until the code follows: the order of refusals (the handler pattern in `src/server/http.ts` still reads the body before it resolves the caller), and `invalid_json` for a body that is not valid UTF-8 (`readJsonBody` decodes leniently) | backend-api, in a later task; security reviews the order (D-031 point 4) | 1.1, 1.8, 1.10 |
 
-Closed since the earlier version: telling the customer later that a returned quantity was cut (not required, D-028; the record is on the order item and `cartReturn` is filled from it), which request stores a lowered cart quantity (D-029), and whether a pure reorder raises `contentRevision` (it does not, DATA_MODEL.md section 4.2).
+Closed since the earlier version: telling the customer later that a returned quantity was cut (not required, D-028; the record is on the order item and `cartReturn` is filled from it), which request stores a lowered cart quantity (D-029), whether a pure reorder raises `contentRevision` (it does not, DATA_MODEL.md section 4.2), whether a price-only resubmission raises it (it does, D-031 point 2), whether an amount in a body is refused or dropped (refused, D-031 point 3), where validation falls in the order of refusals (D-031 point 4), the answer to a quantity change on a hidden cart line (`409 PRODUCT_UNAVAILABLE`, [section 5.4](#54-cart)), and the column for the time an order was paid (`Order.paidAt` exists, DATA_MODEL.md section 6.10; what remains is the owner question 8.1-1).
 
 ### 8.3 Disagreements between documents
 
-**None that needs a decision.** Every disagreement this section listed earlier is ruled on: picture reordering (D-026, OQ-35), what counts as a correction and which items return to the cart (D-028), where a lowered quantity is stored and `storeId` in a seller body (D-029). The `REFUNDED` value and the "creates or activates" wording are no longer in REQUIREMENTS.md.
+**None that needs a decision.** Every disagreement this section listed earlier is ruled on: picture reordering (D-026, OQ-35), what counts as a correction and which items return to the cart (D-028), where a lowered quantity is stored and `storeId` in a seller body (D-029), `contentRevision` on a price-only resubmission, amounts in a body, the order of refusals, and the mechanism of the refused checkout (D-031). The `REFUNDED` value and the "creates or activates" wording are no longer in REQUIREMENTS.md.
 
 One wording difference remains and changes no behaviour: REQ-S-09 in REQUIREMENTS.md speaks of "pending, rejected, or suspended sellers", while DATA_MODEL.md section 4.1 and this contract treat a user with a pending or rejected application as a `CUSTOMER` with no store (sections 1.8 and 3). Under both, such a user cannot create, publish, or sell.
 
 ### 8.4 Documents that do not yet match the decisions
 
-Places that still said otherwise when this section was last checked on 2026-10-11, against the committed files. REQUIREMENTS.md and DATA_MODEL.md were being edited by their owners at that moment, so some may already be fixed. Each is for its owner to change; none is a choice left to make.
+Checked again on 2026-10-11, after the cross-document check, against the files as they stood in the working tree. **Every row this section listed earlier is resolved** and has been removed: REQUIREMENTS.md, DATA_MODEL.md, and TEST_STRATEGY.md now state D-026, D-028, and D-029 at each of the fourteen places that were named here (among them `Order.paidAt` in DATA_MODEL.md section 6.10, the 15-minute timeout, the `status = 'PUBLISHED'` guard of DATA_MODEL.md section 7.6, and the K5 and cart-read cases of TEST_STRATEGY.md).
+
+What lags now comes from D-031, which is newer than those documents. DATA_MODEL.md was being edited by its owner while this was checked, so its row may already be fixed. Each row is for its owner to change; none is a choice left to make.
 
 | Decision | Document and place | What it still says |
 | --- | --- | --- |
-| D-028: what counts as a correction | DATA_MODEL.md section 4.2 and section 19 (DM-Q8); REQUIREMENTS.md BR-19, Q31 | Marked open |
-| D-028: items of a part cancelled before the failure do not return | DATA_MODEL.md section 7.2 and section 19 (DM-Q9); REQUIREMENTS.md BR-20, Q33 | Marked open; BR-20 says "every item" |
-| D-028: awaiting approval is not on sale; hidden by suspension or category is still counted | DATA_MODEL.md section 5 and section 19 (DM-Q10, DM-Q11); REQUIREMENTS.md Q32 | Marked open |
-| D-028: no later notice of a cut quantity is required | DATA_MODEL.md section 7.2 and section 19 (DM-Q12); REQUIREMENTS.md Q34 | Marked open |
-| D-028: hidden cart lines are treated like sold-out lines | REQUIREMENTS.md Q36 | Marked open |
-| D-028: the three Thai texts; the bootstrap script and an existing account | REQUIREMENTS.md Q35, Q37 | Marked open |
-| D-028: payment timeout is 15 minutes | DATA_MODEL.md section 4.3; REQUIREMENTS.md BR-20 | "the configured timeout", no value |
-| D-028: the report range uses the paid date | DATA_MODEL.md section 6.10 | No column records when an order was paid |
-| D-028: publishing sets the submission time that orders the queue | DATA_MODEL.md section 4.2 and section 19 | `moderationRequestedAt` is the time the product last entered `PENDING`; setting it on publish is listed only as a proposal |
-| D-028: no approve or reject on an unpublished product | DATA_MODEL.md section 7.6 (admin moderation guard) | The guard names `moderationStatus` and `contentRevision` only, not `status = 'PUBLISHED'` |
-| D-028: a suspended seller is view-only; contact phone is editable; the admin summary groups | REQUIREMENTS.md REQ-S-02, REQ-S-09, REQ-A-01 | Not stated |
-| D-029 point 1: a `GET` never stores | TEST_STRATEGY.md, OQ-23 cases | "the next cart read returns quantity 3, stores 3" |
-| D-029 point 3: `storeId` in a seller body is rejected | TEST_STRATEGY.md, kind K5 | "a `storeId` sent in the body or query is ignored" |
-| D-026 and D-028 as a whole | TEST_STRATEGY.md R1 to R10 | Listed as waiting for the owner; no cases yet for the whole-percent commission, the sold-out figure, the stock maximum, or the refused checkout that stores a lowered quantity |
+| D-031 point 2: a price-only resubmission raises `contentRevision` | DATA_MODEL.md section 6.6 (its section 4.2 is right) | "It increases only when moderated content changes" |
+| D-031 point 3: an amount in a body is refused, not dropped | REQUIREMENTS.md REQ-C-11 | "Client-sent prices, totals, and fees are ignored" |
+| D-031 points 2 to 5, and this contract's sections 1.8, 5.4, and 8 | TEST_STRATEGY.md, questions T2, T3, T5, T6, T7, and T11 | Each quotes text of this contract that is now corrected and lists the point as unsettled. T2, T6, T7, and T11 are settled here; T5 is settled for the outcome and remains for the mechanism (8.2-2, 8.2-3); T3 is now the owner question 8.1-1 |
+| The id of the blind-resend item | STATUS.md and TEST_STRATEGY.md | "API_CONTRACTS 8.2 item 1" and "the blind-resend point of its section 8.2"; the item is 8.2-1 |
+| D-031 point 4: the caller is identified before the body is read | `src/server/http.ts` (handler pattern in the file comment); SECURITY.md SR-05 item 5 | The pattern reads the body before `requireUser`; SR-05 item 5 gives "origin check, content-type check, size-limited read, schema validation" and does not place identity, role, or the rate limit ([section 1.8](#18-access-levels-and-404-against-403)) |
 
 ## 9. Review findings resolved here
 
