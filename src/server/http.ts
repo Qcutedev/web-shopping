@@ -241,37 +241,63 @@ function contentLengthAllows(request: Request, maxBytes: number): boolean {
   return Number(digits) <= maxBytes;
 }
 
+/** First size of the buffer a body is copied into; it grows from here up to the limit. */
+const INITIAL_BODY_BUFFER_BYTES = 4_096;
+
 /**
  * Reads the body as a stream with a running byte count and stops as soon as the count passes
  * `maxBytes` (`Content-Length` can be absent or untrue). At most one chunk beyond the limit is
  * taken from the stream; the rest is cancelled, not buffered. Returns undefined when the body
  * is over the limit.
+ *
+ * Memory is in proportion to the limit, not to the number of chunks (SR-05 item 8, SEC-020;
+ * the sender chooses the chunk sizes and can send one byte per chunk):
+ *   - each chunk is copied into one buffer and dropped. The buffer starts small, at least
+ *     doubles when it is full, and never grows past `maxBytes`;
+ *   - a chunk with no bytes is skipped: nothing is kept for it;
+ *   - a chunk that is not a `Uint8Array` cannot be counted. It is a server fault: the stream is
+ *     cancelled and a TypeError is thrown at once (a 500 through `errorResponse`). The message
+ *     names nothing of the chunk;
+ *   - a cancellation is started and never awaited, so neither answer waits for a source that
+ *     does not confirm it.
+ *
+ * The result is a view of the buffer, exactly as long as the body.
  */
 async function readBytesUpTo(
   body: ReadableStream<Uint8Array>,
   maxBytes: number,
 ): Promise<Uint8Array | undefined> {
   const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
+  // The refusal stands whether or not the source accepts, or ever confirms, the cancellation.
+  const cancel = (): void => {
+    void reader.cancel().catch(() => undefined);
+  };
+  let buffer = new Uint8Array(Math.min(maxBytes, INITIAL_BODY_BUFFER_BYTES));
   let total = 0;
   for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > maxBytes) {
-      // The refusal stands whether or not the source accepts the cancellation.
-      await reader.cancel().catch(() => undefined);
+    const result = await reader.read();
+    if (result.done) break;
+    // The type says bytes; a stream can still hand over anything, so it is checked.
+    const chunk: unknown = result.value;
+    if (!(chunk instanceof Uint8Array)) {
+      cancel();
+      throw new TypeError("readJsonBody: the request body produced a chunk that is not bytes.");
+    }
+    if (chunk.byteLength === 0) continue;
+    const needed = total + chunk.byteLength;
+    if (needed > maxBytes) {
+      cancel();
       return undefined;
     }
-    chunks.push(value);
+    if (needed > buffer.byteLength) {
+      const grown = new Uint8Array(Math.min(maxBytes, Math.max(buffer.byteLength * 2, needed)));
+      grown.set(buffer.subarray(0, total));
+      buffer = grown;
+    }
+    buffer.set(chunk, total);
+    total = needed;
   }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes;
+  return buffer.subarray(0, total);
 }
 
 /**

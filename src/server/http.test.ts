@@ -937,3 +937,128 @@ describe("readJsonBody body size limit (SR-05, SEC-019)", () => {
     expect(lines).toHaveLength(0);
   });
 });
+
+describe("readJsonBody reads into one bounded buffer (SR-05 item 8, SEC-020)", () => {
+  /** A POST whose body hands over whatever `chunks` yields, one value per read. */
+  function streamedRaw(chunks: Iterable<unknown>, cancel: () => unknown = () => undefined) {
+    const iterator = chunks[Symbol.iterator]();
+    const taken = { pulls: 0, cancelled: false };
+    const body = new ReadableStream<unknown>(
+      {
+        pull(controller) {
+          taken.pulls += 1;
+          const next = iterator.next();
+          if (next.done === true) controller.close();
+          else controller.enqueue(next.value);
+        },
+        cancel() {
+          taken.cancelled = true;
+          return cancel() as void | Promise<void>;
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    const request = new Request("http://localhost/api/v1/cart/items", {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: body as ReadableStream<Uint8Array>,
+      duplex: "half",
+    } as RequestInit);
+    return { request, taken };
+  }
+
+  const split = (source: Uint8Array, size: number): Uint8Array[] => {
+    const parts: Uint8Array[] = [];
+    for (let at = 0; at < source.byteLength; at += size) parts.push(source.slice(at, at + size));
+    return parts;
+  };
+
+  it("a body that outgrows the first buffer many times comes back byte for byte", async () => {
+    // Thai text, so a wrong offset anywhere breaks a character. About 90,000 bytes.
+    const value = { title: "กุ้ง".repeat(7_500), tail: "end" };
+    const bytes = new TextEncoder().encode(JSON.stringify(value));
+    expect(bytes.byteLength).toBeGreaterThan(4_096 * 16);
+    for (const size of [1, 7, 4_095, 4_096, 4_097, 10_000, bytes.byteLength]) {
+      const { request } = streamedRaw(split(bytes, size));
+      expect(await readJsonBody(request), `chunks of ${size}`).toEqual(value);
+    }
+  });
+
+  it("a body of exactly the limit passes when the last growth is capped at the limit", async () => {
+    // 5,000 is not a multiple of the first buffer size: the buffer stops at 5,000, not 8,192.
+    const limit = 5_000;
+    const bytes = new TextEncoder().encode(`"${"a".repeat(limit - 2)}"`);
+    for (const size of [1, 3, 4_096, 4_999, 5_000]) {
+      const exact = streamedRaw(split(bytes, size));
+      expect(await readJsonBody(exact.request, { maxBytes: limit })).toHaveLength(limit - 2);
+      const over = streamedRaw([...split(bytes, size), Uint8Array.of(0x20)]);
+      expect((await thrownBy(() => readJsonBody(over.request, { maxBytes: limit }))).status).toBe(
+        413,
+      );
+      expect(over.taken.cancelled).toBe(true);
+    }
+  });
+
+  it("empty chunks are skipped, wherever they are", async () => {
+    const empty = (): Uint8Array => new Uint8Array(0);
+    const bytes = new TextEncoder().encode('{"quantity":2}');
+    const chunks = [empty(), ...split(bytes, 3).flatMap((part) => [part, empty()]), empty()];
+    expect(await readJsonBody(streamedRaw(chunks).request)).toEqual({ quantity: 2 });
+    // A body of exactly the limit is not pushed over it by empty chunks.
+    expect(await readJsonBody(streamedRaw(chunks).request, { maxBytes: bytes.byteLength })).toEqual(
+      { quantity: 2 },
+    );
+    // Only empty chunks: an empty body, 400 as before.
+    const error = await thrownBy(() => readJsonBody(streamedRaw([empty(), empty()]).request));
+    expect(error.status).toBe(400);
+  });
+
+  it.each([
+    ["a string", "MARKER-IN-BODY"],
+    ["an ArrayBuffer", new TextEncoder().encode("MARKER-IN-BODY").buffer],
+    ["a Uint16Array", new Uint16Array(4)],
+    ["a DataView", new DataView(new ArrayBuffer(4))],
+    ["an array of numbers", [123, 125]],
+    ["an object with a byteLength", { byteLength: 1 }],
+    ["null", null],
+  ])("a chunk that is %s is a server fault at once, not a counted read", async (_name, chunk) => {
+    const { request, taken } = streamedRaw([Uint8Array.of(0x20), chunk, Uint8Array.of(0x31)]);
+    let thrown: unknown;
+    try {
+      await readJsonBody(request);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(TypeError);
+    expect(thrown).not.toBeInstanceOf(AppError);
+    expect(String(thrown)).not.toContain("MARKER");
+    // Nothing is read after the bad chunk, and the source is told to stop.
+    expect(taken).toEqual({ pulls: 2, cancelled: true });
+    const { logger, lines } = captureLog();
+    const response = errorResponse(thrown, { requestId, logger });
+    expect(response.status).toBe(500);
+    expect(await response.text()).not.toContain("MARKER");
+    expect(lines.join("\n")).not.toContain("MARKER");
+  });
+
+  it("a Buffer is bytes and is accepted", async () => {
+    const { request } = streamedRaw([Buffer.from('{"quantity"'), Buffer.from(":2}")]);
+    expect(await readJsonBody(request)).toEqual({ quantity: 2 });
+  });
+
+  it("neither refusal waits for a source that never confirms the cancellation", async () => {
+    const never = (): Promise<void> => new Promise(() => undefined);
+    const big = (function* (): Generator<Uint8Array> {
+      for (;;) yield new Uint8Array(4_096).fill(0x61);
+    })();
+    const tooLarge = streamedRaw(big, never);
+    expect((await thrownBy(() => readJsonBody(tooLarge.request, { maxBytes: 1_000 }))).status).toBe(
+      413,
+    );
+    expect(tooLarge.taken.cancelled).toBe(true);
+
+    const notBytes = streamedRaw(["text"], never);
+    await expect(readJsonBody(notBytes.request)).rejects.toBeInstanceOf(TypeError);
+    expect(notBytes.taken.cancelled).toBe(true);
+  });
+});

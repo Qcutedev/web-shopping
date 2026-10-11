@@ -2,13 +2,15 @@
  * Independent re-check of the fix for SEC-019 (commit e2a4a7a, rule SR-05 in docs/SECURITY.md)
  * and the reproduction of SEC-020, which the re-check found. Owner: security agent.
  *
- *   it(...)        behaviour that was checked on 2026-10-11 and holds. A failure is a regression.
- *   it.fails(...)  the OPEN finding SEC-020. The body asserts the SECURE behaviour, which the
- *                  code does not have yet, so the assertion fails and Vitest reports the test as
- *                  passed ("expected fail"). When the owner fixes the code the test turns red;
- *                  the owner may then change `it.fails` to `it` without touching the body, and
- *                  the security agent re-checks. Nobody else may edit an assertion, skip, or
- *                  delete these.
+ *   it(...)  behaviour that was checked on 2026-10-11 and holds. A failure is a regression.
+ *
+ * SEC-020 is FIXED (re-checked 2026-10-11). Its five reproductions in the last block were
+ * `it.fails` while the finding was open. The owner of the code changed them to `it` with the fix
+ * and did not touch a body: the committed file with only `it.fails(` replaced by `it(`, put
+ * through Prettier, is this file. They are now regression tests; nobody but the security agent
+ * may edit an assertion, a threshold, or a timeout in them, or skip or delete them. The further
+ * cases written for the re-check of that fix, and the reproduction of SEC-021, which that
+ * re-check found, are in `sec020-bounded-buffer-recheck.test.ts`.
  *
  * `readJsonBody` is called directly, and once behind a plain `node:http` server on the loopback
  * interface. No route handler exists, so nothing here goes through the framework.
@@ -446,7 +448,9 @@ describe("SEC-019 re-check: failure and abort while reading", () => {
 });
 
 // ---------------------------------------------------------------------------
-// OPEN finding registered by the re-check of 2026-10-11. Owner of the code: backend-api.
+// Finding registered by the re-check of 2026-10-11 and FIXED the same day (re-checked). These
+// five were its reproductions and are now regression tests. Owner of the code: backend-api.
+// The comments "Observed on 2026-10-11" inside them give the numbers measured before the fix.
 // ---------------------------------------------------------------------------
 
 describe("SEC-020 the memory held while reading a body grows with the number of chunks", () => {
@@ -494,66 +498,52 @@ describe("SEC-020 the memory held while reading a body grows with the number of 
     return held;
   }
 
-  it.fails(
-    "a default-size body in one-byte chunks holds little more than its own size",
-    async () => {
-      // 102,399 one-byte chunks. Observed on 2026-10-11: about 24 MB held, 240 times the body.
-      const held = await heldWhileStalled(
-        DEFAULT_JSON_BODY_LIMIT_BYTES - 1,
-        1,
-        DEFAULT_JSON_BODY_LIMIT_BYTES,
-      );
-      expect(held).toBeLessThan(4 * 1024 * 1024);
-    },
-  );
+  it("a default-size body in one-byte chunks holds little more than its own size", async () => {
+    // 102,399 one-byte chunks. Observed on 2026-10-11: about 24 MB held, 240 times the body.
+    const held = await heldWhileStalled(
+      DEFAULT_JSON_BODY_LIMIT_BYTES - 1,
+      1,
+      DEFAULT_JSON_BODY_LIMIT_BYTES,
+    );
+    expect(held).toBeLessThan(4 * 1024 * 1024);
+  });
 
-  it.fails(
-    "a ceiling-size body in one-byte chunks holds little more than its own size",
-    async () => {
-      // 1,048,575 one-byte chunks. Observed on 2026-10-11: about 245 MB held for one request.
-      const held = await heldWhileStalled(
-        MAX_JSON_BODY_LIMIT_BYTES - 1,
-        1,
-        MAX_JSON_BODY_LIMIT_BYTES,
-      );
-      expect(held).toBeLessThan(8 * 1024 * 1024);
-    },
-    60_000,
-  );
+  it("a ceiling-size body in one-byte chunks holds little more than its own size", async () => {
+    // 1,048,575 one-byte chunks. Observed on 2026-10-11: about 245 MB held for one request.
+    const held = await heldWhileStalled(
+      MAX_JSON_BODY_LIMIT_BYTES - 1,
+      1,
+      MAX_JSON_BODY_LIMIT_BYTES,
+    );
+    expect(held).toBeLessThan(8 * 1024 * 1024);
+  }, 60_000);
 
-  it.fails(
-    "empty chunks are not kept: they never count towards the limit",
-    async () => {
-      // 200,000 chunks of no bytes at all are far below every limit and are all retained.
-      const held = await heldWhileStalled(200_000, 0, DEFAULT_JSON_BODY_LIMIT_BYTES);
-      expect(held).toBeLessThan(4 * 1024 * 1024);
-    },
-    60_000,
-  );
+  it("empty chunks are not kept: they never count towards the limit", async () => {
+    // 200,000 chunks of no bytes at all are far below every limit and are all retained.
+    const held = await heldWhileStalled(200_000, 0, DEFAULT_JSON_BODY_LIMIT_BYTES);
+    expect(held).toBeLessThan(4 * 1024 * 1024);
+  }, 60_000);
 
-  it.fails(
-    "chunks that are not bytes are refused instead of being read without a count",
-    async () => {
-      // 400 chunks of 1,000 characters against a limit of 10,000 bytes.
-      let pulls = 0;
-      const body = new ReadableStream<unknown>(
-        {
-          pull(controller) {
-            pulls += 1;
-            if (pulls > 400) controller.close();
-            else controller.enqueue("a".repeat(1_000));
-          },
+  it("chunks that are not bytes are refused instead of being read without a count", async () => {
+    // 400 chunks of 1,000 characters against a limit of 10,000 bytes.
+    let pulls = 0;
+    const body = new ReadableStream<unknown>(
+      {
+        pull(controller) {
+          pulls += 1;
+          if (pulls > 400) controller.close();
+          else controller.enqueue("a".repeat(1_000));
         },
-        { highWaterMark: 0 },
-      );
-      const request = post(body as ReadableStream<Uint8Array>);
-      await rejection(readJsonBody(request, { maxBytes: 10_000 }));
-      // Secure: stop at the first chunk that is not bytes, or at the latest at the limit.
-      expect(pulls).toBeLessThanOrEqual(11);
-    },
-  );
+      },
+      { highWaterMark: 0 },
+    );
+    const request = post(body as ReadableStream<Uint8Array>);
+    await rejection(readJsonBody(request, { maxBytes: 10_000 }));
+    // Secure: stop at the first chunk that is not bytes, or at the latest at the limit.
+    expect(pulls).toBeLessThanOrEqual(11);
+  });
 
-  it.fails("the 413 does not wait for a source that never confirms the cancellation", async () => {
+  it("the 413 does not wait for a source that never confirms the cancellation", async () => {
     const { request } = streamed(endless(4_096), JSON_HEADERS, () => new Promise(() => undefined));
     const pending = readJsonBody(request, { maxBytes: 1_000 });
     pending.catch(() => undefined);
