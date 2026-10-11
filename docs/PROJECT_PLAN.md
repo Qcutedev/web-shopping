@@ -24,6 +24,8 @@ Status of each task is recorded only in [STATUS.md](STATUS.md). Requirements are
 
 `Deps` lists tasks that must be `VERIFIED` first. Tasks with no dependency on each other and disjoint owners may run in parallel.
 
+BR-17 to BR-38 in the `Covers` columns follow the traceability tables in [REQUIREMENTS.md](REQUIREMENTS.md); when a rule is added or moved there, the column here is updated to match.
+
 ### Phase 1 to 3
 
 | Id | Task | Owner | Deps | Acceptance |
@@ -40,50 +42,50 @@ Status of each task is recorded only in [STATUS.md](STATUS.md). Requirements are
 | T-010 | Scaffold Next.js, TypeScript strict, Tailwind, ESLint, Prettier, Vitest; add all scripts named in CLAUDE.md | orchestrator | T-001, T-002 | N-10 | `pnpm verify` (format check, lint, type check, unit tests, build) passes on the empty app |
 | T-011 | Environment validation and health endpoint | devops | T-010, T-012, T-013 | N-07, N-08 | Missing variable fails startup naming the variable; `/api/health` returns 200 with database up |
 | T-012 | Docker compose for dev and test databases | devops | T-001 | N-10 | Fresh database starts from documented command |
-| T-013 | Prisma schema v1, migrations, raw-SQL constraints | database | T-010, T-012 | BR-01 to 16 | `prisma migrate dev` applies on a fresh database; constraint tests (written with T-023) reject negative stock and price |
+| T-013 | Prisma schema v1, migrations, raw-SQL constraints | database | T-010, T-012 | BR-01 to 21, BR-28, BR-29, BR-36, BR-37 | `prisma migrate dev` applies on a fresh database; constraint tests (written with T-023) reject negative stock and price |
 | T-023 | Integration-test harness: `vitest.integration.config`, test database reset, factories in `tests/helpers`, schema constraint tests | qa | T-012, T-013 (schema landed) | N-05 | `pnpm test:integration` runs against the test database and passes; reset leaves no rows between files |
 | T-014 | Seed sample data (sample accounts need the auth library's password hashing) | database | T-013, T-015 | N-09 | Seed runs twice cleanly; refuses production |
 | T-015 | Auth: register, login, logout, sessions, guards | auth | T-013, T-019, T-023 | C-01, C-02, N-04 | Auth and guard tests pass; cookie attributes asserted |
-| T-016 | Admin bootstrap script | auth, devops | T-015 | A-11 | Creates admin from env input; rejects a password that fails the REQ-C-01 policy; idempotent |
+| T-016 | Admin bootstrap script | auth, devops | T-015 | A-11, BR-26 | Creates admin from env input; rejects a password that fails the REQ-C-01 policy; follows BR-26 when run again: a new email creates a further admin, an email that is already an admin changes nothing, an email that is a customer or seller is refused and changes nothing |
 | T-017 | Design tokens and base UI primitives | ui-ux-design | T-010 | N-01 to 03 | Primitives render; contrast pairs checked and recorded |
-| T-018 | App shell: header, footer, navigation, Thai strings file, formatters | frontend | T-015, T-017 | N-01, N-02, N-12 | Shell renders at three widths; formatter unit tests pass; marketplace name comes from one place |
+| T-018 | App shell: header, footer, navigation, Thai strings file, formatters | frontend | T-015, T-017 | N-01, N-02, N-12, Thai texts of BR-20, BR-31, BR-32 | Shell renders at three widths; formatter unit tests pass; marketplace name comes from one place |
 | T-019 | Error envelope, logger, rate limiter, request id | backend-api | T-010 | N-07 | Unit tests pass |
 
 ### Phase 5 Catalog
 
 | Id | Task | Owner | Deps | Covers | Acceptance |
 | --- | --- | --- | --- | --- | --- |
-| T-020 | Catalog module: list, search, filter, sort, paginate, detail, store | backend-api | T-013, T-019 | C-05 to 09, N-06, BR-05 | Integration tests: visibility rule BR-05 holds for every hidden case; page size capped at 50 |
-| T-021 | Storefront pages: home, category, search, product, store | frontend | T-014, T-018, T-020 | C-05 to 09, N-03 | Loading, empty, error states present; pages work at three widths; keyboard operable, forms labelled |
+| T-020 | Catalog module: list, search, filter, sort, paginate, detail, store | backend-api | T-013, T-019 | C-05 to 09, N-06, BR-05, BR-23, BR-24, BR-27 | Integration tests: visibility rule BR-05 holds for every hidden case; page size capped at 50 |
+| T-021 | Storefront pages: home, category, search, product, store | frontend | T-014, T-018, T-020 | C-05 to 09, N-03, BR-24, BR-25, BR-30 | Loading, empty, error states present; pages work at three widths; keyboard operable, forms labelled |
 
 ### Phase 6 Cart and orders
 
 | Id | Task | Owner | Deps | Covers | Acceptance |
 | --- | --- | --- | --- | --- | --- |
 | T-030 | Profile and address module and pages | backend-api, frontend | T-015 | C-03, C-04 | Cross-user address access returns 404 |
-| T-031 | Cart module | backend-api | T-015, T-020 | C-10, BR-16 | Totals server-computed; unavailable items flagged; own-store product rejected |
-| T-032 | Checkout, orders, mock payment, state machines | backend-api | T-030, T-031 | C-11 to 13, BR-03, BR-04, BR-07 to 16, N-09 | Transactional; price tampering ignored; idempotency honoured; mock payment and simulated shipping recorded as such |
+| T-031 | Cart module | backend-api | T-015, T-020 | C-10, BR-12, BR-16, BR-22, BR-30, BR-31, BR-38 | Totals server-computed; unavailable items flagged; own-store product rejected |
+| T-032 | Checkout, orders, mock payment, state machines | backend-api | T-030, T-031 | C-11 to 13, BR-03, BR-04, BR-07 to 16, BR-20 to 22, BR-30, BR-32, N-09 | Transactional; price tampering ignored; idempotency honoured; mock payment and simulated shipping recorded as such |
 | T-033 | Concurrency and duplicate-submission tests | qa | T-032 | N-05 | Last-item race yields exactly one order; stock never negative |
-| T-034 | Cart, checkout, confirmation, order history pages | frontend | T-031, T-032 | C-10 to 13, N-03, N-09 | Mock payment labelled; failure path shown; keyboard operable, forms labelled |
+| T-034 | Cart, checkout, confirmation, order history pages | frontend | T-031, T-032 | C-10 to 13, N-03, N-09, BR-20, BR-22, BR-30 to 32, BR-38 | Mock payment labelled; failure path shown; keyboard operable, forms labelled |
 | T-035 | Reviews module and UI | backend-api, frontend | T-032 | C-14 | Eligibility rule BR-11 enforced server-side |
 
 ### Phase 7 Seller
 
 | Id | Task | Owner | Deps | Covers | Acceptance |
 | --- | --- | --- | --- | --- | --- |
-| T-040 | Seller application and store module, including the approve and reject service that T-050 later exposes to admins | backend-api | T-015 | S-01, S-02, S-09, BR-06 | A user without an approved store is blocked on every seller endpoint that requires one |
-| T-041 | Upload module with storage abstraction (local disk adapter) | backend-api | T-019, T-040 | S-05 | Rejects wrong type, oversize, mismatched content, traversal names |
-| T-042 | Seller product and inventory module | backend-api | T-040, T-041 | S-04, S-06 | Cross-store access returns 404 on read, update, delete |
-| T-043 | Seller orders, fulfilment, and dashboard summary | backend-api | T-032, T-040, T-042 | S-03, S-07, S-08, BR-14 | Transition table enforced; cross-store access returns 404; a suspended store can still read and fulfil its existing orders; summary computed from real rows |
-| T-044 | Seller dashboard pages | frontend | T-040 to T-043 | S-01 to S-09, N-03 | All states present; summaries from real rows; keyboard operable, forms labelled |
+| T-040 | Seller application and store module, including the approve and reject service that T-050 later exposes to admins | backend-api | T-015 | S-01, S-02, S-09, BR-06, BR-14 | A user without an approved store is blocked on every seller endpoint that requires one |
+| T-041 | Upload module with storage abstraction (local disk adapter) | backend-api | T-019, T-040 | S-05, BR-14 | Rejects wrong type, oversize, mismatched content, traversal names |
+| T-042 | Seller product and inventory module | backend-api | T-040, T-041 | S-04, S-06, BR-12, BR-14, BR-17 to 19, BR-23, BR-25, BR-34 | Cross-store access returns 404 on read, update, delete |
+| T-043 | Seller orders, fulfilment, and dashboard summary | backend-api | T-032, T-040, T-042 | S-03, S-07, S-08, BR-14, BR-21, BR-25, BR-29, BR-33, BR-35 | Transition table enforced; cross-store access returns 404; a suspended store can still read and fulfil its existing orders; summary computed from real rows |
+| T-044 | Seller dashboard pages | frontend | T-040 to T-043 | S-01 to S-09, N-03, BR-14 | All states present; summaries from real rows; keyboard operable, forms labelled |
 | T-045 | Seller isolation test suite | qa, security | T-042, T-043 | N-04 | Every seller endpoint tested with a foreign id |
 
 ### Phase 8 Admin
 
 | Id | Task | Owner | Deps | Covers | Acceptance |
 | --- | --- | --- | --- | --- | --- |
-| T-050 | Admin module: users, applications, suspension, moderation, categories, orders, settings, reports, audit | backend-api | T-040, T-042, T-032 | A-01 to A-10, N-06 | Non-admin rejected on every endpoint; each action writes an audit row; page size capped at 50 |
-| T-051 | Admin dashboard pages | frontend | T-050 | A-01 to A-10, N-03 | Pagination and filters work; keyboard operable, forms labelled |
+| T-050 | Admin module: users, applications, suspension, moderation, categories, orders, settings, reports, audit | backend-api | T-040, T-042, T-032 | A-01 to A-10, N-06, BR-17, BR-19 to 21, BR-23, BR-26 to 28, BR-33, BR-36 | Non-admin rejected on every endpoint; each action writes an audit row; page size capped at 50 |
+| T-051 | Admin dashboard pages | frontend | T-050 | A-01 to A-10, N-03, Thai texts of BR-20, BR-31, BR-32 | Pagination and filters work; keyboard operable, forms labelled |
 | T-052 | Admin permission and escalation tests | qa, security | T-050 | N-04 | Customer and seller get 403 on every admin endpoint |
 
 ### Phase 9 to 11

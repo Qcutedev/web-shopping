@@ -37,6 +37,7 @@ Decisions marked `PROPOSED` are not yet validated against the installed stack; e
 | D-027 | 2026-10-11 | Sessions end on logout and user deactivation, not on store suspension (supersedes part of D-004) | ACCEPTED |
 | D-028 | 2026-10-11 | Owner answers to the follow-up questions raised by D-026 (REQUIREMENTS Q31 to Q37 and others) | ACCEPTED |
 | D-029 | 2026-10-11 | A `GET` never writes; checkout stores a lowered quantity and stops; `storeId` in a seller body is rejected | ACCEPTED |
+| D-030 | 2026-10-11 | Markdown stays excluded from Prettier; `format:check` is not evidence about documents | ACCEPTED |
 
 ## Details
 
@@ -217,6 +218,11 @@ Made by the orchestrator on 2026-10-11; technical, following the security agent'
 3. **`storeId` in a seller request body is rejected as an unknown key** (strict schemas, SECURITY), not ignored. TEST_STRATEGY K5 is changed by qa.
 
 Also confirmed for T-013: the two `OrderItem` columns that record a cart return (`cartQuantityBeforeReturn`, `cartQuantityAfterReturn`) stay in the model; they serve the idempotent replay of a failed checkout even though no later notice is required. The session clean-up needs a scheduled run; choosing it is part of T-015 with devops and supersedes "no scheduled jobs" in the known limitations when it lands.
+
+### D-030 Markdown stays excluded from Prettier
+Made by the orchestrator on 2026-10-11; tooling only, no product effect.
+
+`.prettierignore` keeps `*.md`. The documents are hand-formatted, with wide tables and Mermaid blocks, and several agents edit them in parallel: turning Prettier on would rewrite every table in one commit and make each later diff harder to review. The consequence is stated so nobody relies on it: `pnpm format:check` and `pnpm verify` prove nothing about a Markdown file. Documents are checked by review (code-review and the documentation drift audit, T-080), and an agent that edits a document is responsible for well-formed tables and for section references that resolve.
 
 ## Pending decisions for the user
 
