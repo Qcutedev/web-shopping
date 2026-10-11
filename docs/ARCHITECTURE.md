@@ -127,7 +127,7 @@ sequenceDiagram
   end
 ```
 
-The client never sends a price, total, shipping fee, store id, or user id. The locking, guard, and timeout rules are in D-023 and D-024. Whether an unavailable item stops the whole checkout or is skipped is open (OQ-09); the diagram shows the stop-everything variant.
+The client never sends a price, total, shipping fee, store id, or user id. The locking, guard, and timeout rules are in D-023 and D-024. An unavailable item stops the whole checkout; there is no partial purchase (BR-22, D-025).
 
 ## Cross-cutting concerns
 
