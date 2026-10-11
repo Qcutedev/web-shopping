@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import {
+  ABORTED_BODY_ERROR_CODE,
   AppError,
   conflict,
+  CONFLICT_REASON_PATTERN,
   ERROR_CODES,
   ERROR_STATUS,
   type ErrorCode,
@@ -12,10 +14,14 @@ import {
   fromZodError,
   insufficientStock,
   internalError,
+  INVALID_JSON_CODE,
   invalidHeader,
   invalidJsonBody,
   invalidStateTransition,
   isAppError,
+  JSON_TOO_DEEP_FIELD_CODE,
+  jsonBodyTooDeep,
+  MAX_CONFLICT_REASON_LENGTH,
   MAX_FIELD_ERRORS,
   MAX_FIELD_MESSAGE_LENGTH,
   MAX_FIELD_PATH_LENGTH,
@@ -25,6 +31,8 @@ import {
   productUnavailable,
   rateLimited,
   RateLimitedError,
+  requestBodyAborted,
+  RequestBodyAbortedError,
   sellerNotApproved,
   unauthenticated,
   unsupportedMediaType,
@@ -73,7 +81,7 @@ describe("error codes", () => {
       insufficientStock([]),
       productUnavailable(),
       invalidStateTransition(),
-      conflict(),
+      conflict("DUPLICATE_SKU"),
       payloadTooLarge(),
       unsupportedMediaType(),
       orderLimitExceeded(),
@@ -92,12 +100,12 @@ describe("error codes", () => {
 describe("AppError serialisation", () => {
   it("exposes only code, message, and details", () => {
     const cause = new Error('duplicate key violates "Product_sku_key" postgresql://u:pw@db/app');
-    const error = conflict({ message: "SKU already exists.", details: { field: "sku" }, cause });
+    const error = conflict("DUPLICATE_SKU", { message: "SKU already exists.", cause });
 
     expect(error.toPublic()).toEqual({
       code: "CONFLICT",
       message: "SKU already exists.",
-      details: { field: "sku" },
+      details: { reason: "DUPLICATE_SKU" },
     });
     const json = JSON.stringify(error);
     expect(JSON.parse(json)).toEqual(error.toPublic());
@@ -354,5 +362,148 @@ describe("invalidJsonBody and invalidHeader (docs/API_CONTRACTS.md, error envelo
         ],
       },
     });
+  });
+});
+
+describe("conflict requires a reason (CR-02; docs/API_CONTRACTS.md section 2.3)", () => {
+  // The reasons the contract lists today. The list is not in the code yet (item 8.2-10).
+  const DOCUMENTED_REASONS = [
+    "DUPLICATE_SKU",
+    "OPEN_APPLICATION",
+    "DUPLICATE_REVIEW",
+    "NOT_DELIVERED",
+    "UPLOAD_IN_USE",
+    "STALE_REVISION",
+    "NEGATIVE_STOCK",
+    "STOCK_LIMIT",
+    "CATEGORY_INACTIVE",
+    "CATEGORY_HAS_PRODUCTS",
+    "SELF_DEACTIVATION",
+    "LAST_ADMIN",
+    "APPLICANT_NOT_CUSTOMER",
+  ];
+
+  it.each(DOCUMENTED_REASONS)("carries %s as details.reason and nothing else", (reason) => {
+    const error = conflict(reason);
+    expect(error.status).toBe(409);
+    expect(error.toPublic()).toEqual({
+      code: "CONFLICT",
+      message: "The request conflicts with existing data.",
+      details: { reason },
+    });
+  });
+
+  it("keeps a public message and a cause, and never lets details replace the reason", () => {
+    const cause = new Error("Product_storeId_sku_key");
+    const error = conflict("DUPLICATE_SKU", { message: "SKU already exists.", cause });
+    expect(error.message).toBe("SKU already exists.");
+    expect(error.cause).toBe(cause);
+    expect(error.details).toEqual({ reason: "DUPLICATE_SKU" });
+
+    // A caller without type checking cannot pass details that drop or replace the reason.
+    const untyped = conflict as unknown as (reason: string, options: object) => AppError;
+    expect(untyped("LAST_ADMIN", { details: { reason: "OTHER", userId: "u_1" } }).details).toEqual({
+      reason: "LAST_ADMIN",
+    });
+  });
+
+  it.each([
+    ["no argument", []],
+    ["undefined", [undefined]],
+    ["null", [null]],
+    ["an empty string", [""]],
+    ["blanks", ["   "]],
+    ["the old options object", [{ message: "SKU already exists." }]],
+    ["an options object with details", [{ details: { reason: "DUPLICATE_SKU" } }]],
+    ["a number", [409]],
+    ["lower case", ["duplicate_sku"]],
+    ["a sentence", ["SKU already exists."]],
+    ["a leading underscore", ["_DUPLICATE"]],
+    ["a trailing underscore", ["DUPLICATE_"]],
+    ["a doubled underscore", ["DUPLICATE__SKU"]],
+    ["a leading digit", ["1DUPLICATE"]],
+    ["a line break at the end", ["DUPLICATE_SKU\n"]],
+    ["a reason that is too long", ["A".repeat(MAX_CONFLICT_REASON_LENGTH + 1)]],
+  ])("throws a TypeError for %s", (_label, args) => {
+    const untyped = conflict as unknown as (...given: unknown[]) => AppError;
+    expect(() => untyped(...args)).toThrow(TypeError);
+    try {
+      untyped(...args);
+    } catch (error) {
+      // A programming error, not a domain error: it becomes a 500, never a 409 without a reason.
+      expect(isAppError(error)).toBe(false);
+      expect(String(error)).toBe(
+        "TypeError: conflict: a reason is required, in upper case with underscores (for example DUPLICATE_SKU).",
+      );
+    }
+  });
+
+  it("accepts a reason of exactly the longest length", () => {
+    const reason = "A".repeat(MAX_CONFLICT_REASON_LENGTH);
+    expect(conflict(reason).details).toEqual({ reason });
+    expect(CONFLICT_REASON_PATTERN.test("STALE_REVISION")).toBe(true);
+  });
+});
+
+describe("jsonBodyTooDeep and requestBodyAborted (provisional, items 8.2-12 and 8.2-13)", () => {
+  it("jsonBodyTooDeep is a 400 VALIDATION_ERROR with one root field error and no cause", () => {
+    const error = jsonBodyTooDeep(32);
+    expect(error.status).toBe(400);
+    expect(error.cause).toBeUndefined();
+    expect(error.toPublic()).toEqual({
+      code: "VALIDATION_ERROR",
+      message: "The request is invalid.",
+      details: {
+        fields: [
+          {
+            path: "",
+            code: JSON_TOO_DEEP_FIELD_CODE,
+            message: "The request body nests arrays and objects more than 32 levels deep.",
+          },
+        ],
+      },
+    });
+  });
+
+  it("the provisional choices add no public code: both reuse what the contract already has", () => {
+    expect(JSON_TOO_DEEP_FIELD_CODE).toBe(INVALID_JSON_CODE);
+    expect(ABORTED_BODY_ERROR_CODE).toBe("VALIDATION_ERROR");
+    expect(Object.keys(DOCUMENTED)).toContain(ABORTED_BODY_ERROR_CODE);
+    expect(DOCUMENTED[ABORTED_BODY_ERROR_CODE]).toBeLessThan(500);
+  });
+
+  it("requestBodyAborted is a client error that keeps nothing of the source but two labels", () => {
+    const source = Object.assign(new Error("read ECONNRESET at 10.0.0.7:5432"), {
+      code: "ECONNRESET",
+    });
+    const error = requestBodyAborted(source);
+    expect(error).toBeInstanceOf(RequestBodyAbortedError);
+    expect(isAppError(error)).toBe(true);
+    expect(error.name).toBe("RequestBodyAbortedError");
+    expect(error.status).toBeLessThan(500);
+    expect(error.cause).toBeUndefined();
+    expect(error.sourceErrorName).toBe("Error");
+    expect(error.sourceErrorCode).toBe("ECONNRESET");
+    expect(error.toPublic()).toEqual({
+      code: "VALIDATION_ERROR",
+      message: "The request is invalid.",
+      details: {
+        fields: [
+          {
+            path: "",
+            code: "invalid_json",
+            message: "The request body was not received completely.",
+          },
+        ],
+      },
+    });
+    // Neither label, and nothing else of the source, is in what may leave the server.
+    const json = JSON.stringify(error);
+    expect(JSON.parse(json)).toEqual(error.toPublic());
+    for (const hidden of ["ECONNRESET", "10.0.0.7", "sourceError", "stack"]) {
+      expect(json).not.toContain(hidden);
+    }
+    expect(error.message).not.toContain("10.0.0.7");
+    expect(error.stack ?? "").not.toContain("10.0.0.7");
   });
 });

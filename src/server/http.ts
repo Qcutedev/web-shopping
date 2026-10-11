@@ -10,30 +10,65 @@
  * cacheable passes `cacheControl` to a success helper; error responses are never
  * storable.
  *
- * Handler pattern for a mutation with a JSON body (`proxyConfig` is the validated SR-01
- * configuration and `appOrigin` the validated `APP_URL`, both passed in by the caller; nothing
- * in this module reads the environment):
+ * Handler pattern for a mutation with a JSON body. The order of the calls is the order of
+ * refusals of docs/API_CONTRACTS.md section 1.8 (D-031 point 4 as amended by D-032 point 1;
+ * SECURITY.md SR-05 item 5) and is not a matter of taste: the first check that fails gives the
+ * answer, and no body is read for a caller who is going to be refused. `proxyConfig` is the
+ * validated SR-01 configuration and `appOrigin` the validated `APP_URL`, both passed in by the
+ * caller; nothing in this module reads the environment. The example is an endpoint of access
+ * `seller` that has a rate limit:
  *
  *   const requestId = resolveRequestId(request, {
  *     trustIncoming: trustsIncomingRequestId(proxyConfig),
  *   });
  *   const log = logger.child({ requestId });
  *   try {
- *     assertSameOrigin(request, appOrigin);
- *     const input = parseInput(bodySchema, await readJsonBody(request));
- *     const actor = await requireUser(request);
- *     return ok(await service(actor, input), { requestId });
+ *     assertSameOrigin(request, appOrigin); // step 1: 403 FORBIDDEN
+ *     assertContentType(request, JSON_CONTENT_TYPE); // step 2: 415 UNSUPPORTED_MEDIA_TYPE
+ *     const actor = await requireActor(request); // step 3: 401 UNAUTHENTICATED
+ *     assertRole(actor, "SELLER"); // step 4: 403 FORBIDDEN
+ *     assertStoreApproved(actor); // step 4, access `seller` only: 403 SELLER_NOT_APPROVED
+ *     const limit = await rateLimiter.consume(actor.userId, RATE_LIMITS.<RULE>); // step 5
+ *     if (!limit.allowed) throw rateLimited(limit.retryAfterSeconds); // 429 RATE_LIMITED
+ *     const body = await readJsonBody(request); // step 6: 413; a body that is not JSON: 400
+ *     const input = parseInput(bodySchema, body); // step 7: 400 VALIDATION_ERROR
+ *     return ok(await service(actor, input), { requestId }); // steps 8 to 10, in the service
  *   } catch (error) {
  *     return errorResponse(error, { requestId, logger: log });
  *   }
+ *
+ * What the pattern fixes:
+ *
+ *   - Steps 1 to 5 use the headers and the session only. Nothing before `readJsonBody` may touch
+ *     the body, and nothing before the service may look up the resource an id names.
+ *   - Step 2 is called by the handler itself, although `readJsonBody` checks the content type
+ *     again: a wrong content type is 415 for everyone, also for a caller without a session.
+ *   - Steps 3 and 4 belong to auth (`src/server/auth/**`, T-015; no guard exists yet).
+ *     `requireActor` is its name in the documents; `assertRole` and `assertStoreApproved` stand
+ *     here for the role helper (role only) and the second pure helper that judges the store
+ *     status, whose names auth chooses. The role is judged first. An endpoint of access
+ *     `seller (any store status)` calls the role helper alone; a `public` endpoint skips steps 3
+ *     and 4.
+ *   - Step 5 only on an endpoint that has a limit (docs/SECURITY.md, SR-02). The subject is
+ *     `actor.userId` and nothing else; on a `public` endpoint that takes a body (sign-up,
+ *     sign-in) it is the client address, still before the body is read. A request that reaches
+ *     this step uses one allowance whatever happens afterwards.
+ *   - Step 7 also covers the path parameters, the query, and the required headers: parse them
+ *     here, after the body was read (a request that is too large is 413 even when a header or a
+ *     parameter is invalid as well). Validation makes no database query.
+ *   - The service checks role, store status, and ownership again (steps 8 and 9). The checks of
+ *     the handler are refusals made sooner, never the control.
+ *   - A mutation without a body ends after step 5 and calls the service; it never reads a body.
+ *     A `GET` or `HEAD` skips steps 1, 2, and 6: `requireActor`, the access level, the rate
+ *     limit where there is one, then `parseInput` on the path parameters and the query.
  *
  * Never call `request.json()`, `request.text()`, `request.formData()`, `request.arrayBuffer()`,
  * or `request.blob()` in a handler (security rule SR-05): they hold a body of any size in
  * memory, and a body that is not valid JSON makes `request.json()` throw a SyntaxError, which
  * `errorResponse` would turn into a 500 with an error-level log line per request.
  * `readJsonBody` checks the content type first (415), reads at most a fixed number of bytes
- * (413), and maps the parse failure to 400 VALIDATION_ERROR. The order in a handler is: origin
- * check, content-type check, size-limited read, schema validation.
+ * (413), and maps a body that is not valid UTF-8, is not valid JSON, or nests too deep to 400
+ * VALIDATION_ERROR.
  *
  * Validation errors: only request input becomes 400 VALIDATION_ERROR, and only
  * because the handler says so, by calling `readJsonBody`, `parseInput` (or
@@ -53,8 +88,11 @@ import {
   internalError,
   invalidJsonBody,
   isAppError,
+  jsonBodyTooDeep,
   payloadTooLarge,
   RateLimitedError,
+  requestBodyAborted,
+  RequestBodyAbortedError,
   unsupportedMediaType,
 } from "./errors";
 import type { Logger } from "./logger";
@@ -292,6 +330,13 @@ const realByteLength: (chunk: Uint8Array) => number = (() => {
  *     arrives from the network is made of them): the stream is cancelled and a TypeError is
  *     thrown.
  *
+ * A source that fails (SR-05 item 10, SEC-024): when a read of the stream rejects, the body
+ * stopped arriving (the connection broke, the request was aborted, the body ended before its
+ * declared length). That is the client's doing: `requestBodyAborted` is thrown, a client error
+ * that keeps neither the source's error nor anything of the bytes read so far. Every rejection
+ * of a read is treated this way, because it cannot be attributed with certainty. The two
+ * refusals above are the reader's own and stay server faults.
+ *
  * The result is a view of the buffer, exactly as long as the body.
  */
 async function readBytesUpTo(
@@ -307,7 +352,13 @@ async function readBytesUpTo(
   let total = 0;
   let emptyChunks = 0;
   for (;;) {
-    const result = await reader.read();
+    let result: ReadableStreamReadResult<Uint8Array>;
+    try {
+      result = await reader.read();
+    } catch (error) {
+      // Only the class name and the code of `error` are copied; the error itself is dropped.
+      throw requestBodyAborted(error);
+    }
     if (result.done) break;
     // The type says bytes; a stream can still hand over anything, so it is checked.
     const chunk: unknown = result.value;
@@ -341,6 +392,49 @@ async function readBytesUpTo(
 }
 
 /**
+ * How deep a JSON body may nest arrays and objects (SR-05 item 12, SEC-023; D-032 point 4). A
+ * scalar is depth 0, `[]` is 1, `[{}]` is 2. Changing the number is a change of SR-05.
+ */
+export const MAX_JSON_NESTING_DEPTH = 32;
+
+const CODE_DOUBLE_QUOTE = 34;
+const CODE_BACKSLASH = 92;
+const CODE_OPEN_BRACKET = 91;
+const CODE_CLOSE_BRACKET = 93;
+const CODE_OPEN_BRACE = 123;
+const CODE_CLOSE_BRACE = 125;
+
+/**
+ * True when `text` opens more than `maxDepth` arrays and objects inside one another. One pass
+ * from left to right, no recursion, no allocation: the cost is in proportion to the length of
+ * the text, and the pass stops at the bracket that exceeds the limit.
+ *
+ * Brackets inside a string literal do not count; inside a string a backslash takes the next
+ * character with it, so an escaped quote does not end the string. For a text that is valid JSON
+ * the answer is exact. For any other text it is the answer for the brackets as written: such a
+ * text is refused either here or by the parser, with 400 in both cases.
+ */
+function nestsDeeperThan(text: string, maxDepth: number): boolean {
+  let depth = 0;
+  let inString = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    if (inString) {
+      if (code === CODE_BACKSLASH) index += 1;
+      else if (code === CODE_DOUBLE_QUOTE) inString = false;
+    } else if (code === CODE_DOUBLE_QUOTE) {
+      inString = true;
+    } else if (code === CODE_OPEN_BRACKET || code === CODE_OPEN_BRACE) {
+      depth += 1;
+      if (depth > maxDepth) return true;
+    } else if ((code === CODE_CLOSE_BRACKET || code === CODE_CLOSE_BRACE) && depth > 0) {
+      depth -= 1;
+    }
+  }
+  return false;
+}
+
+/**
  * Reads the JSON body of a mutation. The one way a handler reads a JSON body (SR-05), in this
  * order:
  *
@@ -351,19 +445,33 @@ async function readBytesUpTo(
  *   3. the body is read as a stream while its bytes are counted; reading stops and the answer is
  *      413 PAYLOAD_TOO_LARGE as soon as the count passes the limit, so a missing or untrue
  *      `Content-Length` does not help. The limit is in bytes, not characters;
- *   4. a body that is not valid JSON (an empty body included) is 400 VALIDATION_ERROR with
+ *   4. the bytes are decoded strictly as UTF-8. A body with a byte sequence that is not valid
+ *      UTF-8 is refused like a body that is not JSON (item 6); it is never repaired with
+ *      replacement characters (SR-05 item 11, SEC-022). A leading byte order mark is removed;
+ *   5. a body that nests arrays and objects more than MAX_JSON_NESTING_DEPTH levels deep is 400
+ *      VALIDATION_ERROR (SR-05 item 12, SEC-023), decided before the parser sees the text, so a
+ *      text that is too deep and also not valid JSON gets this answer. Its field error is
+ *      `jsonBodyTooDeep` in src/server/errors.ts, whose `code` is provisional
+ *      (docs/API_CONTRACTS.md item 8.2-12);
+ *   6. a body that is not valid JSON (an empty body included) is 400 VALIDATION_ERROR with
  *      `details.fields = [{ path: "", code: "invalid_json", message }]`.
  *
  * 413 and 400 are ordinary client errors: nothing is logged, nothing of the body is kept, and
- * the parser's message, which quotes a piece of the body, is neither sent nor kept as a cause.
+ * the decoder's and the parser's errors (the parser's message quotes a piece of the body) are
+ * neither sent nor kept as a cause.
+ *
+ * A body that stops arriving while it is read is a client error as well, `requestBodyAborted`
+ * (SR-05 item 10, SEC-024; its status and code are provisional, docs/API_CONTRACTS.md item
+ * 8.2-13). `errorResponse` writes one warn-level line for it, without a stack.
  *
  * The limit is `options.maxBytes`, by default DEFAULT_JSON_BODY_LIMIT_BYTES. A `maxBytes` that
  * is not a positive integer of at most MAX_JSON_BODY_LIMIT_BYTES is a programming error and
  * throws a TypeError before anything else is looked at, so it fails on every request and in
  * every test, not only for a large body.
  *
- * Any other failure (the body was already read, the connection broke) is passed on unchanged
- * and becomes a 500. The result is `unknown`: pass it to `parseInput`.
+ * Any other failure (the body was already read, a chunk that is not bytes, too many empty
+ * chunks) is a server fault: it is passed on unchanged and becomes a 500. The result is
+ * `unknown`: pass it to `parseInput`.
  */
 export async function readJsonBody(
   request: Request,
@@ -385,8 +493,17 @@ export async function readJsonBody(
     request.body === null ? new Uint8Array(0) : await readBytesUpTo(request.body, maxBytes);
   if (bytes === undefined) throw payloadTooLarge();
 
-  // Decoded like `request.json()` does: UTF-8, a leading byte order mark removed.
-  const text = new TextDecoder().decode(bytes);
+  // Strict UTF-8 (SEC-022): an invalid sequence throws instead of becoming U+FFFD. A leading
+  // byte order mark is removed, as `request.json()` does. The decoder's error is not kept.
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
+  } catch {
+    throw invalidJsonBody();
+  }
+  if (nestsDeeperThan(text, MAX_JSON_NESTING_DEPTH)) {
+    throw jsonBodyTooDeep(MAX_JSON_NESTING_DEPTH);
+  }
   try {
     return JSON.parse(text) as unknown;
   } catch (error) {
@@ -446,14 +563,25 @@ export function errorBody(error: AppError, requestId: string): ErrorBody {
  *   - a 5xx is logged at error level with the original error, stack included;
  *   - a 4xx that carries a `cause` is logged at warn level with that cause, because the
  *     service attached it for the operator (for example the constraint behind a CONFLICT);
- *   - a 4xx without a cause is an ordinary outcome and is not logged here.
+ *   - a request body that broke off (RequestBodyAbortedError; SR-05 item 10, SEC-024) is logged
+ *     at warn level, one line with a fixed message: the code, the status, and the class name
+ *     and code of the source's error. No stack, no error message, nothing of the body, and no
+ *     client address. Nothing a client can cause at will is logged at error level;
+ *   - any other 4xx without a cause is an ordinary outcome and is not logged here.
  */
 export function errorResponse(
   error: unknown,
   context: ResponseContext & { logger?: Pick<Logger, "error" | "warn"> },
 ): Response {
   const appError = toAppError(error);
-  if (appError.status >= 500) {
+  if (appError instanceof RequestBodyAbortedError) {
+    context.logger?.warn("Request body was not received completely", {
+      code: appError.code,
+      status: appError.status,
+      sourceError: appError.sourceErrorName,
+      sourceCode: appError.sourceErrorCode,
+    });
+  } else if (appError.status >= 500) {
     context.logger?.error("Unhandled error", {
       code: appError.code,
       err: appError.cause ?? appError,

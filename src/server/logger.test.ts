@@ -3,12 +3,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppError, notFound } from "./errors";
 import {
   createLogger,
+  DEFAULT_LOG_LEVEL,
+  getLogLevel,
   isSensitiveKey,
+  type Logger,
+  logger,
   type LoggerOptions,
   MAX_ENTRY_CHARS,
   MAX_ENTRY_NODES,
   redact,
   REDACTED,
+  setLogLevel,
   TRUNCATED,
 } from "./logger";
 
@@ -1453,4 +1458,124 @@ describe("cost of the patterns added for SEC-012 to SEC-016", () => {
     expect(performance.now() - started).toBeLessThan(1_000);
     expect(lines).toHaveLength(100);
   });
+});
+
+describe("level of the process-wide logger (setLogLevel)", () => {
+  /** Lines the process-wide logger writes to stdout, parsed. */
+  function captureStdout() {
+    const lines: Record<string, unknown>[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      lines.push(JSON.parse(String(chunk)) as Record<string, unknown>);
+      return true;
+    });
+    return lines;
+  }
+
+  function writeOneOfEach(log: Logger): void {
+    log.debug("d");
+    log.info("i");
+    log.warn("w");
+    log.error("e");
+  }
+
+  afterEach(() => {
+    setLogLevel(DEFAULT_LOG_LEVEL);
+  });
+
+  it("is info until it is set, with nothing in the environment consulted", () => {
+    vi.stubEnv("LOG_LEVEL", "debug");
+    try {
+      expect(DEFAULT_LOG_LEVEL).toBe("info");
+      expect(getLogLevel()).toBe("info");
+      const lines = captureStdout();
+      writeOneOfEach(logger);
+      expect(lines.map((line) => line.level)).toEqual(["info", "warn", "error"]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it.each([
+    ["debug", ["debug", "info", "warn", "error"]],
+    ["info", ["info", "warn", "error"]],
+    ["warn", ["warn", "error"]],
+    ["error", ["error"]],
+  ] as const)("setLogLevel(%s) makes the process-wide logger write %j", (level, written) => {
+    setLogLevel(level);
+    expect(getLogLevel()).toBe(level);
+    const lines = captureStdout();
+    writeOneOfEach(logger);
+    expect(lines.map((line) => line.level)).toEqual(written);
+  });
+
+  it("reaches children made before and after the call, and their children", () => {
+    const before = logger.child({ component: "before" });
+    const grandchild = before.child({ requestId: "req-level-0001" });
+    setLogLevel("error");
+    const after = logger.child({ component: "after" });
+    const lines = captureStdout();
+    for (const log of [before, grandchild, after]) writeOneOfEach(log);
+    expect(lines.map((line) => line.level)).toEqual(["error", "error", "error"]);
+    expect(lines.map((line) => line.component)).toEqual(["before", "before", "after"]);
+    expect(lines[1]?.requestId).toBe("req-level-0001");
+
+    setLogLevel("debug");
+    lines.length = 0;
+    writeOneOfEach(grandchild);
+    expect(lines.map((line) => line.level)).toEqual(["debug", "info", "warn", "error"]);
+  });
+
+  it("can be changed again, in both directions", () => {
+    const lines = captureStdout();
+    setLogLevel("error");
+    logger.warn("dropped");
+    setLogLevel("warn");
+    logger.warn("written");
+    setLogLevel("error");
+    logger.warn("dropped again");
+    expect(lines.map((line) => line.message)).toEqual(["written"]);
+  });
+
+  it("does not touch a logger made with createLogger, or its children", () => {
+    const quiet = capture({ level: "error" });
+    const chatty = capture({ level: "debug" });
+    const unset = capture();
+    const chattyChild = chatty.log.child({ component: "c" });
+    setLogLevel("warn");
+    for (const log of [quiet.log, chatty.log, chattyChild, unset.log]) writeOneOfEach(log);
+    expect(quiet.entries().map((line) => line.level)).toEqual(["error"]);
+    expect(chatty.entries().map((line) => line.level)).toEqual([
+      "debug",
+      "info",
+      "warn",
+      "error",
+      "debug",
+      "info",
+      "warn",
+      "error",
+    ]);
+    expect(unset.entries().map((line) => line.level)).toEqual(["info", "warn", "error"]);
+  });
+
+  it.each([
+    ["an unknown word", "loud"],
+    ["upper case", "DEBUG"],
+    ["an empty string", ""],
+    ["undefined", undefined],
+    ["null", null],
+    ["a number", 10],
+    ["a property of every object", "constructor"],
+    ["__proto__", "__proto__"],
+    ["an object", { level: "debug" }],
+  ])(
+    "refuses %s with a TypeError that names nothing of the value, and keeps the level",
+    (_label, value) => {
+      setLogLevel("warn");
+      const untyped = setLogLevel as (level: unknown) => void;
+      expect(() => untyped(value)).toThrow(
+        new TypeError("setLogLevel: the level must be debug, info, warn, or error."),
+      );
+      expect(getLogLevel()).toBe("warn");
+    },
+  );
 });

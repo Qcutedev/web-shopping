@@ -811,15 +811,26 @@ function writeToStdout(line: string): void {
   process.stdout.write(`${line}\n`);
 }
 
+/** The level of a logger that was given none, and of the process-wide logger until it is set. */
+export const DEFAULT_LOG_LEVEL: LogLevel = "info";
+
+/** The level of one logger and of every child made from it. Read at each line, so it can change. */
+interface LevelCell {
+  current: LogLevel;
+}
+
 export function createLogger(options: LoggerOptions = {}): Logger {
-  const minimum = LEVEL_ORDER[options.level ?? "info"];
+  return buildLogger(options, { current: options.level ?? DEFAULT_LOG_LEVEL });
+}
+
+function buildLogger(options: Omit<LoggerOptions, "level">, levelCell: LevelCell): Logger {
   const write = options.write ?? writeToStdout;
   const now = options.now ?? (() => new Date());
   const bindings = options.bindings ?? {};
   const requestId = options.requestId;
 
   function emit(level: LogLevel, message: string, fields?: LogFields): void {
-    if (LEVEL_ORDER[level] < minimum) return;
+    if (LEVEL_ORDER[level] < LEVEL_ORDER[levelCell.current]) return;
     let line: string;
     try {
       const safeFields = redact({ ...bindings, ...fields });
@@ -853,16 +864,48 @@ export function createLogger(options: LoggerOptions = {}): Logger {
     error: (message, fields) => emit("error", message, fields),
     child(childBindings) {
       const { requestId: childRequestId, ...rest } = childBindings;
-      return createLogger({
-        level: options.level,
-        write,
-        now,
-        requestId: childRequestId ?? requestId,
-        bindings: { ...bindings, ...rest },
-      });
+      // The child shares the parent's level cell: a level set later reaches it as well.
+      return buildLogger(
+        {
+          write,
+          now,
+          requestId: childRequestId ?? requestId,
+          bindings: { ...bindings, ...rest },
+        },
+        levelCell,
+      );
     },
   };
 }
 
-/** Process-wide logger. Use `logger.child({ requestId })` inside a request. */
-export const logger: Logger = createLogger();
+/** The level of the process-wide logger. Module state: importing this file reads no variable. */
+const processLevel: LevelCell = { current: DEFAULT_LOG_LEVEL };
+
+/**
+ * Process-wide logger. Use `logger.child({ requestId })` inside a request.
+ *
+ * Its level is DEFAULT_LOG_LEVEL until `setLogLevel` is called. This module never reads the
+ * environment, at import or later: src/server/env.ts is the one place that does, and it imports
+ * this module, so the validated `LOG_LEVEL` is handed over by a call, not fetched from here.
+ */
+export const logger: Logger = buildLogger({}, processLevel);
+
+/**
+ * Sets the level of the process-wide logger and of every child made from it, before or after
+ * this call. For the server's start-up code, with the validated `LOG_LEVEL`
+ * (`getEnv().logLevel` of src/server/env.ts). A logger made with `createLogger` is not affected.
+ *
+ * A value that is not a level is a programming error and throws a TypeError; the level is left
+ * as it was. The message names nothing of the value.
+ */
+export function setLogLevel(level: LogLevel): void {
+  if (typeof level !== "string" || !Object.hasOwn(LEVEL_ORDER, level)) {
+    throw new TypeError("setLogLevel: the level must be debug, info, warn, or error.");
+  }
+  processLevel.current = level;
+}
+
+/** The current level of the process-wide logger. */
+export function getLogLevel(): LogLevel {
+  return processLevel.current;
+}

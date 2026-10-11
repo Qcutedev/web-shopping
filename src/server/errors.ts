@@ -8,7 +8,9 @@
  * What reaches a client is exactly `code`, `message`, and `details`. Anything
  * attached as `cause` stays on the server. `errorResponse` in src/server/http.ts
  * writes it to the log through the redacting logger: at error level for a 5xx,
- * at warn level for a 4xx that carries a cause. Therefore `message` and `details`
+ * at warn level for a 4xx that carries a cause (a request body that broke off is
+ * the one error with a log line of its own, see RequestBodyAbortedError).
+ * Therefore `message` and `details`
  * must be written as public, developer-facing English text and data: never a
  * database message, a stack, SQL, a secret, or an id the caller has no right to
  * see.
@@ -227,6 +229,99 @@ export function invalidJsonBody(): AppError {
 }
 
 /**
+ * PROVISIONAL, not ruled (docs/API_CONTRACTS.md item 8.2-12): the `code` of the field error for a
+ * JSON body that nests arrays and objects deeper than the limit (SR-05 item 12, SEC-023). The
+ * status and the error code are fixed (400 VALIDATION_ERROR); the field code is not. Until it is
+ * ruled, the existing `invalid_json` is reused, so no new public code exists. A ruling for a code
+ * of its own changes this one line (and the contract).
+ */
+export const JSON_TOO_DEEP_FIELD_CODE: string = INVALID_JSON_CODE;
+
+/**
+ * 400 VALIDATION_ERROR for a JSON body nested more than `maxDepth` levels deep:
+ * `details.fields = [{ path: "", code: JSON_TOO_DEEP_FIELD_CODE, message }]`. Nothing of the body
+ * is in it, and no cause is kept.
+ */
+export function jsonBodyTooDeep(maxDepth: number): AppError {
+  return validationError([
+    {
+      path: "",
+      code: JSON_TOO_DEEP_FIELD_CODE,
+      message: `The request body nests arrays and objects more than ${maxDepth} levels deep.`,
+    },
+  ]);
+}
+
+/**
+ * PROVISIONAL, not ruled (docs/API_CONTRACTS.md item 8.2-13): the error code, and through
+ * ERROR_STATUS the status, of the answer to a request body that stops arriving (SR-05 item 10,
+ * SEC-024). Fixed by SR-05: a client error, below 500. Not fixed: which one. Until it is ruled,
+ * the existing 400 VALIDATION_ERROR is reused, so no new public code exists. A ruling for another
+ * code changes this one line (and the contract); a code other than VALIDATION_ERROR carries
+ * empty `details`.
+ */
+export const ABORTED_BODY_ERROR_CODE: ErrorCode = "VALIDATION_ERROR";
+
+/** Upper bound, in characters, on the class name and the code copied from a source error. */
+const MAX_SOURCE_ERROR_LABEL_LENGTH = 64;
+
+/** `value[key]` when it is a string or a finite number, clipped; undefined otherwise. Never throws. */
+function readLabel(value: unknown, key: string): string | undefined {
+  try {
+    if (typeof value !== "object" || value === null) return undefined;
+    const found: unknown = (value as Record<string, unknown>)[key];
+    if (typeof found === "string" && found.length > 0) {
+      return clip(found, MAX_SOURCE_ERROR_LABEL_LENGTH);
+    }
+    if (typeof found === "number" && Number.isFinite(found)) return String(found);
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The answer to a request body that broke off while it was read (the connection was lost, the
+ * request was aborted, the body ended before its declared length). The client's doing, not a
+ * server fault (SR-05 item 10, SEC-024): a status below 500.
+ *
+ * The error of the body's source is NOT kept: no `cause`, no message, no stack. Only its class
+ * name and its `code` are copied, as two short strings, for the one warn-level line that
+ * `errorResponse` writes. Neither is ever sent to a client.
+ */
+export class RequestBodyAbortedError extends AppError {
+  /** `name` of the error the body's source failed with, for example `TypeError` or `AbortError`. */
+  readonly sourceErrorName: string | undefined;
+  /** `code` of that error, for example `ECONNRESET`. */
+  readonly sourceErrorCode: string | undefined;
+
+  constructor(source?: unknown) {
+    super(ABORTED_BODY_ERROR_CODE, {
+      details:
+        ABORTED_BODY_ERROR_CODE === "VALIDATION_ERROR"
+          ? {
+              fields: [
+                {
+                  path: "",
+                  code: INVALID_JSON_CODE,
+                  message: "The request body was not received completely.",
+                },
+              ],
+            }
+          : {},
+    });
+    this.name = "RequestBodyAbortedError";
+    this.sourceErrorName = readLabel(source, "name");
+    this.sourceErrorCode = readLabel(source, "code");
+  }
+}
+
+/** See RequestBodyAbortedError. `source` is what the read of the body threw; it is not kept. */
+export function requestBodyAborted(source?: unknown): RequestBodyAbortedError {
+  return new RequestBodyAbortedError(source);
+}
+
+/**
  * 400 VALIDATION_ERROR for a missing or malformed request header:
  * `details.fields = [{ path: <header name>, code: "invalid_header", message }]`
  * (docs/API_CONTRACTS.md; decided for `Idempotency-Key`). `headerName` is written as the
@@ -269,8 +364,32 @@ export function invalidStateTransition(options?: AppErrorOptions): AppError {
   return new AppError("INVALID_STATE_TRANSITION", options);
 }
 
-export function conflict(options?: AppErrorOptions): AppError {
-  return new AppError("CONFLICT", options);
+/** Form of a `CONFLICT` reason: upper-case words joined by `_`, as in docs/API_CONTRACTS.md section 2.3. */
+export const CONFLICT_REASON_PATTERN = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*$/;
+/** Upper bound, in characters, on a `CONFLICT` reason. */
+export const MAX_CONFLICT_REASON_LENGTH = 64;
+
+/**
+ * 409 CONFLICT. `reason` is required and becomes `details.reason`, the only key of the details:
+ * the contract says "`CONFLICT` always carries `details.reason`" (docs/API_CONTRACTS.md section
+ * 2.3, which lists the reasons; one that is not listed there is a contract change).
+ *
+ * A reason that is missing, is not a string, or does not have the form of
+ * CONFLICT_REASON_PATTERN is a programming error and throws a TypeError, on every call and in
+ * every test. The message names nothing of the value. The list of reasons itself is not in the
+ * code yet: each task adds its own (docs/API_CONTRACTS.md item 8.2-10).
+ */
+export function conflict(reason: string, options: Omit<AppErrorOptions, "details"> = {}): AppError {
+  if (
+    typeof reason !== "string" ||
+    reason.length > MAX_CONFLICT_REASON_LENGTH ||
+    !CONFLICT_REASON_PATTERN.test(reason)
+  ) {
+    throw new TypeError(
+      "conflict: a reason is required, in upper case with underscores (for example DUPLICATE_SKU).",
+    );
+  }
+  return new AppError("CONFLICT", { ...options, details: { reason } });
 }
 
 export function payloadTooLarge(options?: AppErrorOptions): AppError {

@@ -1,14 +1,24 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import {
+  ABORTED_BODY_ERROR_CODE,
   AppError,
   conflict,
   ERROR_CODES,
   ERROR_STATUS,
+  forbidden,
   fromZodError,
+  JSON_TOO_DEEP_FIELD_CODE,
   notFound,
   rateLimited,
+  requestBodyAborted,
+  RequestBodyAbortedError,
+  sellerNotApproved,
+  unauthenticated,
 } from "./errors";
 import {
   assertContentType,
@@ -19,6 +29,7 @@ import {
   JSON_CONTENT_TYPE,
   MAX_EMPTY_BODY_CHUNKS,
   MAX_JSON_BODY_LIMIT_BYTES,
+  MAX_JSON_NESTING_DEPTH,
   MULTIPART_CONTENT_TYPE,
   ok,
   paginated,
@@ -28,6 +39,7 @@ import {
   toAppError,
 } from "./http";
 import { createLogger } from "./logger";
+import { createRateLimiter } from "./rate-limit";
 import { REQUEST_ID_HEADER } from "./request-id";
 
 const requestId = "req-test-0001";
@@ -153,9 +165,8 @@ describe("error envelope", () => {
   });
 
   it("includes public message and details of a domain error, never its cause", async () => {
-    const error = conflict({
+    const error = conflict("DUPLICATE_SKU", {
       message: "SKU already exists.",
-      details: { field: "sku" },
       cause: new Error('Unique constraint failed on "Product_storeId_sku_key"'),
     });
     const response = errorResponse(error, { requestId });
@@ -166,7 +177,7 @@ describe("error envelope", () => {
       error: {
         code: "CONFLICT",
         message: "SKU already exists.",
-        details: { field: "sku" },
+        details: { reason: "DUPLICATE_SKU" },
         requestId,
       },
     });
@@ -331,10 +342,10 @@ describe("unknown errors", () => {
     const cause = new Error(
       'Unique constraint failed on "Product_storeId_sku_key"; seller somchai@example.com; password=hunter2',
     );
-    const response = errorResponse(conflict({ message: "SKU already exists.", cause }), {
-      requestId,
-      logger,
-    });
+    const response = errorResponse(
+      conflict("DUPLICATE_SKU", { message: "SKU already exists.", cause }),
+      { requestId, logger },
+    );
 
     expect(response.status).toBe(409);
     expect(await response.text()).not.toContain("Product_storeId_sku_key");
@@ -1301,5 +1312,760 @@ describe("readJsonBody always ends (SR-05 item 9, SEC-021)", () => {
     expect(await readJsonBody(streamedRaw([view]).request, { maxBytes: 3 })).toEqual([1]);
     const buffer = Buffer.from(backing.buffer, backing.byteOffset + 4, 3);
     expect(await readJsonBody(streamedRaw([buffer]).request, { maxBytes: 3 })).toEqual([1]);
+  });
+});
+
+const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
+
+/** A POST with a JSON content type whose body is exactly `bytes`. */
+function postBytes(bytes: Uint8Array | readonly number[]): Request {
+  const body = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
+  return new Request("http://localhost/api/v1/cart/items", {
+    method: "POST",
+    body: body as BodyInit,
+    headers: JSON_HEADERS,
+  });
+}
+
+/** A POST with a JSON content type whose body is whatever `source` produces. */
+function postStream(source: UnderlyingDefaultSource<Uint8Array>): Request {
+  return new Request("http://localhost/api/v1/cart/items", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    // Nothing is produced ahead of a read.
+    body: new ReadableStream<Uint8Array>(source, { highWaterMark: 0 }),
+    duplex: "half",
+  } as RequestInit);
+}
+
+/** Whatever `promise` rejects with; fails when it resolves. */
+async function rejectionOf(promise: Promise<unknown>): Promise<unknown> {
+  try {
+    await promise;
+  } catch (error) {
+    return error;
+  }
+  throw new Error("expected a rejection");
+}
+
+const INVALID_JSON_PUBLIC = {
+  code: "VALIDATION_ERROR",
+  message: "The request is invalid.",
+  details: {
+    fields: [{ path: "", code: "invalid_json", message: "The request body is not valid JSON." }],
+  },
+};
+
+describe("readJsonBody refuses bytes that are not valid UTF-8 (SR-05 item 11, SEC-022)", () => {
+  it("the reproduction of SEC-022: a lone FF byte inside a string is 400 invalid_json", async () => {
+    // {"a":"?"} with the single byte FF in place of the question mark.
+    const bytes = [0x7b, 0x22, 0x61, 0x22, 0x3a, 0x22, 0xff, 0x22, 0x7d];
+    const error = await thrownBy(() => readJsonBody(postBytes(bytes)));
+    expect(error.status).toBe(400);
+    expect(error.toPublic()).toEqual(INVALID_JSON_PUBLIC);
+    expect(error.cause).toBeUndefined();
+  });
+
+  it.each([
+    ["a lone continuation byte", [0x80]],
+    ["a truncated two-byte sequence", [0xc3]],
+    ["a truncated three-byte sequence (part of a Thai letter)", [0xe0, 0xb8]],
+    ["a truncated four-byte sequence", [0xf0, 0x9f, 0x98]],
+    ["an overlong encoding of a slash", [0xc0, 0xaf]],
+    ["an overlong encoding of a quote", [0xe0, 0x80, 0xa2]],
+    ["an encoded surrogate half", [0xed, 0xa0, 0x80]],
+    ["a code point above U+10FFFF", [0xf4, 0x90, 0x80, 0x80]],
+    ["the byte FE", [0xfe]],
+  ])("refuses %s inside a string value", async (_label, invalid) => {
+    const bytes = [...utf8('{"a":"'), ...invalid, ...utf8('"}')];
+    const error = await thrownBy(() => readJsonBody(postBytes(bytes)));
+    expect(error.toPublic()).toEqual(INVALID_JSON_PUBLIC);
+    expect(error.cause).toBeUndefined();
+  });
+
+  it("refuses an invalid sequence in a key, between tokens, and at either end", async () => {
+    const cases = [
+      [...utf8('{"'), 0xff, ...utf8('":1}')],
+      [...utf8('{"a":1'), 0xff, ...utf8("}")],
+      [0xff, ...utf8('{"a":1}')],
+      [...utf8('{"a":1}'), 0xff],
+      [0xff],
+    ];
+    for (const bytes of cases) {
+      const error = await thrownBy(() => readJsonBody(postBytes(bytes)));
+      expect(error.toPublic()).toEqual(INVALID_JSON_PUBLIC);
+    }
+  });
+
+  it("never hands out a replacement character the client did not send", async () => {
+    // Two different invalid bodies must not become one value; both are refused.
+    for (const invalid of [0xff, 0xfe]) {
+      const bytes = [...utf8('{"a":"'), invalid, ...utf8('"}')];
+      const outcome = await readJsonBody(postBytes(bytes)).then(
+        (value) => JSON.stringify(value),
+        () => "refused",
+      );
+      expect(outcome).toBe("refused");
+    }
+    // U+FFFD that the client really sent, as its three valid bytes, is ordinary text.
+    const sent = [...utf8('{"a":"'), 0xef, 0xbf, 0xbd, ...utf8('"}')];
+    expect(await readJsonBody(postBytes(sent))).toEqual({ a: "�" });
+  });
+
+  it("judges a sequence that is split across two chunks as a whole", async () => {
+    const inChunks = (chunks: Uint8Array[]): Request =>
+      postStream({
+        start(controller) {
+          for (const chunk of chunks) controller.enqueue(chunk);
+          controller.close();
+        },
+      });
+    const thai = utf8('{"a":"ก"}');
+    // Cut in the middle of the three bytes of the Thai letter: still one valid body.
+    expect(await readJsonBody(inChunks([thai.subarray(0, 7), thai.subarray(7)]))).toEqual({
+      a: "ก",
+    });
+    // The same letter with its last byte missing.
+    const broken = Uint8Array.from([...thai.subarray(0, 8), ...utf8('"}')]);
+    const error = await thrownBy(() =>
+      readJsonBody(inChunks([broken.subarray(0, 7), broken.subarray(7)])),
+    );
+    expect(error.toPublic()).toEqual(INVALID_JSON_PUBLIC);
+  });
+
+  it("keeps accepting valid UTF-8: Thai text, four-byte characters, escapes, a byte order mark", async () => {
+    const title = "เสื้อยืด \u{1f600}";
+    expect(await readJsonBody(postBytes(utf8(JSON.stringify({ title }))))).toEqual({ title });
+    // A lone surrogate written as a JSON escape is plain ASCII on the wire, so valid UTF-8.
+    expect(await readJsonBody(postBytes(utf8('{"a":"\\ud800"}')))).toEqual({ a: "\ud800" });
+    // A leading byte order mark is accepted and removed.
+    expect(await readJsonBody(postBytes([0xef, 0xbb, 0xbf, ...utf8('{"quantity":2}')]))).toEqual({
+      quantity: 2,
+    });
+    // Only one, and only at the start.
+    const twice = [0xef, 0xbb, 0xbf, 0xef, 0xbb, 0xbf, ...utf8("1")];
+    expect((await thrownBy(() => readJsonBody(postBytes(twice)))).toPublic()).toEqual(
+      INVALID_JSON_PUBLIC,
+    );
+  });
+
+  it("writes no log line and echoes nothing of the body", async () => {
+    const { logger, lines } = captureLog();
+    const bytes = [...utf8('{"note":"MARKER-IN-BODY'), 0xff, ...utf8('"}')];
+    const error = await thrownBy(() => readJsonBody(postBytes(bytes)));
+    const response = errorResponse(error, { requestId, logger });
+    expect(response.status).toBe(400);
+    expect(await response.text()).not.toContain("MARKER");
+    expect(lines).toHaveLength(0);
+  });
+
+  it("a body over the byte limit is still 413, whatever its bytes are", async () => {
+    const bytes = new Uint8Array(2_000).fill(0xff);
+    const error = await thrownBy(() => readJsonBody(postBytes(bytes), { maxBytes: 1_000 }));
+    expect(error.status).toBe(413);
+  });
+});
+
+describe("readJsonBody caps JSON nesting (SR-05 item 12, SEC-023)", () => {
+  const TOO_DEEP_PUBLIC = {
+    code: "VALIDATION_ERROR",
+    message: "The request is invalid.",
+    details: {
+      fields: [
+        {
+          path: "",
+          code: JSON_TOO_DEEP_FIELD_CODE,
+          message: "The request body nests arrays and objects more than 32 levels deep.",
+        },
+      ],
+    },
+  };
+  const arrays = (depth: number, inner = ""): string =>
+    `${"[".repeat(depth)}${inner}${"]".repeat(depth)}`;
+  const objects = (depth: number): string => `${'{"a":'.repeat(depth)}1${"}".repeat(depth)}`;
+  const jsonPost = (text: string): Request => post(text, JSON_HEADERS);
+
+  /** The depth of a parsed value, counted without recursion. */
+  function depthOf(value: unknown): number {
+    let deepest = 0;
+    const stack: [unknown, number][] = [[value, 0]];
+    for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
+      const [current, depth] = next;
+      if (typeof current !== "object" || current === null) continue;
+      deepest = Math.max(deepest, depth + 1);
+      for (const child of Object.values(current)) stack.push([child, depth + 1]);
+    }
+    return deepest;
+  }
+
+  it("the number is 32", () => {
+    expect(MAX_JSON_NESTING_DEPTH).toBe(32);
+  });
+
+  it("the reproduction of SEC-023: 33 arrays inside one another are 400 VALIDATION_ERROR", async () => {
+    const error = await thrownBy(() => readJsonBody(jsonPost(arrays(33))));
+    expect(error.status).toBe(400);
+    expect(error.toPublic()).toEqual(TOO_DEEP_PUBLIC);
+    expect(error.cause).toBeUndefined();
+  });
+
+  it("accepts exactly 32 levels of arrays, of objects, and of both mixed", async () => {
+    expect(depthOf(await readJsonBody(jsonPost(arrays(32))))).toBe(32);
+    expect(depthOf(await readJsonBody(jsonPost(objects(32))))).toBe(32);
+    const mixed = `${'[{"a":'.repeat(16)}1${"}]".repeat(16)}`;
+    expect(depthOf(await readJsonBody(jsonPost(mixed)))).toBe(32);
+  });
+
+  it.each([
+    ["33 arrays", arrays(33)],
+    ["33 objects", objects(33)],
+    ["17 arrays each holding an object", `${'[{"a":'.repeat(17)}1${"}]".repeat(17)}`],
+    ["33 arrays behind a wide first level", `[1,2,3,{"a":"b"},${arrays(32)}]`],
+    ["33 levels after blanks and line breaks", ` \n\t${arrays(33)}\n`],
+    ["33 levels with blanks between the brackets", `${"[ ".repeat(33)}${"] ".repeat(33)}`],
+  ])("refuses %s", async (_label, text) => {
+    const error = await thrownBy(() => readJsonBody(jsonPost(text)));
+    expect(error.toPublic()).toEqual(TOO_DEEP_PUBLIC);
+  });
+
+  it("counts the deepest point, not the number of brackets", async () => {
+    // 1,000 arrays side by side are depth 2.
+    const wide = `[${Array.from({ length: 1_000 }, () => "[]").join(",")}]`;
+    expect(depthOf(await readJsonBody(jsonPost(wide)))).toBe(2);
+    // Going down to 32 and back up, twice, is still 32.
+    expect(depthOf(await readJsonBody(jsonPost(`[${arrays(31)},${arrays(31)}]`)))).toBe(32);
+  });
+
+  it("does not count brackets inside a string, and an escaped quote does not end the string", async () => {
+    const brackets = "[{".repeat(100);
+    expect(await readJsonBody(jsonPost(JSON.stringify({ a: brackets })))).toEqual({ a: brackets });
+    const tricky = { a: `\\"${brackets}\\\\"`, 'k"[[[[': [brackets] };
+    expect(await readJsonBody(jsonPost(JSON.stringify(tricky)))).toEqual(tricky);
+    // A string cannot hide real nesting behind it either.
+    for (const first of ['"\\\\"', '"a\\""', '"\\\\\\""']) {
+      const hidden = `[${first},${arrays(32)}]`;
+      expect(() => JSON.parse(hidden) as unknown).not.toThrow();
+      expect((await thrownBy(() => readJsonBody(jsonPost(hidden)))).toPublic()).toEqual(
+        TOO_DEEP_PUBLIC,
+      );
+    }
+  });
+
+  it("a text that is not JSON is refused with 400 whether or not it is deep", async () => {
+    for (const text of ["[".repeat(33), "{".repeat(33), "]".repeat(40), `${arrays(33)}x`]) {
+      expect((await thrownBy(() => readJsonBody(jsonPost(text)))).status).toBe(400);
+    }
+    // Closing brackets that open nothing do not buy extra depth.
+    const closersFirst = `${"]".repeat(10)}${arrays(33)}`;
+    expect((await thrownBy(() => readJsonBody(jsonPost(closersFirst)))).toPublic()).toEqual(
+      TOO_DEEP_PUBLIC,
+    );
+  });
+
+  it("is applied at the ceiling as well, and after the 413", async () => {
+    const options = { maxBytes: MAX_JSON_BODY_LIMIT_BYTES };
+    const half = MAX_JSON_BODY_LIMIT_BYTES / 2;
+    const deepest = await thrownBy(() => readJsonBody(jsonPost(arrays(half)), options));
+    expect(deepest.toPublic()).toEqual(TOO_DEEP_PUBLIC);
+    // Too large and too deep is 413: the size is judged first.
+    expect((await thrownBy(() => readJsonBody(jsonPost(arrays(half))))).status).toBe(413);
+  });
+
+  it("costs time in proportion to the body, also for the worst bodies at the ceiling", async () => {
+    const options = { maxBytes: MAX_JSON_BODY_LIMIT_BYTES };
+    const bodies = [
+      // Never deeper than 32, so the whole text is scanned: down and up again all the way.
+      `[${Array.from({ length: 15_000 }, () => arrays(31)).join(",")}]`,
+      // One long string of brackets and backslashes.
+      JSON.stringify({ a: "[\\".repeat(170_000) }),
+    ];
+    for (const body of bodies) {
+      expect(utf8(body).byteLength).toBeGreaterThan(500_000);
+      expect(utf8(body).byteLength).toBeLessThanOrEqual(MAX_JSON_BODY_LIMIT_BYTES);
+      const started = performance.now();
+      await readJsonBody(jsonPost(body), options);
+      expect(performance.now() - started).toBeLessThan(2_000);
+    }
+  });
+
+  it("the deepest value handed out can be walked by recursion", async () => {
+    const walk = (value: unknown): number =>
+      typeof value === "object" && value !== null
+        ? 1 + Math.max(0, ...Object.values(value).map(walk))
+        : 0;
+    expect(walk(await readJsonBody(jsonPost(arrays(32))))).toBe(32);
+  });
+
+  it("writes no log line and echoes nothing of the body", async () => {
+    const { logger, lines } = captureLog();
+    const error = await thrownBy(() => readJsonBody(jsonPost(arrays(33, '"MARKER-IN-BODY"'))));
+    const response = errorResponse(error, { requestId, logger });
+    expect(response.status).toBe(400);
+    expect(await response.text()).not.toContain("MARKER");
+    expect(lines).toHaveLength(0);
+  });
+});
+
+describe("a request body that stops arriving (SR-05 item 10, SEC-024)", () => {
+  const MARKER = "QZXVMARKER";
+
+  /** A body that delivers `chunksBefore` chunks holding the marker and then fails with `failure`. */
+  function breakingOff(failure: unknown, chunksBefore = 2) {
+    const taken = { reads: 0 };
+    const request = postStream({
+      pull(controller) {
+        taken.reads += 1;
+        if (taken.reads > chunksBefore) controller.error(failure);
+        else controller.enqueue(utf8(`"${MARKER}`));
+      },
+    });
+    return { request, taken };
+  }
+
+  /** A logger at the lowest level, so that nothing written is missed. */
+  function captureAll() {
+    const lines: string[] = [];
+    const logger = createLogger({ level: "debug", write: (line) => lines.push(line), requestId });
+    return { logger, lines };
+  }
+
+  it("the provisional answer is an existing code with a status below 500 (8.2-13)", () => {
+    expect(ERROR_CODES).toContain(ABORTED_BODY_ERROR_CODE);
+    expect(ERROR_STATUS[ABORTED_BODY_ERROR_CODE]).toBeGreaterThanOrEqual(400);
+    expect(ERROR_STATUS[ABORTED_BODY_ERROR_CODE]).toBeLessThan(500);
+    const error = requestBodyAborted(new Error("x"));
+    expect(error.code).toBe(ABORTED_BODY_ERROR_CODE);
+    expect(error.status).toBe(ERROR_STATUS[ABORTED_BODY_ERROR_CODE]);
+  });
+
+  it("the reproduction of SEC-024: below 500, one warn line, no stack, nothing of the body", async () => {
+    const failure = Object.assign(new Error(`aborted after ${MARKER}`), { code: "ECONNRESET" });
+    const { request, taken } = breakingOff(failure);
+    const error = await rejectionOf(readJsonBody(request));
+
+    expect(error).toBeInstanceOf(RequestBodyAbortedError);
+    expect(error).toBeInstanceOf(AppError);
+    const aborted = error as RequestBodyAbortedError;
+    // The source's error is not kept: no cause, no message, no stack of it.
+    expect(aborted.cause).toBeUndefined();
+    expect(String(aborted)).not.toContain(MARKER);
+    expect(JSON.stringify(aborted)).not.toContain(MARKER);
+    expect(JSON.stringify(aborted)).not.toContain("ECONNRESET");
+    // Nothing is read after the failure.
+    expect(taken.reads).toBe(3);
+
+    const { logger, lines } = captureAll();
+    const response = errorResponse(error, { requestId, logger });
+    expect(response.status).toBeLessThan(500);
+    expect(response.status).toBe(ERROR_STATUS[ABORTED_BODY_ERROR_CODE]);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const text = await response.text();
+    expect(text).not.toContain(MARKER);
+    expect(text).not.toContain("ECONNRESET");
+    expect(text).not.toContain("INTERNAL_ERROR");
+
+    expect(lines).toHaveLength(1);
+    const logged = JSON.parse(lines[0] ?? "") as Record<string, unknown>;
+    expect(Object.keys(logged).sort()).toEqual([
+      "code",
+      "level",
+      "message",
+      "requestId",
+      "sourceCode",
+      "sourceError",
+      "status",
+      "timestamp",
+    ]);
+    expect(logged).toMatchObject({
+      level: "warn",
+      message: "Request body was not received completely",
+      requestId,
+      code: ABORTED_BODY_ERROR_CODE,
+      status: response.status,
+      sourceError: "Error",
+      sourceCode: "ECONNRESET",
+    });
+    expect(lines[0]).not.toContain(MARKER);
+    expect(lines[0]).not.toContain("stack");
+    expect(lines[0]).not.toContain("http.ts");
+    expect(lines[0]).not.toContain("clientIp");
+  });
+
+  it("the public answer is the provisional one and says nothing about the source", async () => {
+    const { request } = breakingOff(new TypeError("terminated"));
+    const error = await thrownBy(() => readJsonBody(request));
+    expect(error.toPublic()).toEqual({
+      code: "VALIDATION_ERROR",
+      message: "The request is invalid.",
+      details: {
+        fields: [
+          {
+            path: "",
+            code: "invalid_json",
+            message: "The request body was not received completely.",
+          },
+        ],
+      },
+    });
+  });
+
+  it.each([
+    ["before the first byte", 0],
+    ["after one chunk", 1],
+    ["after many chunks", 50],
+  ])("a failure %s is the same client error", async (_label, chunksBefore) => {
+    const { request, taken } = breakingOff(new Error("socket hang up"), chunksBefore);
+    const error = await rejectionOf(readJsonBody(request));
+    expect(error).toBeInstanceOf(RequestBodyAbortedError);
+    expect(taken.reads).toBe(chunksBefore + 1);
+  });
+
+  it("a source whose pull throws, and one that rejects, are the same client error", async () => {
+    const throwing = postStream({
+      pull() {
+        throw new RangeError("pull threw");
+      },
+    });
+    const rejecting = postStream({
+      pull() {
+        return Promise.reject(new Error("pull rejected"));
+      },
+    });
+    const first = await rejectionOf(readJsonBody(throwing));
+    expect(first).toBeInstanceOf(RequestBodyAbortedError);
+    expect((first as RequestBodyAbortedError).sourceErrorName).toBe("RangeError");
+    expect(await rejectionOf(readJsonBody(rejecting))).toBeInstanceOf(RequestBodyAbortedError);
+  });
+
+  it("copies only a short class name and code, whatever the source failed with", () => {
+    const labelsOf = (source: unknown) => {
+      const error = requestBodyAborted(source);
+      return [error.sourceErrorName, error.sourceErrorCode];
+    };
+    expect(labelsOf(new DOMException("gone", "AbortError"))).toEqual(["AbortError", "20"]);
+    expect(labelsOf(Object.assign(new Error("x"), { code: "UND_ERR_SOCKET" }))).toEqual([
+      "Error",
+      "UND_ERR_SOCKET",
+    ]);
+    expect(labelsOf(Object.assign(new Error("x"), { code: 104 }))).toEqual(["Error", "104"]);
+    // Not an error at all, or an error that carries nothing usable.
+    for (const source of [
+      undefined,
+      null,
+      "a text with MARKER",
+      42,
+      Symbol("s"),
+      () => undefined,
+    ]) {
+      expect(labelsOf(source)).toEqual([undefined, undefined]);
+    }
+    expect(labelsOf({ name: { nested: true }, code: ["E"] })).toEqual([undefined, undefined]);
+    expect(labelsOf({ name: "", code: Number.NaN })).toEqual([undefined, undefined]);
+    // A long value is clipped; a getter that throws is survived.
+    const [longName, longCode] = labelsOf({ name: "N".repeat(5_000), code: "C".repeat(5_000) });
+    expect(longName).toHaveLength(64);
+    expect(longCode).toHaveLength(64);
+    const hostile = {
+      get name(): string {
+        throw new Error("name getter");
+      },
+      get code(): string {
+        throw new Error("code getter");
+      },
+    };
+    expect(labelsOf(hostile)).toEqual([undefined, undefined]);
+    expect(requestBodyAborted().sourceErrorName).toBeUndefined();
+  });
+
+  it("never logs the source's message, stack, or other properties, and redacts the two it copies", async () => {
+    const failure = Object.assign(new Error("password=hunter2 somchai@example.com"), {
+      name: "somchai@example.com",
+      code: "token=abc123SECRET",
+      meta: { target: "User_email_key", row: MARKER },
+      clientIp: "203.0.113.9",
+    });
+    const { request } = breakingOff(failure);
+    const error = await rejectionOf(readJsonBody(request));
+    const { logger, lines } = captureAll();
+    errorResponse(error, { requestId, logger });
+    expect(lines).toHaveLength(1);
+    for (const leaked of [
+      "hunter2",
+      "somchai@example.com",
+      "abc123SECRET",
+      "User_email_key",
+      MARKER,
+      "203.0.113.9",
+      "meta",
+      "stack",
+    ]) {
+      expect(lines[0]).not.toContain(leaked);
+    }
+    expect(JSON.parse(lines[0] ?? "")).toMatchObject({ level: "warn" });
+  });
+
+  it("writes nothing at error level, at any logger level, and needs no logger", async () => {
+    const error = await rejectionOf(readJsonBody(breakingOff(new Error("aborted")).request));
+    const calls: string[] = [];
+    const recording = {
+      error: () => calls.push("error"),
+      warn: () => calls.push("warn"),
+    };
+    expect(errorResponse(error, { requestId, logger: recording }).status).toBeLessThan(500);
+    expect(calls).toEqual(["warn"]);
+    // A logger that drops warn lines writes nothing at all.
+    const lines: string[] = [];
+    const errorsOnly = createLogger({ level: "error", write: (line) => lines.push(line) });
+    errorResponse(error, { requestId, logger: errorsOnly });
+    expect(lines).toHaveLength(0);
+    expect(errorResponse(error, { requestId }).status).toBeLessThan(500);
+  });
+
+  it("the reader's own refusals stay server faults at error level", async () => {
+    const notBytes = postStream({
+      pull(controller) {
+        (controller as unknown as ReadableStreamDefaultController<unknown>).enqueue("text");
+      },
+    });
+    const alreadyRead = post('{"quantity":2}', JSON_HEADERS);
+    await alreadyRead.text();
+    for (const request of [notBytes, alreadyRead]) {
+      const error = await rejectionOf(readJsonBody(request));
+      expect(error).toBeInstanceOf(TypeError);
+      expect(error).not.toBeInstanceOf(AppError);
+      const { logger, lines } = captureAll();
+      expect(errorResponse(error, { requestId, logger }).status).toBe(500);
+      expect(lines).toHaveLength(1);
+      expect(JSON.parse(lines[0] ?? "")).toMatchObject({ level: "error", code: "INTERNAL_ERROR" });
+    }
+  });
+
+  it("a body that only ends early, without an error, is judged as what arrived", async () => {
+    // A stream that closes in the middle of a document is not a failed read: it is not JSON.
+    const closing = postStream({
+      start(controller) {
+        controller.enqueue(utf8('{"quantity":'));
+        controller.close();
+      },
+    });
+    const error = await thrownBy(() => readJsonBody(closing));
+    expect(error).not.toBeInstanceOf(RequestBodyAbortedError);
+    expect(error.toPublic()).toEqual(INVALID_JSON_PUBLIC);
+  });
+});
+
+describe("handler pattern in the order of refusals (CR-09; D-031 point 4, D-032 point 1)", () => {
+  const APP_ORIGIN = "https://shop.example";
+  const RULE = { name: "pattern-test", limit: 2, windowMs: 60_000, maxKeys: 100 };
+
+  interface TestActor {
+    userId: string;
+    role: "CUSTOMER" | "SELLER" | "ADMIN";
+    storeStatus?: "APPROVED" | "SUSPENDED";
+  }
+
+  // Stand-ins for the guards that auth writes in T-015. Only their place in the order is tested.
+  function requireActor(request: Request): TestActor {
+    const session = request.headers.get("x-test-session");
+    if (session === null) throw unauthenticated();
+    return JSON.parse(session) as TestActor;
+  }
+  function assertRole(actor: TestActor, role: TestActor["role"]): void {
+    if (actor.role !== role) throw forbidden();
+  }
+  function assertStoreApproved(actor: TestActor): void {
+    if (actor.storeStatus !== "APPROVED") throw sellerNotApproved();
+  }
+
+  /** The pattern of the file comment of src/server/http.ts, call for call. */
+  function makeHandler() {
+    const limiter = createRateLimiter({ rules: [RULE] });
+    const served: unknown[] = [];
+    async function handler(request: Request): Promise<Response> {
+      try {
+        assertSameOrigin(request, APP_ORIGIN);
+        assertContentType(request, JSON_CONTENT_TYPE);
+        const actor = requireActor(request);
+        assertRole(actor, "SELLER");
+        assertStoreApproved(actor);
+        const limit = await limiter.consume(actor.userId, RULE);
+        if (!limit.allowed) throw rateLimited(limit.retryAfterSeconds);
+        const body = await readJsonBody(request, { maxBytes: 1_000 });
+        const input = parseInput(cartSchema, body);
+        served.push(input);
+        return ok(input, { requestId });
+      } catch (error) {
+        return errorResponse(error, { requestId });
+      }
+    }
+    return { handler, served };
+  }
+
+  const SELLER: TestActor = { userId: "u_seller", role: "SELLER", storeStatus: "APPROVED" };
+  const SUSPENDED: TestActor = { userId: "u_suspended", role: "SELLER", storeStatus: "SUSPENDED" };
+  const CUSTOMER: TestActor = { userId: "u_customer", role: "CUSTOMER" };
+
+  interface Sent {
+    origin?: string;
+    contentType?: string;
+    actor?: TestActor;
+    body: string;
+  }
+
+  /** A request whose body records whether anything was taken from it. */
+  function send(sent: Sent) {
+    const taken = { reads: 0 };
+    const headers = new Headers();
+    if (sent.origin !== undefined) headers.set("origin", sent.origin);
+    if (sent.contentType !== undefined) headers.set("content-type", sent.contentType);
+    if (sent.actor !== undefined) headers.set("x-test-session", JSON.stringify(sent.actor));
+    let done = false;
+    const request = new Request(`${APP_ORIGIN}/api/v1/seller/products`, {
+      method: "POST",
+      headers,
+      body: new ReadableStream<Uint8Array>(
+        {
+          pull(controller) {
+            taken.reads += 1;
+            if (done) controller.close();
+            else controller.enqueue(utf8(sent.body));
+            done = true;
+          },
+        },
+        { highWaterMark: 0 },
+      ),
+      duplex: "half",
+    } as RequestInit);
+    return { request, taken };
+  }
+
+  async function answer(handler: (request: Request) => Promise<Response>, sent: Sent) {
+    const { request, taken } = send(sent);
+    const response = await handler(request);
+    const body = (await read(response)) as { error?: { code: string } };
+    return { status: response.status, code: body.error?.code, reads: taken.reads };
+  }
+
+  const INVALID = '{"quantity":"two","storeId":"s_other"}';
+  const TOO_LARGE = `"${"a".repeat(5_000)}"`;
+  const VALID = '{"quantity":2}';
+  const good = { origin: APP_ORIGIN, contentType: "application/json", actor: SELLER };
+
+  it("the file comment of http.ts shows the calls in the order of section 1.8", () => {
+    const source = readFileSync(fileURLToPath(new URL("./http.ts", import.meta.url)), "utf8");
+    const comment = source.slice(0, source.indexOf("\nimport "));
+    const calls = [
+      "assertSameOrigin(request, appOrigin)",
+      "assertContentType(request, JSON_CONTENT_TYPE)",
+      "requireActor(request)",
+      "assertRole(actor",
+      "assertStoreApproved(actor)",
+      "rateLimiter.consume(actor.userId",
+      "throw rateLimited(",
+      "readJsonBody(request)",
+      "parseInput(bodySchema, body)",
+      "service(actor, input)",
+      "errorResponse(error, { requestId, logger: log })",
+    ];
+    const positions = calls.map((call) => comment.indexOf(call));
+    expect(positions.every((position) => position !== -1)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    // The withdrawn order is gone.
+    expect(comment).not.toContain("requireUser");
+    expect(comment).not.toContain("size-limited read, schema validation");
+  });
+
+  it("a request that fails every check is answered by the first check, and each next one in turn", async () => {
+    const { handler, served } = makeHandler();
+    const steps: [Sent, number, string][] = [
+      [{ body: TOO_LARGE }, 403, "FORBIDDEN"],
+      [{ origin: "https://evil.example", body: TOO_LARGE }, 403, "FORBIDDEN"],
+      [{ origin: APP_ORIGIN, body: TOO_LARGE }, 415, "UNSUPPORTED_MEDIA_TYPE"],
+      [
+        { origin: APP_ORIGIN, contentType: "text/plain", body: TOO_LARGE },
+        415,
+        "UNSUPPORTED_MEDIA_TYPE",
+      ],
+      [
+        { origin: APP_ORIGIN, contentType: "application/json", body: TOO_LARGE },
+        401,
+        "UNAUTHENTICATED",
+      ],
+      [{ ...good, actor: CUSTOMER, body: TOO_LARGE }, 403, "FORBIDDEN"],
+      [{ ...good, actor: SUSPENDED, body: TOO_LARGE }, 403, "SELLER_NOT_APPROVED"],
+    ];
+    for (const [sent, status, code] of steps) {
+      const outcome = await answer(handler, sent);
+      expect([outcome.status, outcome.code]).toEqual([status, code]);
+      // Steps 1 to 4 never touch the body.
+      expect(outcome.reads).toBe(0);
+    }
+    // Step 6 before step 7: too large and invalid is 413.
+    expect(await answer(handler, { ...good, body: TOO_LARGE })).toMatchObject({ status: 413 });
+    expect(served).toHaveLength(0);
+  });
+
+  it("an anonymous caller, a wrong role, and a suspended seller are refused whatever the body is", async () => {
+    const { handler } = makeHandler();
+    for (const body of [VALID, INVALID, "not json", TOO_LARGE]) {
+      const base = { origin: APP_ORIGIN, contentType: "application/json", body };
+      expect(await answer(handler, base)).toEqual({
+        status: 401,
+        code: "UNAUTHENTICATED",
+        reads: 0,
+      });
+      expect(await answer(handler, { ...base, actor: CUSTOMER })).toEqual({
+        status: 403,
+        code: "FORBIDDEN",
+        reads: 0,
+      });
+      // D-032 point 1: not 400, also for an invalid body.
+      expect(await answer(handler, { ...base, actor: SUSPENDED })).toEqual({
+        status: 403,
+        code: "SELLER_NOT_APPROVED",
+        reads: 0,
+      });
+    }
+  });
+
+  it("the rate limit comes after the access level and before the body is read", async () => {
+    const { handler, served } = makeHandler();
+    // Refused at steps 1 to 4: none of the allowance is used, however often.
+    for (let round = 0; round < 10; round += 1) {
+      await answer(handler, { ...good, origin: "https://evil.example", body: VALID });
+      await answer(handler, { ...good, contentType: "text/plain", body: VALID });
+      await answer(handler, { ...good, actor: { ...SELLER, role: "ADMIN" }, body: VALID });
+      await answer(handler, {
+        ...good,
+        actor: { ...SELLER, storeStatus: "SUSPENDED" },
+        body: VALID,
+      });
+    }
+    // A request that reaches step 5 uses one allowance whatever happens afterwards: 400, 413.
+    expect(await answer(handler, { ...good, body: INVALID })).toMatchObject({
+      status: 400,
+      code: "VALIDATION_ERROR",
+    });
+    expect(await answer(handler, { ...good, body: TOO_LARGE })).toMatchObject({ status: 413 });
+    // The limit of 2 is used up: 429, and the body is not read, valid or not.
+    expect(await answer(handler, { ...good, body: VALID })).toEqual({
+      status: 429,
+      code: "RATE_LIMITED",
+      reads: 0,
+    });
+    expect(await answer(handler, { ...good, body: TOO_LARGE })).toEqual({
+      status: 429,
+      code: "RATE_LIMITED",
+      reads: 0,
+    });
+    expect(served).toHaveLength(0);
+  });
+
+  it("a permitted, valid request reaches the service", async () => {
+    const { handler, served } = makeHandler();
+    const outcome = await answer(handler, { ...good, body: VALID });
+    expect(outcome.status).toBe(200);
+    expect(outcome.reads).toBeGreaterThan(0);
+    expect(served).toEqual([{ quantity: 2 }]);
   });
 });

@@ -1426,12 +1426,25 @@ describe("TM-16 content type and JSON body (assertContentType, readJsonBody)", (
     const parsed = (await readJsonBody(post("application/json", polluting))) as object;
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
     expect(Object.getPrototypeOf(parsed)).toBe(Object.prototype);
-    const deep = `${"[".repeat(20_000)}${"]".repeat(20_000)}`;
-    const outcome = await readJsonBody(post("application/json", deep)).then(
-      () => 200,
-      (error: unknown) => (error instanceof AppError ? error.status : 500),
+    // Changed on 2026-10-12 with the fix of SEC-023 (SR-05 item 12): this case accepted either
+    // outcome for 20,000 nested arrays. The answer is now fixed on both sides of the limit of 32.
+    const outcomeFor = (depth: number): Promise<number> =>
+      readJsonBody(post("application/json", `${"[".repeat(depth)}${"]".repeat(depth)}`)).then(
+        () => 200,
+        (error: unknown) => (error instanceof AppError ? error.status : 500),
+      );
+    expect(await outcomeFor(20_000)).toBe(400);
+    expect(await outcomeFor(33)).toBe(400);
+    expect(await outcomeFor(32)).toBe(200);
+    const refused = await rejection(
+      post("application/json", `${"[".repeat(20_000)}${"]".repeat(20_000)}`),
     );
-    expect([200, 400]).toContain(outcome);
+    expect(refused.code).toBe("VALIDATION_ERROR");
+    expect(refused.cause).toBeUndefined();
+    const lines: string[] = [];
+    const log = createLogger({ level: "debug", write: (line) => lines.push(line) });
+    expect(errorResponse(refused, { requestId: REQUEST_ID, logger: log }).status).toBe(400);
+    expect(lines).toHaveLength(0);
   });
 });
 

@@ -12,6 +12,12 @@
  * cases written for the re-check of that fix, and the reproduction of SEC-021, which that
  * re-check found, are in `sec020-bounded-buffer-recheck.test.ts`.
  *
+ * Two cases were changed by the security agent on 2026-10-12, with the fixes of SEC-023 and
+ * SEC-024, because they pinned the behaviour those findings replaced: "the largest accepted
+ * documents do not turn into a server error" and "a body that breaks off is a client error
+ * below 500 that carries nothing of the body". Each says in its body what it required before.
+ * The further cases of that re-check are in `sec022-024-json-body-recheck.test.ts`.
+ *
  * `readJsonBody` is called directly, and once behind a plain `node:http` server on the loopback
  * interface. No route handler exists, so nothing here goes through the framework.
  *
@@ -26,11 +32,18 @@ import { runInNewContext } from "node:vm";
 
 import { describe, expect, it } from "vitest";
 
-import { AppError } from "../../src/server/errors";
+import {
+  ABORTED_BODY_ERROR_CODE,
+  AppError,
+  ERROR_STATUS,
+  JSON_TOO_DEEP_FIELD_CODE,
+  RequestBodyAbortedError,
+} from "../../src/server/errors";
 import {
   DEFAULT_JSON_BODY_LIMIT_BYTES,
   errorResponse,
   MAX_JSON_BODY_LIMIT_BYTES,
+  MAX_JSON_NESTING_DEPTH,
   readJsonBody,
 } from "../../src/server/http";
 import { createLogger } from "../../src/server/logger";
@@ -336,12 +349,59 @@ describe("SEC-019 re-check: the refusal is a 413 in the standard envelope", () =
   });
 
   it("the largest accepted documents do not turn into a server error", async () => {
-    // Deep nesting at the ceiling: the parser must answer, not overflow the stack into a 500.
+    // Changed on 2026-10-12 with the fix of SEC-023 (SR-05 item 12). Until then this case
+    // required 524,288 nested arrays at the ceiling to parse. Such a document is now refused:
+    // the answer is still never a server error, and it is the exact refusal of the nesting limit.
     const options = { maxBytes: MAX_JSON_BODY_LIMIT_BYTES };
-    const arrays = `${"[".repeat(524_288)}${"]".repeat(524_288)}`;
-    expect(Array.isArray(await readJsonBody(post(arrays), options))).toBe(true);
+    const nested = (depth: number): string => `${"[".repeat(depth)}${"]".repeat(depth)}`;
+    const tooDeep = {
+      code: "VALIDATION_ERROR",
+      message: "The request is invalid.",
+      details: {
+        fields: [
+          {
+            path: "",
+            // Provisional (docs/API_CONTRACTS.md item 8.2-12): the one constant, whatever is ruled.
+            code: JSON_TOO_DEEP_FIELD_CODE,
+            message: "The request body nests arrays and objects more than 32 levels deep.",
+          },
+        ],
+      },
+    };
+    for (const depth of [524_288, 51_200, 33]) {
+      const error = await appError(readJsonBody(post(nested(depth)), options));
+      expect(error.status, String(depth)).toBe(400);
+      expect(error.toPublic(), String(depth)).toEqual(tooDeep);
+      expect(error.cause, String(depth)).toBeUndefined();
+      const lines: string[] = [];
+      const log = createLogger({ level: "debug", write: (line) => lines.push(line) });
+      const response = errorResponse(error, { requestId: REQUEST_ID, logger: log });
+      expect(response.status, String(depth)).toBe(400);
+      expect(lines, String(depth)).toHaveLength(0);
+    }
+    // The limit itself: 32 levels are accepted, at the default limit and at the ceiling.
+    expect(MAX_JSON_NESTING_DEPTH).toBe(32);
+    let deepest: unknown = await readJsonBody(post(nested(32)));
+    let levels = 0;
+    while (Array.isArray(deepest)) {
+      levels += 1;
+      deepest = deepest[0];
+    }
+    expect(levels).toBe(32);
+    expect(Array.isArray(await readJsonBody(post(nested(32)), options))).toBe(true);
+    // The largest documents that are accepted at the ceiling are answered, not a server error:
+    // a flat array of 524,287 numbers, and 16,000 arrays of depth 31 inside one array.
+    const flat = `[${"0,".repeat(524_286)}0]`;
+    expect(encode(flat).byteLength).toBe(MAX_JSON_BODY_LIMIT_BYTES - 1);
+    expect(await readJsonBody(post(flat), options)).toHaveLength(524_287);
+    const comb = `[${Array.from({ length: 16_000 }, () => nested(31)).join(",")}]`;
+    expect(encode(comb).byteLength).toBeLessThanOrEqual(MAX_JSON_BODY_LIMIT_BYTES);
+    expect(await readJsonBody(post(comb), options)).toHaveLength(16_000);
+    // A megabyte of opening brackets: refused for its depth before the parser sees it.
     const unclosed = "[".repeat(MAX_JSON_BODY_LIMIT_BYTES);
-    expect((await appError(readJsonBody(post(unclosed), options))).status).toBe(400);
+    const unclosedError = await appError(readJsonBody(post(unclosed), options));
+    expect(unclosedError.status).toBe(400);
+    expect(unclosedError.toPublic()).toEqual(tooDeep);
   });
 });
 
@@ -354,29 +414,54 @@ describe("SEC-019 re-check: failure and abort while reading", () => {
     expect(taken.cancelled).toBe(true);
   });
 
-  it("a body that breaks off is a server-side error that carries nothing of the body", async () => {
+  it("a body that breaks off is a client error below 500 that carries nothing of the body", async () => {
+    // Changed on 2026-10-12 with the fix of SEC-024 (SR-05 item 10). Until then this case
+    // required a server-side error and a 500. The half that checks that nothing of the body is
+    // kept is unchanged; the other half now requires the opposite of what it did.
     const marker = "QZXVMARKER";
+    const sourceMarker = "QZXVSOURCE";
     let reads = 0;
+    const source = new Error(`aborted ${sourceMarker}`, { cause: new Error(sourceMarker) });
     const body = new ReadableStream<Uint8Array>(
       {
         pull(controller) {
           reads += 1;
-          if (reads === 3) controller.error(new Error("aborted"));
+          if (reads === 3) controller.error(source);
           else controller.enqueue(encode(`"${marker}`));
         },
       },
       { highWaterMark: 0 },
     );
     const error = await rejection(readJsonBody(post(body)));
-    // Not a 400 and not a 413: the client did not send a complete body at all.
-    expect(error).not.toBeInstanceOf(AppError);
-    expect(String(error)).not.toContain(marker);
+    // The client's doing: a client error of its own class, not the source's error passed on.
+    expect(error).toBeInstanceOf(RequestBodyAbortedError);
+    expect(error).not.toBe(source);
+    const aborted = error as RequestBodyAbortedError;
+    // Provisional (docs/API_CONTRACTS.md item 8.2-13): the one constant, and never a 5xx.
+    expect(aborted.code).toBe(ABORTED_BODY_ERROR_CODE);
+    expect(aborted.status).toBe(ERROR_STATUS[ABORTED_BODY_ERROR_CODE]);
+    expect(aborted.status).toBeGreaterThanOrEqual(400);
+    expect(aborted.status).toBeLessThan(500);
+    expect(aborted.cause).toBeUndefined();
+    for (const text of [String(error), JSON.stringify(error), String(aborted.stack)]) {
+      expect(text).not.toContain(marker);
+      expect(text).not.toContain(sourceMarker);
+    }
     const lines: string[] = [];
     const log = createLogger({ level: "debug", write: (line) => lines.push(line) });
     const response = errorResponse(error, { requestId: REQUEST_ID, logger: log });
-    expect(response.status).toBe(500);
-    expect(await response.text()).not.toContain(marker);
+    expect(response.status).toBe(aborted.status);
+    expect(response.status).not.toBe(500);
+    const text = await response.text();
+    expect((JSON.parse(text) as { error: { code: string } }).error.code).not.toBe("INTERNAL_ERROR");
+    expect(text).not.toContain(marker);
+    expect(text).not.toContain(sourceMarker);
+    // One line, at warn level, with no stack and nothing of the body or of the source's message.
+    expect(lines).toHaveLength(1);
+    expect((JSON.parse(lines[0] ?? "{}") as { level?: string }).level).toBe("warn");
     expect(lines.join("\n")).not.toContain(marker);
+    expect(lines.join("\n")).not.toContain(sourceMarker);
+    expect(lines.join("\n")).not.toMatch(/"stack"|\bat \S+ \(/);
     // Nothing is read after the failure.
     expect(reads).toBe(3);
   });
