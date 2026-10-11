@@ -67,15 +67,16 @@ Technical points still open after D-031, none blocking T-013: T10 / X-07 (expire
 
 Raised by devops, for other owners: the start-up hook file an in-process timer would need (Next.js instrumentation file) has no owner in AGENT_WORKFLOW.md, assign one before T-015; script names for running the purge and the sweep on demand are needed with T-015 and T-032; T-011 fixes the timeout variable (proposed `PAYMENT_TIMEOUT_MINUTES`, integer, default 15); security rules on restored sessions (DEP-Q7) and settles DEP-Q4 with devops in T-071; KNOWN_LIMITATIONS.md "no background job runner" is updated when T-015 lands.
 
-Parked for the owner (ask in plain Thai with a recommendation, with the next batch; none blocks T-013):
+Parked for the owner: nothing. The owner answered every parked question on 2026-10-12 (D-033): CR-15, Q38 to Q41, the filter chips (still deferred to milestone 1 with OQ-20, by the owner's choice), DEP-Q1 to DEP-Q3, DEP-Q5, DEP-Q6, DEP-Q8, DEP-Q9. Still to tell the owner: after a restore everyone signs in once (D-032 point 3).
 
-- CR-15 (technical, needed before T-020): create the database client on first use, or keep it created at import and give build and unit tests a placeholder `DATABASE_URL`? Recommended: on first use, so that importing a module never fails and `next build` needs no database variable; the missing-variable error then appears at the first query, and T-011 env validation still reports it at start-up.
-- Q38 (REQUIREMENTS.md): the Thai mark on a cart line whose product is hidden; must not say why. Recommended: "สินค้านี้ไม่พร้อมจำหน่ายในขณะนี้".
-- (REQUIREMENTS Q39) Confirm the shared reading of "view only" for a suspended store: all three documents also refuse editing the store profile (name, description, logo, contact phone), uploading, and deleting a product. The owner was told in chat and has not objected; no schema effect either way.
-- (REQUIREMENTS Q40) Paid time (X-03): should order pages show when an order was paid, and should the admin order list be filterable by paid date so it matches the report? No recommendation needed to continue; `Order.paidAt` exists in the model either way.
-- (REQUIREMENTS Q41) Admin dashboard (X-14): is one total number of users enough, or users split into active and deactivated? The documents use one total.
-- Chips: should filter chips also show the ink border on hover? D-026 OQ-45 names form controls and outline buttons only, so chips were left unchanged. Recommended: decide on real pages at milestone 1 with OQ-20.
-- DEPLOYMENT.md "Open questions" DEP-Q1 to DEP-Q3 and DEP-Q5 to DEP-Q9 (who the system administrators are and who approves one; how often access is checked; who may place and close an investigation hold and how often a hold is reviewed; whether 30 days is also the shortest time a backup is kept; whether a restore signs everyone out; how soon after 15 minutes an unpaid order must fail; a shortest time for logs). Each has a recommendation in the document. DEP-Q7 (whether a restore signs everyone out) is no longer a question: security made it a requirement (D-032 point 3); tell the owner that everyone signs in once after a restore. DEP-Q8 should be answered before T-032; security's minimums for DEP-Q5 and DEP-Q8 are in SECURITY.md "Scheduled work: security minimums".
+Work that D-033 creates, none started:
+
+- database: create the client on first use (`src/server/db/client.ts`, CR-15), before T-020.
+- product-requirements: close Q38 to Q41 in REQUIREMENTS.md; Q40 adds the paid time on the order pages and the paid-date filter on the admin order list.
+- backend-api: API_CONTRACTS.md for Q40 (`paidAt` in the order responses, the paid-date filter), and close the matching 8.1 items.
+- frontend, with the cart task: the Q38 text "สินค้านี้ไม่พร้อมจำหน่ายในขณะนี้" into `src/i18n/th.ts`.
+- devops: close DEP-Q1 to DEP-Q3, DEP-Q5, DEP-Q6, DEP-Q8, DEP-Q9 in DEPLOYMENT.md with the answers; the sweep interval of one minute goes to T-011 and T-032.
+- qa: TEST_STRATEGY.md cases for Q40.
 
 Next steps, in order:
 

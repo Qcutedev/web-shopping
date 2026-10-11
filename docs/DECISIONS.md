@@ -40,6 +40,7 @@ Decisions marked `PROPOSED` are not yet validated against the installed stack; e
 | D-030 | 2026-10-11 | Markdown stays excluded from Prettier; `format:check` is not evidence about documents | ACCEPTED |
 | D-031 | 2026-10-11 | Technical rulings after the cross-document check: Prisma and Better Auth versions, `contentRevision` on a price correction, amounts in a request body, order of refusals, refused-checkout mechanism | ACCEPTED |
 | D-032 | 2026-10-11 | After the security review: store status is judged before the body is read (amends D-031 point 4); every restore deletes all sessions and re-applies restrictions | ACCEPTED |
+| D-033 | 2026-10-12 | Owner answers to the parked questions: CR-15, REQUIREMENTS Q38 to Q41, filter chips, DEPLOYMENT DEP-Q1 to DEP-Q3, DEP-Q5, DEP-Q6, DEP-Q8, DEP-Q9 | ACCEPTED |
 
 ## Details
 
@@ -244,6 +245,23 @@ Made by the orchestrator on 2026-10-11, following the security agent's review (S
 2. **Accepted as backend-api wrote them, with security's conditions:** origin and content type are checked before identity; the rate limit is consumed after identity and role and before the body is read, and a request that reaches it uses one allowance whatever happens afterwards; `413` comes before `400`; validation makes no database query; `PATCH` on a hidden product's own cart line is `409 PRODUCT_UNAVAILABLE` with reason `NOT_AVAILABLE`. The guarantees for sign-in and sign-up are in SECURITY.md SR-05 item 5 and bind T-015.
 3. **Every restore deletes every session, and restrictions are re-applied before the application serves.** A session ended after the backup was taken, and a user deactivated or a store suspended after it, would otherwise be valid again. This is a security requirement (SECURITY.md SR-07), not an owner choice; it closes DEPLOYMENT.md DEP-Q7. Its cost is that everyone signs in once after a restore. Backup encryption and separate storage are also requirements.
 4. **New Low findings SEC-022 to SEC-024** (invalid UTF-8 accepted, unbounded JSON nesting, an aborted body logged at error level) are fixed by backend-api in the `src/server` follow-up before the first handler that reads a JSON body is merged; JSON nesting is capped at 32 levels.
+
+### D-033 Owner answers to the parked questions
+Answered by the owner on 2026-10-12, one question at a time, in chat. In every case the owner chose the recommended option. The answers are binding; the documents named are updated by their owners and lag until then.
+
+1. **CR-15: the database client is created on first use**, not at import. Importing a module never fails for a missing `DATABASE_URL`, and `next build` and unit tests need no database variable. The missing-variable error appears at the first query, and T-011 env validation reports it at start-up. Owner of the change: database (`src/server/db`). Needed before T-020.
+2. **Q38: the mark on a cart line whose product is hidden** is "สินค้านี้ไม่พร้อมจำหน่ายในขณะนี้". It never says why. The string goes into `src/i18n/th.ts`.
+3. **Q39: "view only" for a suspended store is confirmed as the documents read it.** A suspended store may not edit the store profile (name, description, logo, contact phone), may not upload, and may not delete a product. No document changes.
+4. **Q40: the paid time is shown and can be filtered on.** Order pages for the customer, the seller, and the admin show when an order was paid, and the admin order list can be filtered by paid date, so that it matches the report. `Order.paidAt` already exists.
+5. **Q41: the admin dashboard shows one total number of users.** No split into active and deactivated. No document changes.
+6. **Filter chips: not decided now.** Chips stay unchanged; the hover border is decided on real pages at milestone 1, with OQ-20.
+7. **DEP-Q1: the owner is the only system administrator**, and approves each further person individually.
+8. **DEP-Q2: the access list is checked against the real accounts** before every production release and at least every 90 days.
+9. **DEP-Q3: the system administrators place and close an investigation hold**, and the owner is told each time.
+10. **DEP-Q5: every open hold is reviewed every 30 days**, and the review is added to the record.
+11. **DEP-Q6: 30 days is both the longest and the shortest time a database backup is kept**: one backup a day, each kept 30 days and then deleted. A provider plan that costs money is a separate approval.
+12. **DEP-Q8: the payment-timeout sweep runs every minute.** An unpaid order is failed within about 16 minutes; the check query allows 20.
+13. **DEP-Q9: logs are kept at least 30 days where the chosen host offers it without extra cost.** Anything paid is a separate approval. The 90-day maximum (OQ-48) stands.
 
 ## Pending decisions for the user
 
