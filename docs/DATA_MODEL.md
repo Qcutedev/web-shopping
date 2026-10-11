@@ -1,8 +1,8 @@
 # Data Model
 
-Owner: database agent. This is the **design** for schema v1, corrected on 2026-10-11 after the T-004 planning review ([reviews/T-004-findings.md](reviews/T-004-findings.md)) and the owner answers in [DECISIONS.md](DECISIONS.md) D-025, and again the same day for the second batch of owner answers, D-026 (OQ-25 to OQ-50). **No schema file and no migration exist yet.** T-013 writes `prisma/schema.prisma` from this document; from then on the schema file is authoritative and this document must match it.
+Owner: database agent. This is the **design** for schema v1, corrected on 2026-10-11 after the T-004 planning review ([reviews/T-004-findings.md](reviews/T-004-findings.md)) and the owner answers in [DECISIONS.md](DECISIONS.md) D-025, and again the same day for the second batch of owner answers, D-026 (OQ-25 to OQ-50), the follow-up answers, D-028, and the technical rulings, D-029. **No schema file and no migration exist yet.** T-013 writes `prisma/schema.prisma` from this document; from then on the schema file is authoritative and this document must match it.
 
-Items marked **to validate in T-013** or **to validate in T-015** are technical points that depend on the installed Prisma or Better Auth version. They are not asserted here. Items marked **OPEN (owner)** wait for an owner answer, and items marked **DISAGREEMENT** are points on which two other documents differ; both kinds are listed in [section 19](#19-open-points). For each of them this document says what the data model needs under every reading and does not pick one.
+Items marked **to validate in T-013** or **to validate in T-015** are technical points that depend on the installed Prisma or Better Auth version. They are not asserted here. No owner question is open in this document: every one raised here has been answered, and [section 19](#19-open-points) lists the answers and the few technical points that remain for later tasks.
 
 ## 1. Conventions
 
@@ -75,7 +75,15 @@ Application status lives on `SellerApplication`. Store status holds only states 
 - **When the role changes:** exactly once, in the approval transaction, guarded by `WHERE role = 'CUSTOMER'`. It never changes back: a suspended seller is still a `SELLER`. Because a user has a single role, an `ADMIN` cannot become a seller; an application from a user whose role is not `CUSTOMER` cannot be approved.
 - Approval always **creates** the store. "Creates or activates" in REQ-A-03 and in the API contract has no second case, because a user who already owns a store cannot apply.
 - A user with a `PENDING` or `REJECTED` application and no store is a `CUSTOMER` with no `Store` row. "Seller, any status" therefore means: role `SELLER` with a store that is `APPROVED` or `SUSPENDED`.
-- `ADMIN` is written only by the bootstrap script (OQ-13). No service function sets it.
+- `ADMIN` is written only by the bootstrap script (OQ-13). No service function sets it. The script may be run again to create further admins (D-026, OQ-37), and it **only ever inserts a new user** with the role `ADMIN`; it never changes the role of an existing row (D-028):
+
+  | The email given to the script | What the script does | Rows changed |
+  | --- | --- | --- |
+  | Has no account | Creates the user through the auth library, with role `ADMIN` | one `User`, one `Account` inserted |
+  | Belongs to an account whose role is `ADMIN` | Finishes without change (not an error) | none |
+  | Belongs to an account whose role is `CUSTOMER` or `SELLER` | **Refuses** | none |
+
+  The unique constraint on the email is the backstop: if the script's lookup and its insert race with a sign-up for the same address, the insert fails and nothing is promoted. A seller therefore can never become an admin, which keeps "one role per user" and "an admin owns no store" true without a constraint.
 
 ### 4.2 Product status and moderation (S5, OQ-04, OQ-05, OQ-06, OQ-35, OQ-36, OQ-42)
 
@@ -86,22 +94,24 @@ Two independent columns. `Product.status` is the seller's switch; `Product.moder
 | From | To | Who |
 | --- | --- | --- |
 | (new row) | `DRAFT` | Seller |
-| `DRAFT` | `PUBLISHED` | Seller |
+| `DRAFT` | `PUBLISHED` | Seller. When the product's `moderationStatus` is `PENDING`, the same statement sets `moderationRequestedAt = now()`: publishing is what submits it for approval (D-028) |
 | `PUBLISHED` | `DRAFT` | Seller (unpublish) |
 | `DRAFT`, `PUBLISHED` | `ARCHIVED` | Seller (archive, or delete of a product that orders reference) |
 
 `ARCHIVED` is final in v1: no requirement and no endpoint restores an archived product.
+
+Every row of this table, and every other seller write to a product, is refused while the seller's store is `SUSPENDED` (D-028; [section 7.7](#77-suspended-store-which-statements-carry-the-store-status-d-028)).
 
 `Product.moderationStatus`:
 
 | From | To | Trigger |
 | --- | --- | --- |
 | (new row) | `PENDING` | Product created |
-| `PENDING` | `APPROVED` | Admin approves |
-| `PENDING` | `REJECTED` | Admin rejects, reason required |
-| `APPROVED` | `TAKEN_DOWN` | Admin takes down, reason required |
-| `APPROVED` | `PENDING` | Seller changes a **moderated field** (OQ-05) |
-| `REJECTED`, `TAKEN_DOWN` | `PENDING` | Seller saves a correction, which resubmits the product automatically (OQ-06, OQ-36) |
+| `PENDING` | `APPROVED` | Admin approves. **Only when `status = 'PUBLISHED'`** (D-028) |
+| `PENDING` | `REJECTED` | Admin rejects, reason required. **Only when `status = 'PUBLISHED'`** (D-028) |
+| `APPROVED` | `TAKEN_DOWN` | Admin takes down, reason required. Unchanged by D-028: no condition on `status` |
+| `APPROVED` | `PENDING` | Seller changes **moderated content** (OQ-05). A price change does **not** do this |
+| `REJECTED`, `TAKEN_DOWN` | `PENDING` | Seller saves a **correction**: a change to moderated content **or to the price** (OQ-06, OQ-36; D-028) |
 
 **Moderated content.** Four things, and nothing else:
 
@@ -110,7 +120,17 @@ Two independent columns. `Product.status` is the seller's switch; `Product.moder
 3. `categoryId`
 4. the **set** of pictures: which uploads are attached to the product, compared as the set of `ProductImage.uploadId` values, **without regard to `sortOrder`**
 
-**Not moderated:** `priceSatang`, `stock`, `sku`, `status`, and **the order of the pictures**, including which picture is first (D-026, OQ-35). A change to these applies at once and does not touch `moderationStatus` (OQ-05).
+**Not moderated:** `priceSatang`, `stock`, `sku`, `status`, and **the order of the pictures**, including which picture is first (D-026, OQ-35). A change to these applies at once and does not touch `moderationStatus` (OQ-05), with **one exception for the price**, below.
+
+**The price is treated in two different ways, on purpose (D-025, OQ-05; D-028).**
+
+| Stored `moderationStatus` | A save that changes `priceSatang` and no moderated content |
+| --- | --- |
+| `APPROVED` | Takes effect at once. The product stays `APPROVED` and on sale. No re-approval (OQ-05) |
+| `PENDING` | Takes effect at once. The product stays `PENDING` and keeps its place in the queue |
+| `REJECTED`, `TAKEN_DOWN` | **Is a correction: the product returns to `PENDING`** (D-028). A product may have been rejected for its price, so changing the price is a way to answer the rejection |
+
+So the price is never part of the moderated content, and a price change never hides a product that is on sale. It matters to moderation in exactly one place: as a way **out of** `REJECTED` or `TAKEN_DOWN`. A change only to `stock`, only to `sku`, or only to the order of the pictures is not a correction and leaves a rejected or taken-down product where it is.
 
 **Picture change against picture reorder (D-026, OQ-35; DM-Q4 answered).** The owner decided against the reading this section was first written for.
 
@@ -124,16 +144,25 @@ Two independent columns. `Product.status` is the seller's switch; `Product.moder
 
 Why comparing upload ids is enough: an `Upload` row and its bytes never change after insert, and a key is never reused ([section 6.7](#67-upload-s8)). Two saves that attach the same upload ids therefore show exactly the same pictures, so a seller cannot swap what a picture shows and present it as a reorder. Uploading the same file again creates a new upload with a new id; attaching it is a replacement and needs approval.
 
-**How a save is classified.** The seller's edit runs in one transaction that first locks the product row (`SELECT ... FROM "Product" WHERE id = :id AND "storeId" = :actorStoreId FOR UPDATE`), then reads the stored `title`, `description`, `categoryId`, and the product's current `uploadId` values, and compares them with the values about to be stored (text is compared after whatever trimming or normalisation the service applies before storing, so a save that stores the same bytes is "no change"). The row lock makes the comparison and the write one step with respect to a second edit by the same seller and to an admin decision.
+**How a save is classified.** The seller's edit runs in one transaction that first locks the product row (`SELECT ... FROM "Product" WHERE id = :id AND "storeId" = :actorStoreId FOR UPDATE`), then reads the stored `title`, `description`, `categoryId`, `priceSatang`, `moderationStatus`, and the product's current `uploadId` values, and compares them with the values about to be stored (text is compared after whatever trimming or normalisation the service applies before storing, so a save that stores the same bytes is "no change"). The row lock makes the comparison and the write one step with respect to a second edit by the same seller and to an admin decision.
 
 | Outcome of the comparison | `contentRevision` | `moderationStatus` | `moderationRequestedAt` |
 | --- | --- | --- | --- |
 | Moderated content differs | `+ 1` | `APPROVED`, `REJECTED`, `TAKEN_DOWN` become `PENDING`; `PENDING` stays | Set to `now()` only when the status changed to `PENDING` |
-| Only the picture order differs | **unchanged** | **unchanged** | unchanged |
-| Only non-moderated columns differ | unchanged | unchanged, except for the open case below | unchanged, except for the open case below |
+| Moderated content is the same, the price differs, and the stored status is `REJECTED` or `TAKEN_DOWN` | **`+ 1`** | becomes `PENDING` | Set to `now()` |
+| Moderated content is the same, the price differs, and the stored status is `APPROVED` or `PENDING` | unchanged | unchanged | unchanged |
+| Only the picture order, the SKU, or both differ | **unchanged** | **unchanged** | unchanged |
 | Nothing differs | unchanged | unchanged (OQ-36: no resubmission without a change) | unchanged |
 
-**A pure reorder does not raise `contentRevision`** (the answer to the point API_CONTRACTS.md section 8.2 left for this document). `contentRevision` is the version of the moderated content and of nothing else: it increases exactly when one of the four things above changes. Reasons:
+(Stock is changed by its own statement, which never reads or writes these three columns.)
+
+**What `contentRevision` counts.** It increases by one in exactly two cases: the moderated content changed, or the save resubmitted the product (moved it from `REJECTED` or `TAKEN_DOWN` to `PENDING`). The second case is new with D-028 and is the only one in which a price change raises it. Put as one rule: **every seller save that changes what an admin is asked to decide on raises the revision; nothing else does.**
+
+Why a price-only resubmission raises it, although the price is not moderated content: an admin screen that still shows the product as it was **before** it was rejected holds the old revision and the old price. Without the increase, an approve sent from that stale screen would match the product again once the seller's price change returned it to `PENDING`, and the product would go live on a decision made about the rejected price. With the increase the stale decision fails on its revision and the admin reloads and sees the new price.
+
+Why a price change on an `APPROVED` or `PENDING` product does not raise it: the price is not something the admin approves (OQ-05), the seller may change it the moment after approval anyway, and raising the revision without hiding the product would let a seller defeat a takedown by changing the price repeatedly, the same hazard as for a reorder below. Known consequence, accepted with OQ-05: an admin can approve a `PENDING` product whose price changed after they opened it.
+
+**A pure reorder does not raise `contentRevision`** (the answer to the point API_CONTRACTS.md section 8.2 left for this document). Reasons:
 
 - The admin still approves what they were shown. A decision is guarded by the `contentRevision` the admin saw, so the title, description, category, and every picture that goes live are the ones on the admin's screen. The only thing that can differ is the order of pictures the admin did see, and the owner decided that the order is not subject to approval.
 - A reorder never hides the product: `moderationStatus` is not touched, so an `APPROVED` product stays in the shop and a `PENDING` one keeps its place in the queue (`moderationRequestedAt` unchanged).
@@ -146,33 +175,40 @@ A reorder is still a write to the product: `Product.updatedAt` changes and the `
 
 **Resubmission (OQ-06; D-026, OQ-36).** There is no separate resubmit action and no column for one. A `REJECTED` or `TAKEN_DOWN` product returns to `PENDING` as part of the seller's save, in the same statement.
 
-- Certain: a save that changes moderated content resubmits. A save in which nothing differs from the stored values does not, and writes nothing to the three moderation columns.
-- **OPEN (owner)**, DM-Q8 (REQUIREMENTS Q31): whether a save of a rejected or taken-down product that changes only non-moderated things (the price, the stock, the SKU, or the picture order) counts as a "correction" and resubmits it. D-026 says "saving a correction"; this section was written for "moderated content only". Not decided here. What each reading needs:
-
-  | Reading | Columns | Statement |
-  | --- | --- | --- |
-  | Moderated content only | none added | As in the table above: such a save leaves `moderationStatus` alone |
-  | Any change, or some named changes (for example the price) | none added | The same save, when the stored status is `REJECTED` or `TAKEN_DOWN` and a named column differs, also sets `moderationStatus = 'PENDING'` and `moderationRequestedAt = now()`. `contentRevision` stays as it is, because the moderated content is the same; the admin decision is still guarded by status and revision. Stock is changed through its own endpoint, so that statement would need the same rule if stock is named |
-
-  Either way the schema is the same, so the point does not block T-013.
+**What counts as a correction (D-028; DM-Q8 answered).** A change to `title`, `description`, `categoryId`, the set of pictures, **or `priceSatang`**. A save that changes only `stock`, only `sku`, or only the order of the pictures does not resubmit, and neither does a save in which nothing differs from the stored values; such a save writes nothing to the three moderation columns. No column was added for this rule.
 
 `moderationNote` holds the reason of the last rejection or takedown. It stays readable to the seller while they correct the product and is cleared on approval.
 
-**Approving what was actually reviewed.** `contentRevision` (an integer) increases by one in the same statement as every change to moderated content. An admin decision (approve, reject, take down) is guarded by `moderationStatus` **and** by the `contentRevision` the admin was shown. Without it a seller could change the text, or swap a picture, in the moment between the admin opening the product and pressing approve, and the unseen content would go live. A seller's edit holds the product row lock while it writes; an admin decision that arrives meanwhile waits, then evaluates its guard against the new row and affects zero rows, which is a conflict.
+**Approving what was actually reviewed.** `contentRevision` (an integer) increases by one in the same statement as every change to moderated content and every resubmission. An admin decision (approve, reject, take down) is guarded by `moderationStatus` **and** by the `contentRevision` the admin was shown. Without it a seller could change the text, or swap a picture, in the moment between the admin opening the product and pressing approve, and the unseen content would go live. A seller's edit holds the product row lock while it writes; an admin decision that arrives meanwhile waits, then evaluates its guard against the new row and affects zero rows, which is a conflict.
 
-**The approval queue (D-026, OQ-42; DM-Q3 answered).** The queue is the products with `moderationStatus = 'PENDING'` **and** `status = 'PUBLISHED'`, ordered by `moderationRequestedAt`, oldest first, then `id`. A product the seller has saved but not yet published is not in it; it enters when the seller publishes it and leaves without a decision if the seller unpublishes or archives it. This is a query filter and changes no column. The state table above is unchanged: an admin decision is guarded by `moderationStatus` and `contentRevision`, not by `status`.
+**The approval queue (D-026, OQ-42; DM-Q3 answered).** The queue is the products with `moderationStatus = 'PENDING'` **and** `status = 'PUBLISHED'`, ordered by `moderationRequestedAt`, oldest first, then `id`. A product the seller has saved but not yet published is not in it; it enters when the seller publishes it and leaves without a decision if the seller unpublishes or archives it. This is a query filter and changes no column.
 
-`moderationRequestedAt` is the time the product last entered `PENDING`. Editing a product that is already `PENDING` raises `contentRevision` and leaves `moderationRequestedAt` alone. One consequence of OQ-42 is not settled and is listed in [section 19](#19-open-points): a product created long ago and published today sorts ahead of products that have been in the queue for days, because publishing does not touch this column.
+**Decisions only on what is in the queue (D-028).** An admin can approve or reject a product only while it is `PENDING` **and** `PUBLISHED`. The guard of both statements is `"moderationStatus" = 'PENDING' AND status = 'PUBLISHED' AND "contentRevision" = :seen`. Opening an unpublished product directly and deciding on it affects zero rows, as does a decision that races with the seller unpublishing or archiving it. Takedown is unchanged: `"moderationStatus" = 'APPROVED' AND "contentRevision" = :seen`, with no condition on `status`.
+
+**`moderationRequestedAt` is the time the product was submitted for approval (D-028; the proposal made here, accepted).** It is set to `now()` by two events, and by nothing else:
+
+1. the product enters `PENDING` (created; an edit of moderated content on an `APPROVED` product; a correction of a `REJECTED` or `TAKEN_DOWN` one);
+2. the seller publishes a product whose `moderationStatus` is `PENDING` (`DRAFT` to `PUBLISHED`).
+
+The queue is ordered by it, oldest first, then `id`. A draft that sat unpublished for weeks therefore joins the queue at the back on the day it is published, and unpublishing and publishing again moves a product to the back, never forward. Editing a product that is already `PENDING` raises `contentRevision` and leaves `moderationRequestedAt` alone, so a seller who fixes a typo while waiting does not lose their place.
 
 ### 4.3 Payment status, on `Order` (M2, OQ-07, D-023)
 
 | From | To | Trigger |
 | --- | --- | --- |
 | (new row) | `PENDING` | Checkout transaction |
-| `PENDING` | `PAID` | Mock provider confirms |
-| `PENDING` | `FAILED` | Mock provider declines, or the order stayed `PENDING` past the configured timeout (D-023 point 6) |
+| `PENDING` | `PAID` | Mock provider confirms. The same statement sets `Order.paidAt = now()` |
+| `PENDING` | `FAILED` | Mock provider declines, or the order was still `PENDING` **15 minutes** after it was created (D-023 point 6; D-028) |
 
 `PAID` and `FAILED` are final in v1. A failed order is never paid again (OQ-07); the customer checks out again, which creates a new order with a new idempotency key.
+
+**The payment timeout is 15 minutes (D-028), and it is configuration, not a column.**
+
+- It is one validated configuration value with the default 15 (minutes), read by the function that fails overdue orders. Its name and file are for backend-api and devops (`src/server/env.ts` is where validated configuration lives). It is not a column of `MarketplaceSettings`: no admin screen changes it and no requirement asks for one, and it is not copied onto the order, because an order is overdue by its own `createdAt`.
+- Reason for configuration rather than a constant in code: tests of the timeout path must be able to shorten it without waiting 15 minutes.
+- An order is overdue when `"paymentStatus" = 'PENDING' AND "createdAt" < now() - :timeout`. The index on `Order(paymentStatus, createdAt)` serves exactly this.
+- Failing an overdue order is the guarded failure transaction of [section 7.2](#72-payment-completion-and-payment-failure-oq-07-oq-26-oq-27-oq-41). A confirmation that arrives after the order was failed affects zero rows and changes nothing; a timeout that arrives after the order was paid likewise.
+- What calls that function when no customer request does is the same missing piece as for the session purge ([section 6.1](#61-auth-tables-s19)): nothing runs on a schedule yet. Until something does, an overdue order is failed only when a code path that calls the function happens to run (D-023 point 6 names the checkout path and a script). This is a request to the orchestrator and devops, not a schema matter.
 
 ### 4.4 Fulfilment status, on `SellerOrder` (OQ-08, OQ-17, OQ-34, OQ-41)
 
@@ -201,6 +237,8 @@ A reorder is still a write to the product: `Product.updatedAt` changes and the `
 - **Sales and revenue are the price of the goods only.** Every sales or revenue amount is the sum of `SellerOrder.itemsSubtotalSatang` over the seller orders that count. **`shippingFeeSatang` is never part of any sales or revenue figure**, and neither is `Order.shippingTotalSatang` or `Order.grandTotalSatang`. `Order.itemsSubtotalSatang` must not be used either: it still contains the goods of cancelled seller orders.
 - **Order count.** An order counts once when `Order.paymentStatus = 'PAID'` and at least one of its seller orders is not `CANCELLED`. In SQL: `COUNT(DISTINCT "orderId")` over the seller orders that count. An order with only some stores' parts cancelled is therefore one order; an order whose every part is cancelled is not counted; an order whose payment is `PENDING` or `FAILED` is not counted.
 - **Per store.** For one store the same rule gives the number of its seller orders that count, because `(orderId, storeId)` is unique.
+- **Which date a report's range uses (D-028): the date the order was paid.** A seller order belongs to a range `[from, to)` when its order's `paidAt` is in it: `o."paidAt" >= :from AND o."paidAt" < :to`. `Order.paidAt` is set once, when the payment becomes `PAID` ([section 6.10](#610-order)), and is indexed for this. An order created before midnight and paid after it belongs to the later day. Because only paid orders count, every order that counts has a `paidAt`. A later cancellation removes the seller order from the figures of the range its payment fell in; it does not move it to another range.
+- The admin dashboard summary (D-028) shows the same order count and sales total over all time, with no range.
 
 `SellerOrder.itemsSubtotalSatang` is written once in checkout as the sum of the seller order's `OrderItem.lineTotalSatang`, at the unit prices copied at purchase, and never changes; cancelling removes the whole seller order from the figures rather than changing an amount.
 
@@ -245,10 +283,10 @@ Two separate figures for the seller, both counted **only over products that are 
 | Sold out | `stock = 0` |
 
 - A product with `stock = 0` is **not** low stock. The earlier `stock <= 5` is replaced.
-- **On sale** excludes, for certain, a product whose `status` is `DRAFT` or `ARCHIVED` and a product whose `moderationStatus` is `REJECTED` or `TAKEN_DOWN` (the four cases D-026 names). A product with `status = 'PUBLISHED'` and `moderationStatus = 'APPROVED'` is on sale.
-- **OPEN (owner)**, DM-Q10: whether a product that is `PUBLISHED` but still `PENDING` approval is on sale. D-026 does not name it. REQUIREMENTS.md (Terms, BR-25) and API_CONTRACTS.md (section 5.7.2) both currently read it as **not** on sale. Not decided here. Under "not on sale" the filter is `status = 'PUBLISHED' AND "moderationStatus" = 'APPROVED'`; under "on sale" it is `status = 'PUBLISHED' AND "moderationStatus" IN ('APPROVED', 'PENDING')`.
-- **OPEN (owner)**, DM-Q11 (REQUIREMENTS Q32): whether a published, approved product that is hidden because its store is suspended or its category is inactive is counted. Under "counted" the filter reads only the product's own two columns; under "not counted" it also joins `Store.status` and `Category.isActive`.
-- Under every one of these readings the figures are query filters over existing columns. No column or index is added: the count is per store and is served by the index on `Product(storeId, status)`.
+- **On sale** means exactly `status = 'PUBLISHED' AND "moderationStatus" = 'APPROVED'`. It reads the product's own two columns and nothing else.
+- A product that is published but still awaiting approval (`PENDING`) is **not** on sale and is in neither figure (D-028; DM-Q10 answered). So are drafts, archived, rejected, and taken-down products.
+- A published, approved product that is hidden because its store is suspended or its category is switched off **is still counted** (D-028; DM-Q11 answered): the seller still sees what needs restocking. "On sale" is therefore **not** the same as "visible"; the filter must not join `Store.status`, the owner's `isActive`, or `Category.isActive`.
+- The figures are query filters over existing columns. No column or index is added: the count is per store and is served by the index on `Product(storeId, status)`.
 - The number 5 is a fixed business rule, not an admin setting, so it is not stored in the database: it is one exported constant, `LOW_STOCK_THRESHOLD = 5`, in the seller product module under `src/modules` (backend-api chooses the file), and nothing else repeats the number. The lower end of the range is 1 because 0 is the sold-out figure.
 - The public "สินค้าหมด" mark is a different thing: it is simply `stock = 0` on a visible product (OQ-11).
 
@@ -312,7 +350,9 @@ Consequences that follow from this:
 
 - Until the scheduled run exists, the limit is met only by accident. It must exist before any environment that holds real people's sessions; that is a condition on T-015 being `VERIFIED` and on any deployment, and is reported to the orchestrator as a request, not solved in the schema.
 - If the scheduler or the whole deployment is stopped for more than a day, expired rows outlive the limit until the next start, when the start-up purge removes them. No mechanism inside the database avoids this: the PostgreSQL image in use has no scheduler of its own, and adding an extension for one would be a new dependency, which is not proposed.
-- A database backup holds the `Session` rows that existed when it was taken, with their addresses, until the backup itself is deleted. Backups are kept 30 days (D-026, OQ-50), so the one-day limit describes the live database only. After a restore the purge must run before the application serves requests. See [section 19](#19-open-points) and SECURITY.md SR-07.
+- A database backup holds the `Session` rows that existed when it was taken, with their addresses, until the backup itself is deleted. Backups are kept 30 days (D-026, OQ-50), so the one-day limit describes the live database only. **The owner accepted this (D-028)**; it is stated in the privacy notes (SECURITY.md).
+- **A restore ends with the session clean-up (D-028).** A restored database contains sessions that have expired since the backup was taken. The restore procedure is not finished until the purge statement above has run against the restored database, and the application does not serve requests before that. The procedure belongs to devops (DEPLOYMENT.md); the statement is the same one.
+- D-029 records that the scheduled run is chosen in T-015 together with devops.
 
 The address the library writes must be the one derived by SECURITY.md SR-01, never a client-controlled header (to validate in T-015).
 
@@ -334,6 +374,8 @@ Indexes: `Session(userId)` (revocation), `Session(expiresAt)` (purge), `Account(
 - Created only by the approval transaction ([section 4.1](#41-seller-application-store-and-role-b3)).
 - `slug` is generated once and never changes, also when the store is renamed ([section 9](#9-slugs-s11)).
 - `statusReason` holds the reason of the last suspension or reinstatement; the history is in `AuditLog`.
+- **The seller may change `contactPhone`**, as well as `name`, `description`, and the logo, without any approval (D-028). It is an ordinary mutable column: no review state, no history, and no copy on orders (an order shows the buyer's shipping phone, not the store's). `SellerApplication.contactPhone` is what the applicant entered and is not changed afterwards.
+- While the store is `SUSPENDED` the seller cannot change any of these columns ([section 7.7](#77-suspended-store-which-statements-carry-the-store-status-d-028)).
 - Index `(status)` for the admin store list.
 
 ### 6.4 SellerApplication
@@ -392,28 +434,24 @@ Indexes: `Session(userId)` (revocation), `Session(expiresAt)` (purge), `Account(
 | Adding a sold-out product is refused (OQ-28) | No row is inserted and no row is changed | none |
 | Asking for more than the stock, with stock at least 1 (OQ-28) | The write (a `POST` or `PATCH`) stores `quantity` equal to the stock, read in the same transaction as the write | none: the response of that write reports it |
 | A product in the cart sells out (OQ-29) | **The row stays as it is.** Nothing deletes it and nothing changes its quantity; a quantity of 0 cannot be stored. It is left out of totals and blocks checkout by being read against `stock = 0` | none: derived as `stock = 0` |
-| Stock drops below a line's quantity, with stock at least 1 (OQ-23, OQ-30) | See the two readings below | See below |
+| A product in the cart becomes hidden: taken down, rejected, unpublished, archived, its store suspended, its owner deactivated, or its category switched off (D-028) | **The row stays as it is**, exactly like a sold-out line. Nothing deletes it and nothing changes its quantity. It is flagged as not buyable, left out of totals, and blocks checkout by being read against the visibility conditions of [section 5](#5-visibility-and-purchasability). If the product becomes visible again the line can be bought again, with no write | none: derived from visibility |
+| Stock drops below a line's quantity, with stock at least 1 (OQ-23, OQ-30) | The row is **not** changed by reading it. It is changed by the next mutation: the customer's own `PATCH`, or the checkout request ([section 7.1](#71-checkout-d-023-oq-30)) | none: derived, see below |
 | A product is hard-deleted by its seller (OQ-43; DM-Q5 answered) | The row goes by cascade, with no message | none |
 
-**Reporting a lowered quantity on the cart page.** A line is "lowered" when its stored `quantity` is above the product's current `stock` and the stock is at least 1. That is a comparison of two existing columns and can be made on every read. Which request, if any, **stores** the lowered quantity is a **DISAGREEMENT** between TEST_STRATEGY.md (the next cart read stores it) and SECURITY.md TM-16 (a `GET` never changes state), DM-D1. Not decided here. What each reading needs:
+**A read of the cart writes nothing (D-029 point 1; DM-D1 settled).** A `GET` never changes state, without exception. A line is "lowered" when its stored `quantity` is above the product's current `stock` and the stock is at least 1; the cart read computes that from the two existing columns every time and reports the stock as the quantity, and the stored `quantity` stays as it was. The lowering therefore stays reportable on every read until a mutation stores a new quantity, so a lost response loses nothing and no marker column is needed. **There is no `CartItem.loweredFromQuantity`**, and the cart read takes no lock.
 
-| Reading | Rows written by the cart read | What reports the lowering | Columns |
-| --- | --- | --- | --- |
-| The cart read never writes (TM-16) | none | Derived on every read as `quantity > stock AND stock >= 1`; it stays reportable until the customer's own write stores a new quantity, so a lost response loses nothing | **none added** |
-| The cart read stores the lowered quantity | `UPDATE "CartItem" SET quantity = stock` for the lines above stock, taken under the cart row lock so that it cannot interleave with a checkout ([section 7.5](#75-lock-order)); a line whose product has `stock = 0` is not written | Once the quantity is stored it equals the stock, so the comparison no longer shows anything: the lowering is reportable only in the response of the read that made it, unless a marker is stored | To report it after that one response, one nullable column would be needed: `CartItem.loweredFromQuantity` (`Int?`, `CHECK` 1 to 99 and above `quantity`), set by the lowering write and cleared by the customer's next write to the line. Not part of schema v1 unless this reading is chosen |
-
-Schema v1 is written for "none added". Choosing the second reading later means adding one nullable column, which is a non-destructive migration.
-
-**Reporting a lowered quantity at checkout** is in [section 7.1](#71-checkout-d-023-oq-30).
+The lowered quantity is **stored** only by a mutation: the customer's `PATCH` of the line, an add to the line, or the checkout request that finds it ([section 7.1](#71-checkout-d-023-oq-30); D-029 point 2).
 
 ### 6.10 Order
 
-`id`, `orderNumber` unique, `userId` FK, `idempotencyKey`, `paymentStatus` (default `PENDING`), `itemsSubtotalSatang`, `shippingTotalSatang`, `grandTotalSatang`, shipping address copy (`shipRecipientName`, `shipPhone`, `shipLine1`, `shipSubdistrict`, `shipDistrict`, `shipProvince`, `shipPostalCode`), timestamps.
+`id`, `orderNumber` unique, `userId` FK, `idempotencyKey`, `paymentStatus` (default `PENDING`), `paidAt?`, `itemsSubtotalSatang`, `shippingTotalSatang`, `grandTotalSatang`, shipping address copy (`shipRecipientName`, `shipPhone`, `shipLine1`, `shipSubdistrict`, `shipDistrict`, `shipProvince`, `shipPostalCode`), timestamps.
 
 - `orderNumber` is filled by the database, see [section 10](#10-order-numbers-s12).
 - Unique `(userId, idempotencyKey)`: the backstop behind the cart lock (D-023 point 2). The key is stored in the one normalised form the API layer defines and compared exactly.
 - **`paymentStatus` is the only payment status in the model** (M2).
-- Indexes: `(userId, createdAt)` for the customer's history; `(paymentStatus, createdAt)` for the pending-payment timeout sweep and the admin filter.
+- **`paidAt`** (`timestamptz`, nullable) is the moment the payment became `PAID` (D-028: the sales report's range uses the date the order was paid). The earlier design had no such column; `updatedAt` cannot stand in for it, because any later write to the row moves it. It is null while the order is `PENDING` and for ever when it is `FAILED`. It is written once, by the statement that sets `PAID` ([section 7.2](#72-payment-completion-and-payment-failure-oq-07-oq-26-oq-27-oq-41)), with the database clock, and never changes. It is not a second payment status: the check below ties it to `paymentStatus`, so the two cannot disagree.
+- Indexes: `(userId, createdAt)` for the customer's history; `(paymentStatus, createdAt)` for the pending-payment timeout sweep and the admin filter; **`(paidAt)`** for the sales report's date range ([section 4.4](#44-fulfilment-status-on-sellerorder-oq-08-oq-17-oq-34-oq-41)).
+- Check: `("paymentStatus" = 'PAID') = ("paidAt" IS NOT NULL)`: a paid order always has the time, and no other order has one.
 - Checks: each of the three amounts `>= 0`; `"grandTotalSatang" = "itemsSubtotalSatang"::bigint + "shippingTotalSatang"`; `"grandTotalSatang" <= 2000000000` (BR-04); `"shipPostalCode" ~ '^[0-9]{5}$'`.
 
 ### 6.11 SellerOrder
@@ -522,21 +560,55 @@ One transaction:
 
 **When a line cannot be bought (OQ-09; D-026, OQ-29, OQ-30).** Checkout **never places an order with a quantity lower than the cart line holds**: the statement of step 4 takes exactly the line's quantity or nothing. The refusal has to name every such line, so step 4 does not stop at the first zero-row result: it goes through all lines, and for each line that returned zero rows it reads, in the same transaction, why (the visibility conditions of [section 5](#5-visibility-and-purchasability), the own-store rule, and the current `stock`). Those reads are of existing columns; nothing is stored to produce the report. Then every stock decrement of this attempt is undone and no order row exists.
 
-- A line whose product is sold out or not visible stays in the cart unchanged (OQ-29).
-- Whether the refused checkout **stores** the lowered quantity on a line whose quantity was above a stock of at least 1 is a **DISAGREEMENT**, DM-D2: REQUIREMENTS.md (BR-22 case (b), REQ-C-11) says that after the stop "the cart holds the lowered quantity"; API_CONTRACTS.md section 5.5.3 says that after a refusal "the cart is as it was" and the client stores the new quantity with a `PATCH`. D-026 OQ-30 says only that checkout stops, shows the new quantity and total, and the customer confirms again. Not decided here. What each reading needs:
+**What the refused checkout leaves in the cart (D-029 point 2; DM-D2 settled for the REQUIREMENTS.md reading).**
 
-  | Reading | What the refused checkout writes | Transaction shape |
-  | --- | --- | --- |
-  | The cart is as it was (API_CONTRACTS.md) | Nothing | The whole transaction rolls back |
-  | The cart holds the lowered quantity (REQUIREMENTS.md) | `UPDATE "CartItem" SET quantity = :stock` for each line with `quantity > stock AND stock >= 1`, and nothing else | The stock decrements must be undone while that cart write is kept and the cart row lock is still held: either a savepoint taken before step 4 and rolled back to, or validating every line before the first decrement. Which of the two the installed Prisma supports inside an interactive transaction is to validate in T-013 |
+| Kind of line | What the refused checkout does to the `CartItem` row |
+| --- | --- |
+| Quantity above the stock, stock at least 1 | **Stores the lowered quantity**: `quantity` becomes the stock. The refusal reports the new quantity and the totals computed with it; the customer confirms by submitting checkout again (BR-22 case (b)) |
+| Sold out (stock 0) | Unchanged; the line stays (OQ-29) |
+| Hidden product, or the customer's own store | Unchanged; the line stays (D-028) |
+| A line that could be bought | Unchanged |
 
-  Neither reading needs a column. Checkout is a `POST`, so TM-16 does not bear on this one.
+No order is created, no stock changes, and nothing is charged. No column is needed. Checkout is a `POST`, so storing the quantity here is consistent with "a `GET` never writes".
+
+**Recommended transaction shape: an attempt and, when it is refused, a separate refusal transaction. To validate in T-013 and T-032.**
+
+The difficulty is that one outcome must undo the stock decrements and yet keep a cart write. The recommendation avoids undoing part of a transaction at all:
+
+1. **Attempt transaction**: steps 1 to 6 as above, unchanged from D-023. If every line's statement returns a row, it commits and the order exists. If any line returns zero rows, the transaction **rolls back completely**: no decrement survives, and nothing was written to the cart.
+2. **Refusal transaction**, run only after a rolled-back attempt:
+   1. Lock the cart row (`FOR UPDATE`) and repeat the idempotency lookup; if an order with the key exists by now, return it.
+   2. Read every line with its product's `stock` and the visibility and own-store conditions, and classify it.
+   3. Lower the lines that need it with one statement that carries its own conditions, so that it stores what is true at the moment it runs and not what step 2 read:
+
+      ```sql
+      UPDATE "CartItem" ci
+         SET quantity = p.stock
+        FROM "Product" p
+       WHERE ci."cartId" = :cartId AND p.id = ci."productId"
+         AND ci.quantity > p.stock AND p.stock >= 1
+         AND <the product is visible and not the customer's own, as in step 4>
+      RETURNING ci.id, ci."productId", ci.quantity;
+      ```
+
+   4. Commit, and answer with the refusal built from steps 2 and 3.
+3. If the refusal transaction finds **no** line that cannot be bought (stock came back, or a product became visible again, between the two transactions), there is nothing to refuse: run the attempt once more. The number of repeats is bounded (one is enough to make progress in practice); if the second attempt is refused and again nothing is found, the service answers with a retryable conflict rather than looping.
+
+Why this shape and not the two that D-029 names:
+
+| Shape | What it needs | Why it is not the first choice |
+| --- | --- | --- |
+| **Attempt, then refusal transaction** (recommended) | Only features this document already relies on: an interactive transaction, a row lock, raw statements | The cart lock is released between the two transactions. That is harmless: the lowering statement re-checks its own conditions, a second checkout of the same cart runs its own attempt, and stock that moves again only means the next submission is refused again, which the contract already allows |
+| Savepoint before step 4, roll back to it, then lower and commit | `SAVEPOINT` and `ROLLBACK TO SAVEPOINT` as raw statements inside the Prisma interactive transaction | Whether the installed Prisma tolerates savepoints issued behind its back is not known. It is the fallback if the recommended shape shows a problem; it keeps the cart lock throughout |
+| Validate every line before the first decrement | Locking the product rows (`SELECT ... FOR UPDATE`, in id order) before reading their stock | It adds explicit product row locks, which D-023 point 1 deliberately limited to the cart row, and a zero-row result is still possible afterwards because store, owner, and category rows are not locked |
+
+**To validate in T-013:** the three statements (decrement, classification read, lowering) as raw queries through the transaction client, and that a thrown error rolls the attempt back completely. **To validate in T-032:** the two-transaction sequence under concurrency: two checkouts of one cart with different keys; stock taken by another customer between the attempt and the refusal; a repeat with the same key after a refusal (the refused attempt created no order, so the key is still free).
 
 ### 7.2 Payment completion and payment failure (OQ-07, OQ-26, OQ-27, OQ-41)
 
-**Success**, one transaction: `UPDATE "Order" SET "paymentStatus" = 'PAID' WHERE id = :id AND "paymentStatus" = 'PENDING'`. One row affected: write `Payment.providerReference`. Zero rows: someone else finished it; change nothing.
+**Success**, one transaction: `UPDATE "Order" SET "paymentStatus" = 'PAID', "paidAt" = now() WHERE id = :id AND "paymentStatus" = 'PENDING'`. `paidAt` is written here and nowhere else (D-028; [section 6.10](#610-order)). One row affected: write `Payment.providerReference`. Zero rows: someone else finished it; change nothing.
 
-**Failure**, one transaction. A decline by the provider and an order that stayed `PENDING` past the timeout go through **exactly the same steps** (D-026, OQ-27); the only difference is the reason code written in step 6. The steps do not depend on a request from the customer being in progress.
+**Failure**, one transaction. A decline by the provider and an order that stayed `PENDING` past the 15-minute timeout ([section 4.3](#43-payment-status-on-order-m2-oq-07-d-023)) go through **exactly the same steps** (D-026, OQ-27); the only difference is the reason code written in step 6. The steps do not depend on a request from the customer being in progress.
 
 1. Lock the customer's cart row (`FOR UPDATE`), the same first lock checkout takes.
 2. `UPDATE "Order" SET "paymentStatus" = 'FAILED' WHERE id = :id AND "paymentStatus" = 'PENDING'`. Zero rows: stop and change nothing. Everything below is done only by the request whose update affected the row.
@@ -548,7 +620,7 @@ One transaction:
    - no line: insert a `CartItem` with quantity `n`; a line exists: set its quantity to `n`;
    - record the return on the order item: `UPDATE "OrderItem" SET "cartQuantityBeforeReturn" = :e, "cartQuantityAfterReturn" = :n WHERE id = :id AND "cartQuantityAfterReturn" IS NULL`.
 
-   Which items return: the items claimed in step 4. Whether the items of a seller order that was **cancelled before the payment failed** also return is **OPEN (owner)**, DM-Q9; see below.
+   **Which items return: exactly the items claimed in step 4** (D-028; DM-Q9 answered). The items of a seller order that was cancelled before the payment failed are **not** returned: their stock was given back by that earlier cancel, step 4 does not claim them again, and their two return columns stay null for ever. Since OQ-41 only an admin can cancel a seller order that early.
 6. Write `Payment.failureReason` (for example `SIMULATED_DECLINE`, `TIMEOUT`).
 
 **Why the caps hold, and what they can do.**
@@ -562,17 +634,9 @@ One transaction:
 
 - It is written in the failure transaction itself, so it exists after a **timeout** failure exactly as after a decline, with no checkout response involved.
 - It can be read at any later time from the failed order: in the response of the checkout request during which the payment failed, in a repeat of that request with the same idempotency key (which must return the same result as the first time), and in every later read of the order by the customer or the admin. For each returned item: ordered quantity `quantity`, cart quantity `cartQuantityAfterReturn`, capped when `cartQuantityAfterReturn < cartQuantityBeforeReturn + quantity`.
-- Why not a marker on `CartItem`: a marker on the cart line would have to be cleared at some point (when the customer has seen it, or changes the line), which needs a rule for when the customer has "been told" and, if a read clears it, runs into the same open point as DM-D1. A fact about what happened to a failed order belongs to the order, is true for ever, and needs no clearing.
-- What it does not do: the cart read does not carry it. A client that wants to show the notice on the cart page reads it from the failed order. Whether the customer must be told on the next visit to the cart after a timeout failure, or whether it is enough that the cart shows the quantity it holds, is **OPEN (owner)**, DM-Q12 (REQUIREMENTS Q34). Under "it is enough" nothing more is needed. Under "must be told on the next visit" the facts are already stored here; what would be added is a record that the customer has been told (one nullable timestamp on `Order`), and which request writes it.
-
-**OPEN (owner), DM-Q9 (REQUIREMENTS Q33): items of a seller order cancelled before the payment failed.** REQUIREMENTS.md BR-20 says "every item of the order" returns; this section was written for "only the items claimed in step 4". Since OQ-41 only an admin can cancel a seller order that early. Not decided here. What each reading needs:
-
-| Reading | Items that return in step 5 | Notes |
-| --- | --- | --- |
-| Only the parts not already cancelled | The items claimed in step 4 | As written above; `s >= q` always holds |
-| Every item of the order | Every item of the order whose `cartQuantityAfterReturn` is null, whether step 4 claimed it or an earlier cancel did | The stock of an early-cancelled item was given back earlier and may have been sold since, so `s` can be below `q` and can be 0. A line cannot be stored with quantity 0, so this reading also needs a rule for `s = 0` (return nothing for that item, or return it as a sold-out line with its own quantity) |
-
-The return columns are separate from `stockRestoredAt` so that both readings work without a schema change: "stock given back" and "returned to the cart" are recorded independently, each at most once.
+- Why not a marker on `CartItem`: a marker on the cart line would have to be cleared at some point (when the customer has seen it, or changes the line), which needs a rule for when the customer has "been told", and a read could not clear it, because a `GET` never writes (D-029). A fact about what happened to a failed order belongs to the order, is true for ever, and needs no clearing.
+- **No later notice is required (D-028; DM-Q12 answered).** After a timeout failure the customer need not be told on their next visit that a returned quantity was cut; the cart showing the quantity it really holds is enough. So the cart read does not carry the record, and no "has been told" column exists.
+- **The two columns stay all the same (D-029).** They serve the repeat of a failed checkout with the same idempotency key, which must return the same result as the first time, and they keep "returned to the cart" on record separately from "stock given back" (`stockRestoredAt`), which is what distinguishes an item that returned from one whose part was cancelled early.
 
 What follows from this:
 
@@ -597,30 +661,55 @@ One transaction: `UPDATE "SellerOrder" SET "fulfilmentStatus" = 'CANCELLED' WHER
 
 ### 7.5 Lock order
 
-To keep transactions from deadlocking, every transaction takes its locks in this order and skips the ones it does not need: `Cart` row, then `Order`, then `SellerOrder`, then `OrderItem`, then `Product` rows in ascending id, then `ProductImage`, then `CartItem`. A seller's product edit locks its one `Product` row before it reads or replaces the `ProductImage` rows ([section 4.2](#42-product-status-and-moderation-s5-oq-04-oq-05-oq-06-oq-35-oq-36-oq-42)). Any transaction that writes cart lines on the customer's behalf outside a plain add or change (the return of step 5 in 7.2, and a lowering write if one of the open readings of [section 6.9](#69-cart-and-cartitem) or 7.1 is chosen) holds the `Cart` row lock first. "Not the last admin" locks the active admin `User` rows it counts (`FOR UPDATE`) before it changes one of them.
+To keep transactions from deadlocking, every transaction takes its locks in this order and skips the ones it does not need: `Cart` row, then `Order`, then `SellerOrder`, then `OrderItem`, then `Product` rows in ascending id, then `ProductImage`, then `CartItem`. A seller's product edit locks its one `Product` row before it reads or replaces the `ProductImage` rows ([section 4.2](#42-product-status-and-moderation-s5-oq-04-oq-05-oq-06-oq-35-oq-36-oq-42)). Any transaction that writes cart lines on the customer's behalf outside a plain add or change (the return of step 5 in 7.2, and the lowering write of the refusal transaction in 7.1) holds the `Cart` row lock first. A read of the cart takes no lock and writes nothing ([section 6.9](#69-cart-and-cartitem)). "Not the last admin" locks the active admin `User` rows it counts (`FOR UPDATE`) before it changes one of them.
 
 ### 7.6 Status columns and what each guarded update needs
 
 | Column | Guard in the `WHERE` | Other columns the statement needs |
 | --- | --- | --- |
 | `User.isActive` | `"isActive" = :expected` | `role` (last-admin count); `Session.userId` (revocation) |
-| `User.role` | `role = 'CUSTOMER'` | |
+| `User.role` | `role = 'CUSTOMER'`, and the only target is `SELLER`. **No statement anywhere updates an existing row to `ADMIN`**: the bootstrap script only creates new users (section 4.1) | |
 | `SellerApplication.status` | `status = 'PENDING'` | `userId`; unique `Store.ownerId` as the backstop against two stores |
 | `Store.status` | `status = :expected` | `statusReason` |
-| `Product.status` | `status = :expected` | `storeId` (seller scope) |
-| `Product.moderationStatus`, admin | `"moderationStatus" = :expected AND "contentRevision" = :seen` | `moderationNote` |
-| `Product.moderationStatus`, seller edit | No status guard. The transaction locks the product row first, compares the moderated content with what is stored, and sets `PENDING` and raises `contentRevision` only when it differs; a pure reorder of pictures changes neither (section 4.2) | `storeId`, `contentRevision`, `moderationRequestedAt`, `ProductImage.uploadId` |
+| `Product.status` | `status = :expected`, and the store is `APPROVED` (7.7). Publishing a `PENDING` product also sets `moderationRequestedAt = now()` | `storeId` (seller scope), `moderationStatus`, `moderationRequestedAt` |
+| `Product.moderationStatus`, admin approve or reject | `"moderationStatus" = 'PENDING' AND status = 'PUBLISHED' AND "contentRevision" = :seen` (D-028) | `moderationNote` |
+| `Product.moderationStatus`, admin takedown | `"moderationStatus" = 'APPROVED' AND "contentRevision" = :seen` | `moderationNote` |
+| `Product.moderationStatus`, seller edit | No status guard, but the store must be `APPROVED` (7.7). The transaction locks the product row first and compares with what is stored. It sets `PENDING` and raises `contentRevision` when the moderated content differs, or when only the price differs and the stored status is `REJECTED` or `TAKEN_DOWN`; a price change on an `APPROVED` or `PENDING` product, and a pure reorder of pictures, change neither (section 4.2) | `storeId`, `priceSatang`, `contentRevision`, `moderationRequestedAt`, `ProductImage.uploadId` |
 | `Product.stock`, checkout | `stock >= :quantity` plus the purchasability conditions (7.1) | `priceSatang`, `storeId`, `categoryId` |
-| `Product.stock`, seller sets a value | `:value BETWEEN 0 AND 1000000` (OQ-40) | `storeId` |
-| `Product.stock`, seller adjusts by a delta | `stock + :delta >= 0 AND (:delta < 0 OR stock + :delta <= 1000000)` (OQ-40): a decrease is accepted even when the stock stands above 1,000,000 | `storeId` |
-| `Product.stock`, restore | **no guard**: never refused (7.3) | |
-| `Order.paymentStatus` | `"paymentStatus" = 'PENDING'` | `createdAt` (timeout sweep) |
+| `Product.stock`, seller sets a value | `:value BETWEEN 0 AND 1000000` (OQ-40), and the store is `APPROVED` (7.7) | `storeId` |
+| `Product.stock`, seller adjusts by a delta | `stock + :delta >= 0 AND (:delta < 0 OR stock + :delta <= 1000000)` (OQ-40): a decrease is accepted even when the stock stands above 1,000,000; and the store is `APPROVED` (7.7) | `storeId` |
+| `Product.stock`, restore | **no guard**: never refused (7.3), whatever the store's status | |
+| `Order.paymentStatus` | `"paymentStatus" = 'PENDING'`; the move to `PAID` also sets `paidAt` | `createdAt` (timeout sweep), `paidAt` |
 | `SellerOrder.fulfilmentStatus` | `"fulfilmentStatus" = :expected`; every seller statement, and the move to `PROCESSING` by anyone, also `EXISTS` an order with `"paymentStatus" = 'PAID'` (OQ-41) | `storeId` (seller scope), `orderId` |
 | `OrderItem.stockRestoredAt` | `"stockRestoredAt" IS NULL` | `productId`, `quantity` |
 | `OrderItem.cartQuantityAfterReturn` (with `cartQuantityBeforeReturn`) | `"cartQuantityAfterReturn" IS NULL` | `productId`, `quantity`; `CartItem.quantity`; `Product.stock` |
 | `Category.isActive` | `"isActive" = :expected` | |
 
 Zero affected rows is a conflict error, never a silent success.
+
+### 7.7 Suspended store: which statements carry the store status (D-028)
+
+While a store is `SUSPENDED` its seller is **view-only, apart from orders**: the seller may read their own products, store, and summary, and may read and fulfil existing seller orders (BR-14). Every other seller write is refused until the store is reinstated.
+
+`requireActor` reads `Store.status` on every request ([section 6.1](#61-auth-tables-s19)), and that is the first check. It is made before the write, so a suspension that commits in between would not be seen by it. The statements below therefore carry the condition themselves, as `AND EXISTS (SELECT 1 FROM "Store" s WHERE s.id = :actorStoreId AND s.status = 'APPROVED')`, or, for a statement on the `Store` row itself, `AND status = 'APPROVED'`. Zero rows because of it is the "store not approved" refusal, not a conflict.
+
+| Seller statement | Carries the condition? |
+| --- | --- |
+| Create a product (written as `INSERT ... SELECT ... WHERE EXISTS (...)`, so that the condition is part of the insert) | **Yes** |
+| Edit a product: title, description, category, price, SKU, pictures (the row lock of section 4.2 is taken with the condition) | **Yes** |
+| Set or adjust stock | **Yes** |
+| Publish, unpublish, archive | **Yes** |
+| Delete a product (the delete-or-archive transaction of section 14) | **Yes** |
+| Edit the store: `name`, `description`, `logoUploadId`, `contactPhone` | **Yes** |
+| Register an upload (`Upload` insert) | **Yes**: an upload exists only to be attached by one of the writes above |
+| Move a seller order to `PROCESSING`, `SHIPPED`, `DELIVERED`, or `CANCELLED`; create the `Shipment` | **No** (BR-14). These carry the paid-order condition of OQ-41 only |
+| Any read of the seller's own products, store, summary, or orders | **No** |
+
+Statements that are not the seller's never carry it: checkout already requires `s.status = 'APPROVED'` for a different reason (the product must be buyable), the stock restore of 7.3 is never refused, admin decisions on the store's products are unaffected, and the customer's review of a delivered item is unaffected.
+
+D-028 names products, stock, publishing, unpublishing, and archiving. The store's own fields and uploads are included here because the answer is "view only"; if editing the store profile while suspended is wanted, the two rows are simply dropped from the table, with no schema effect.
+
+No column, index, or constraint is added for any of this.
 
 ## 8. Uploads and images (S7, S8)
 
@@ -718,6 +807,11 @@ Consequences, all intended (REQUIREMENTS.md BR-34 says the same): after a restor
 | No duplicate order per submission | unique `(userId, idempotencyKey)` | lookup inside the cart lock |
 | Stock restored at most once | `stockRestoredAt IS NULL` claim | restore only claimed rows |
 | Totals consistent | `CHECK` on `Order` and `OrderItem` | computed from database prices |
+| A paid order has its paid time, and only a paid order | `CHECK` on `Order` | written in the statement that sets `PAID` |
+| A moderation decision only on a published product awaiting approval | guard of the admin statement (`PENDING`, `PUBLISHED`, revision) | |
+| A suspended store's seller is view-only apart from orders | store-status condition in each seller write (section 7.7) | `requireActor` |
+| No existing account is ever promoted to admin | unique email as the backstop; no statement updates a role to `ADMIN` | bootstrap script refuses |
+| A read of the cart writes nothing | | the lowered quantity is derived on read and stored only by a mutation (sections 6.9, 7.1) |
 | Order totals fit in `Int` | `CHECK` (BR-04 cap) | caps validated before insert |
 | One store per seller | unique `ownerId` | |
 | One open application per user | partial unique index | |
@@ -749,7 +843,7 @@ Hand-written in the first migration and kept in sync here. Whether a later `migr
 | `Upload` | `contentType` in the three allowed types; `sizeBytes` 1 to 5,242,880 |
 | `ProductImage` | `sortOrder` 0 to 7 |
 | `CartItem` | quantity 1 to 99 |
-| `Order` | three amounts `>= 0`; grand total equals subtotal plus shipping; grand total at most 2,000,000,000; `shipPostalCode` is 5 digits |
+| `Order` | three amounts `>= 0`; grand total equals subtotal plus shipping; grand total at most 2,000,000,000; `shipPostalCode` is 5 digits; `paidAt` is set exactly when `paymentStatus` is `PAID` |
 | `SellerOrder` | subtotal `>= 0`; shipping fee 0 to 100,000; commission 0 to 10,000 |
 | `OrderItem` | quantity 1 to 99; unit price 100 to 100,000,000; line total equals unit price times quantity; the two return columns are both null or both set; `cartQuantityBeforeReturn` 0 to 99; `cartQuantityAfterReturn` 1 to 99 and at most `cartQuantityBeforeReturn + quantity` |
 | `Payment` | amount 0 to 2,000,000,000 |
@@ -871,52 +965,65 @@ Other D-026 answers written into this document:
 
 OQ-37, OQ-45 to OQ-48, and OQ-50 need nothing from the data model, except that OQ-50 (backups kept 30 days) limits what OQ-49 can promise ([section 6.1](#61-auth-tables-s19)).
 
-### 19.2 Still open
+### 19.2 Answered by the owner (D-028) and ruled by the orchestrator (D-029)
 
-**None of these blocks T-013.** For each one the schema is the same under every reading; the difference is a query filter or which statement writes a row. The reading this document does **not** choose is described at the place given.
+The points this document left open after D-026 are all settled. The body of the document states the decided rule.
 
-**OPEN (owner).** The questions already have an id in REQUIREMENTS.md where one is given.
-
-| Id | Also | Question, in plain words | State of this document | Section |
+| Id | Also | Point | Answer | Where it is written |
 | --- | --- | --- | --- | --- |
-| DM-Q8 | REQUIREMENTS Q31; API_CONTRACTS 8.1 point 4 | A rejected or taken-down product goes back for approval when the seller saves a correction. If the seller changes only the price, the stock, the SKU, or the order of the pictures, does that also send it back? | Both readings described; the certain part (a change to title, description, category, or the set of pictures resubmits; an unchanged save does not) is written as a rule | 4.2 |
-| DM-Q9 | REQUIREMENTS Q33; API_CONTRACTS 8.1 point 5 | The admin cancels one store's part of an order while its payment is still being processed, and then the payment fails. Do the items of the part already cancelled also go back into the cart? | Both readings described. The second one needs one more rule (what to do when that product has meanwhile sold out) | 7.2 |
-| DM-Q10 | API_CONTRACTS 8.1 point 6 | Does a product that the seller has published but that is still waiting for approval count in the seller's "low stock" and "sold out" figures? | Both filters given. REQUIREMENTS.md and API_CONTRACTS.md currently read it as not counted | 5.1 |
-| DM-Q11 | REQUIREMENTS Q32 | Does a published, approved product count in those two figures while it is hidden because its store is suspended or its category is switched off? | Both filters given | 5.1 |
-| DM-Q12 | REQUIREMENTS Q34 | After a payment that failed because the payment system never answered, must the customer be told, the next time they open the cart, that a returned quantity was cut by a limit? | The cut is on record on the failed order under either answer. "Must be told on the next visit" would add one column recording that they were told | 7.2 |
+| DM-Q8 | REQUIREMENTS Q31 | Which saves resubmit a rejected or taken-down product | A change to title, description, category, the set of pictures, or the price. Not a change only to stock, SKU, or picture order. For an approved product a price change still needs no approval | Sections 4.2, 7.6 |
+| DM-Q9 | REQUIREMENTS Q33 | Items of a part cancelled before the payment failed | They do not return to the cart | Section 7.2 |
+| DM-Q10 | | Is a published product awaiting approval "on sale" for the stock figures | No | Section 5.1 |
+| DM-Q11 | REQUIREMENTS Q32 | Is an approved, published product hidden by a suspended store or a switched-off category counted | Yes | Section 5.1 |
+| DM-Q12 | REQUIREMENTS Q34 | Must the customer be told later that a returned quantity was cut | No. The two `OrderItem` return columns stay (D-029) | Sections 7.2, 6.12 |
+| DM-D1 | D-029 point 1 | Does reading the cart store a lowered quantity | No. A `GET` never writes; no `CartItem.loweredFromQuantity` | Section 6.9 |
+| DM-D2 | D-029 point 2 | Does a refused checkout store the lowered quantity | Yes. The checkout request stores it and is refused | Section 7.1 |
+| | REQUIREMENTS Q36 | A cart line whose product is hidden | Treated like a sold-out line: it stays, is flagged, and is left out of totals | Sections 6.9, 7.1 |
+| | REQUIREMENTS Q37 | Bootstrap script given an existing email | An admin's: no change. A customer's or seller's: refused | Sections 4.1, 7.6 |
+| | | What a seller with a suspended store may do | View only, apart from orders | Section 7.7 |
+| | | May a seller change the store's contact phone | Yes, without approval | Section 6.3 |
+| | | Payment timeout | 15 minutes; configuration, not a column | Section 4.3 |
+| | | Which date the sales report's range uses | The date the order was paid: new column `Order.paidAt`, indexed | Sections 6.10, 4.4, 7.2 |
+| | | Moderation decisions on unpublished products | Not allowed: approve and reject only while `PENDING` and `PUBLISHED` | Sections 4.2, 7.6 |
+| | | Order of the approval queue | By submission time; publishing a `PENDING` product sets `moderationRequestedAt` | Section 4.2 |
+| | | Session details inside backups | Accepted; a restore ends with the session clean-up | Section 6.1 |
+| | | Admin dashboard summary figures | All four groups; each is a count or a sum over existing columns and existing indexes, with no stored figure | Section 4.4 |
 
-**DISAGREEMENT between other documents.** Not for this document to settle.
+The Thai texts of D-028 (Q35) and D-029 point 3 (`storeId` in a request body) need nothing from the data model.
 
-| Id | Subject | One document | The other | State of this document | Section |
-| --- | --- | --- | --- | --- | --- |
-| DM-D1 | Does reading the cart store a lowered quantity? | TEST_STRATEGY.md: the next cart read stores it | SECURITY.md TM-16: a `GET` never changes state | Schema v1 has no column for it; the column the first reading would need is described | 6.9 |
-| DM-D2 | Does a checkout that stops because a quantity is above stock store the lowered quantity? | REQUIREMENTS.md BR-22 case (b), REQ-C-11: afterwards the cart holds the lowered quantity | API_CONTRACTS.md section 5.5.3: after a refusal the cart is as it was | Both transaction shapes described; no column either way | 7.1 |
+### 19.3 Still open
 
-**Open, technical, raised by this document.**
+**No owner question is open in this document, and nothing here blocks T-013.**
+
+What remains is technical and belongs to a later task:
 
 | Point | For | Section |
 | --- | --- | --- |
-| Order of the approval queue after OQ-42. The queue is ordered by `moderationRequestedAt`, the time the product last entered `PENDING`. A product created weeks ago and published today therefore goes to the front, ahead of products that have waited for days. Proposed: publishing a `PENDING` product also sets `moderationRequestedAt = now()`, so the column means "entered the queue". This changes the wording of API_CONTRACTS.md section 5.9.3 ("the time the product last entered `PENDING`") and is not applied until backend-api and the orchestrator agree | orchestrator, backend-api | 4.2 |
-| What triggers the session purge, given that nothing runs on a schedule | orchestrator, devops, auth (T-015) | 6.1 |
-| Savepoint or validate-first inside an interactive transaction, needed only under one reading of DM-D2 | T-013 | 7.1 |
+| What triggers the two things that must run with no visitor: the session purge (hourly) and the failing of orders still `PENDING` after 15 minutes. Nothing runs on a schedule yet. D-029 places the choice in T-015 with devops | orchestrator, devops, auth (T-015) | 6.1, 4.3 |
+| The checkout shape recommended in section 7.1 (an attempt transaction, then a separate refusal transaction that stores the lowered quantities), and the savepoint fallback | T-013 (the statements), T-032 (the sequence under concurrency) | 7.1 |
+| Whether a suspended seller may still edit the store profile and register uploads. This document reads "view only" as refusing both; D-028 does not name them | orchestrator, backend-api | 7.7 |
 
-### 19.3 To validate against installed versions
+### 19.4 To validate against installed versions
 
 | Item | During |
 | --- | --- |
 | Auth tables: model names, column names, types, id generation, the option that blocks input to `role`, `isActive`, `phone`, email case handling, deletion of expired sessions, the source of `Session.ipAddress`, cookie cache off | T-015 |
 | Checkout statement and claim statement as raw queries inside an interactive transaction; conditional updates that return rows | T-013 |
+| The classification read and the lowering statement of the refusal transaction as raw queries; a thrown error rolls the attempt transaction back completely; (fallback only) raw `SAVEPOINT` inside an interactive transaction | T-013 |
+| A check constraint that compares an enum column with a literal (`Order.paidAt` against `paymentStatus`) is accepted in the hand-written migration and survives `migrate dev` without drift | T-013 |
 | Database default with a hand-created sequence, and hand-written partial indexes, survive `migrate dev` without drift | T-013 |
 | Type and overflow behaviour of `_sum` on `Int` columns | T-013 |
 | Collation `th-x-icu` present in the database image | T-013 |
 | Id variant (`cuid`) offered by the installed Prisma | T-013 |
 
-### 19.4 Known consequences, stated plainly
+### 19.5 Known consequences, stated plainly
 
 - **Session details after expiry (OQ-22; D-026, OQ-49).** The owner's answer is that login IP and browser details are deleted when the session ends, and are gone within one day of its expiry. Ending is exact (the row is deleted). Expiry depends on a purge that something must run; the design asks for an hourly run, and **no such run exists yet**, so today the one-day limit is not guaranteed by anything ([section 6.1](#61-auth-tables-s19)).
-- **Backups.** A backup keeps the session rows, with their addresses, that existed when it was taken, for as long as the backup is kept: 30 days (D-026, OQ-50). The one-day limit therefore holds for the live database only. SECURITY.md SR-07 records the same point.
+- **Backups.** A backup keeps the session rows, with their addresses, that existed when it was taken, for as long as the backup is kept: 30 days (D-026, OQ-50). The one-day limit therefore holds for the live database only. The owner accepted this (D-028), and a restore ends with the session clean-up.
+- **Overdue orders.** An order still `PENDING` after 15 minutes is failed only when something calls the function that does it. Until a scheduled run exists, an abandoned order can stay `PENDING`, holding its stock, for longer than 15 minutes ([section 4.3](#43-payment-status-on-order-m2-oq-07-d-023)).
 - **Stock above the entry limit.** After a cancellation or a failed payment the stock of a product can stand above 1,000,000. This is intended ([section 11](#11-money-types-bounds-and-aggregates)).
-- **The cap notice is on the order, not on the cart.** A customer whose returned quantity was cut is told from the failed order's record; the cart read itself carries no such notice ([section 7.2](#72-payment-completion-and-payment-failure-oq-07-oq-26-oq-27-oq-41)).
+- **The record of a cut returned quantity is on the order, not on the cart.** It is reported in the result of the failed checkout and its repeat. The cart read carries no such notice, and none is required (D-028) ([section 7.2](#72-payment-completion-and-payment-failure-oq-07-oq-26-oq-27-oq-41)).
+- **Price and approval.** An admin can approve a waiting product whose price changed after they opened it, and a seller can change the price of an approved product at any time. Only a price change that resubmits a rejected or taken-down product invalidates a decision in flight ([section 4.2](#42-product-status-and-moderation-s5-oq-04-oq-05-oq-06-oq-35-oq-36-oq-42)).
 
 ## 20. Review findings resolved here
 
@@ -952,4 +1059,10 @@ OQ-37, OQ-45 to OQ-48, and OQ-50 need nothing from the data model, except that O
 | D-026: OQ-38, OQ-40 | 6.16, 6.11, 11, 7.3, 7.6, 13 |
 | D-026: OQ-39 | 5 |
 | D-026: OQ-44 | 10 |
-| D-026: OQ-49 | 6.1, 19.4 |
+| D-026: OQ-49 | 6.1, 19.5 |
+| D-028: correction by price, decisions only on published products, queue order | 4.2, 7.6 |
+| D-028: stock figures; hidden cart lines; items of an early-cancelled part | 5.1, 6.9, 7.2 |
+| D-028: suspended store view-only; contact phone | 7.7, 6.3 |
+| D-028: payment timeout; paid date for reports (`Order.paidAt`) | 4.3, 6.10, 4.4, 7.2 |
+| D-028: bootstrap script and existing accounts; backups | 4.1, 6.1 |
+| D-029: a `GET` never writes; the refused checkout stores the lowered quantity; return columns confirmed | 6.9, 7.1, 6.12 |
