@@ -87,6 +87,18 @@ Rules that are not negotiable:
 7. Only `src/server/db` imports the Prisma client. `src/server/db` is imported only by `src/modules/**`, `src/server/auth/**`, `src/server/health.ts`, `prisma/seed.ts`, `scripts/**`, and `tests/**`. Pages, route handlers, and components never import it. (Owner approved 2026-10-11, D-021.)
 8. No secrets in source, logs, client bundles, or docs. `.env.example` holds placeholders only.
 
+## Starting a session and resuming interrupted work
+
+A session can end on the usage limit while a task is half done. [docs/STATUS.md](docs/STATUS.md) is then stale, but the files on disk are not. Never redo work that already exists.
+
+1. Before starting any task, run `git status` and `git diff`, and read "Resume here" in [docs/STATUS.md](docs/STATUS.md). Compare the two: uncommitted files are evidence of work that STATUS.md may not record.
+2. If uncommitted work exists, inspect it before anything else: read the files and run the checks that apply to them.
+   - If it is sound, continue from where it stopped, finish it, commit it, and update STATUS.md.
+   - If it is broken or far from complete, summarise it for the owner in Thai and ask whether to keep or discard it. Do not delete or overwrite it without that answer.
+3. Do not start a new task, or relaunch an agent on the same task, on top of uncommitted work that has not been inspected. A relaunched agent is told which files already exist and to continue from them.
+4. Before launching an agent, record in "Resume here" which task is starting, which agent runs it, and which paths it will touch, and commit that.
+5. During a long task, commit each finished part that passes its checks instead of holding everything for one final commit, so an interruption loses only the last part.
+
 ## Verification before claiming anything
 
 - A task is `IMPLEMENTED` when code exists; `VERIFIED` only after its acceptance checks actually ran and passed in this environment.
