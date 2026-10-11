@@ -5,9 +5,10 @@
  *
  *   it(...)        a control that was checked and holds today. A failure is a regression.
  *                  This includes the reproductions of SEC-001 to SEC-007 and SEC-012 to
- *                  SEC-018, which were open findings until their fixes (commits 4407b71 and
- *                  28c92d1) were re-checked on 2026-10-11.
- *   it.fails(...)  an OPEN finding (SEC-019 at the time of writing). The body
+ *                  SEC-019, which were open findings until their fixes (commits 4407b71,
+ *                  28c92d1, and e2a4a7a) were re-checked on 2026-10-11.
+ *   it.fails(...)  an OPEN finding (none in this file at the time of writing; SEC-020 is
+ *                  demonstrated in sec019-body-limit-recheck.test.ts). The body
  *                  asserts the SECURE behaviour, which the code does not have yet, so the
  *                  assertion fails and Vitest reports the test as passed ("expected fail").
  *                  When the owner fixes the code the test turns red; the owner may then
@@ -1475,7 +1476,8 @@ describe("SR-03 trust decision for incoming request ids (trustsIncomingRequestId
 });
 
 // ---------------------------------------------------------------------------
-// OPEN finding registered by the second re-check of 2026-10-11. Owner of the code: backend-api.
+// Finding registered by the second re-check of 2026-10-11, fixed in commit e2a4a7a and
+// re-checked the same day (sec019-body-limit-recheck.test.ts). Owner of the code: backend-api.
 // ---------------------------------------------------------------------------
 
 describe("SEC-019 readJsonBody buffers a request body of any size", () => {
