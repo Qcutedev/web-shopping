@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { db } from "@/server/db";
 
+import { captureViolation, PG_CHECK_VIOLATION } from "../../helpers/database-error";
 import {
   createAccount,
   createAddress,
@@ -285,13 +286,98 @@ describe("createOrder", () => {
     expect(await db.user.count()).toBe(0);
   });
 
+  it("writes the chosen creation time to every row of the order", async () => {
+    const createdAt = new Date("2026-07-15T09:30:00.123Z");
+    const storeA = await createStore();
+    const storeB = await createStore();
+    const a = await createProduct({ storeId: storeA.id });
+    const b = await createProduct({ storeId: storeB.id });
+
+    const { order } = await createOrder({
+      createdAt,
+      lines: [
+        { productId: a.id, quantity: 1 },
+        { productId: b.id, quantity: 2 },
+      ],
+    });
+
+    // Read back from the database, not from what the factory returned.
+    const stored = await db.order.findUniqueOrThrow({
+      where: { id: order.id },
+      include: { sellerOrders: { include: { items: true } }, payment: true },
+    });
+    const iso = "2026-07-15T09:30:00.123Z";
+    expect(stored.createdAt.toISOString()).toBe(iso);
+    expect(stored.sellerOrders).toHaveLength(2);
+    for (const sellerOrder of stored.sellerOrders) {
+      expect(sellerOrder.createdAt.toISOString()).toBe(iso);
+      expect(sellerOrder.items).toHaveLength(1);
+      for (const item of sellerOrder.items) {
+        expect(item.createdAt.toISOString()).toBe(iso);
+      }
+    }
+    expect(stored.payment?.createdAt.toISOString()).toBe(iso);
+  });
+
+  it("leaves the creation times to the database clock when none is chosen", async () => {
+    const before = Date.now() - 60_000;
+
+    const { order, items, payment } = await createOrder();
+
+    for (const row of [order, payment, ...items]) {
+      expect(row.createdAt.getTime()).toBeGreaterThan(before);
+      expect(row.createdAt.getTime()).toBeLessThan(Date.now() + 60_000);
+    }
+  });
+
+  it("refuses two lines for one product, before it writes anything", async () => {
+    const product = await createProduct({ stock: 10 });
+    const other = await createProduct({ stock: 10 });
+    const rowsBefore = { users: await db.user.count(), products: await db.product.count() };
+
+    await expect(
+      createOrder({
+        lines: [
+          { productId: product.id, quantity: 1 },
+          { productId: other.id, quantity: 1 },
+          { productId: product.id, quantity: 2 },
+        ],
+      }),
+    ).rejects.toThrow(
+      "createOrder: two lines name the same product. An order holds at most one item per product; give one line with the whole quantity.",
+    );
+
+    expect(await db.order.count()).toBe(0);
+    expect(await db.orderItem.count()).toBe(0);
+    expect(await db.user.count()).toBe(rowsBefore.users);
+    expect(await db.product.count()).toBe(rowsBefore.products);
+    const stock = async (id: string) =>
+      (await db.product.findUniqueOrThrow({ where: { id } })).stock;
+    expect(await stock(product.id)).toBe(10);
+    expect(await stock(other.id)).toBe(10);
+  });
+
+  it("refuses an order without lines, before it writes anything", async () => {
+    await expect(createOrder({ lines: [] })).rejects.toThrow(
+      "createOrder: an order needs at least one line.",
+    );
+
+    expect(await db.order.count()).toBe(0);
+    expect(await db.user.count()).toBe(0);
+  });
+
   it("writes nothing when the stock does not cover a line", async () => {
     const product = await createProduct({ stock: 1 });
 
-    await expect(
+    // The refusal is the database's, by the stock check, and not some other failure.
+    const violation = await captureViolation(() =>
       createOrder({ lines: [{ productId: product.id, quantity: 2 }] }),
-    ).rejects.toThrow();
+    );
 
+    expect(violation).toMatchObject({
+      code: PG_CHECK_VIOLATION,
+      constraint: "Product_stock_check",
+    });
     expect(await db.order.count()).toBe(0);
     expect(await db.sellerOrder.count()).toBe(0);
     expect(await db.orderItem.count()).toBe(0);

@@ -18,10 +18,15 @@
  * - the lock is scoped to the database the given client is connected to; two runs exclude each
  *   other because both connect to the same base test database;
  * - the transaction is held for at most `RUN_LOCK_HOLD_MS`. A run (or a watch session) that
- *   lasts longer loses the lock without notice.
+ *   lasts longer loses the lock;
+ * - a lock that is lost while the run goes on (the hold time ran out, the connection that held
+ *   it was closed, the server restarted) is not noticed at that moment: nothing watches the
+ *   connection. It is noticed at the end: `release()` throws `RunLockLostError`, and the global
+ *   teardown lets that fail the run.
  *
- * This module imports the database layer as a type only, so the global setup can load it before
- * DATABASE_URL is set.
+ * This module imports the database layer as a type only. It needs no client of its own: the
+ * caller hands in `db`, which creates its client on first use from the DATABASE_URL of that
+ * moment, so the caller must have set DATABASE_URL to a test database before the first use.
  */
 import type { Db } from "@/server/db";
 
@@ -42,8 +47,26 @@ export class ConcurrentRunError extends Error {
   }
 }
 
+/**
+ * Thrown by `release()` when the lock was not held until then. The message holds no URL and
+ * nothing of the database error that ended the hold.
+ */
+export class RunLockLostError extends Error {
+  constructor() {
+    super(
+      "The integration run lost its run lock before it ended (the connection that held it was closed, or the hold time ran out). " +
+        "Another integration run may have started meanwhile and recreated the test databases under this one, so the results of this run cannot be trusted. Run it again.",
+    );
+    this.name = "RunLockLostError";
+  }
+}
+
 export type RunLock = {
-  /** Ends the transaction that holds the lock. Safe to call more than once. */
+  /**
+   * Ends the transaction that holds the lock. Safe to call more than once. Throws
+   * `RunLockLostError`, every time it is called, when the transaction did not end cleanly: the
+   * lock was then lost at some moment before this call.
+   */
   release: () => Promise<void>;
 };
 
@@ -82,11 +105,16 @@ export async function acquireRunLock(db: Db, key: number = RUN_LOCK_KEY): Promis
     },
     { maxWait: 10_000, timeout: RUN_LOCK_HOLD_MS },
   );
-  // Settled here so that a transaction that ends in an error after the lock was reported (the
-  // hold time ran out, or the connection was lost) is not an unhandled rejection.
+  // Settled here so that a transaction that ends in an error is not an unhandled rejection.
+  // Before the lock was reported, the error is the result of the attempt. After that, `attempt`
+  // is already settled and rejecting it does nothing, so the failure is remembered instead: the
+  // transaction ended in an error (the hold time ran out, the connection was closed), and with
+  // it the lock, at some moment the caller was not told about.
+  let lost = false;
   const finished = transaction.then(
     () => undefined,
     (error: unknown) => {
+      lost = true;
       reportFailure(error);
     },
   );
@@ -100,6 +128,9 @@ export async function acquireRunLock(db: Db, key: number = RUN_LOCK_KEY): Promis
     release: async () => {
       endHold();
       await finished;
+      if (lost) {
+        throw new RunLockLostError();
+      }
     },
   };
 }

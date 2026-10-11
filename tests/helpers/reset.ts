@@ -16,6 +16,7 @@
  */
 import { db } from "@/server/db";
 
+import { quoteIdentifier, quoteLiteral } from "./sql";
 import { isWorkerDatabaseName } from "./test-database-url";
 
 /** The settings row as the first migration inserts it (D-017). */
@@ -30,10 +31,6 @@ const MIGRATIONS_TABLE = "_prisma_migrations";
 let checkedDatabase = false;
 let cachedTables: string[] | undefined;
 let cachedSequences: string[] | undefined;
-
-function quote(identifier: string): string {
-  return `"${identifier.replaceAll('"', '""')}"`;
-}
 
 /**
  * Second line of defence behind the global setup: nothing is emptied unless the connection is
@@ -57,7 +54,7 @@ async function assertWorkerDatabase(): Promise<void> {
 export async function listApplicationTables(): Promise<string[]> {
   if (cachedTables === undefined) {
     const rows = await db.$queryRawUnsafe<{ tablename: string }[]>(
-      `SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> '${MIGRATIONS_TABLE}' ORDER BY tablename`,
+      `SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> ${quoteLiteral(MIGRATIONS_TABLE)} ORDER BY tablename`,
     );
     cachedTables = rows.map((row) => row.tablename);
   }
@@ -80,8 +77,10 @@ export async function resetDatabase(): Promise<void> {
   const tables = await listApplicationTables();
   const sequences = await listSequences();
   await db.$transaction([
-    db.$executeRawUnsafe(`TRUNCATE TABLE ${tables.map(quote).join(", ")} CASCADE`),
-    ...sequences.map((name) => db.$executeRawUnsafe(`ALTER SEQUENCE ${quote(name)} RESTART`)),
+    db.$executeRawUnsafe(`TRUNCATE TABLE ${tables.map(quoteIdentifier).join(", ")} CASCADE`),
+    ...sequences.map((name) =>
+      db.$executeRawUnsafe(`ALTER SEQUENCE ${quoteIdentifier(name)} RESTART`),
+    ),
     db.$executeRawUnsafe(
       `INSERT INTO "MarketplaceSettings" ("id", "flatShippingFeeSatang", "commissionRateBps", "updatedById", "updatedAt")
        VALUES (${INITIAL_SETTINGS.id}, ${INITIAL_SETTINGS.flatShippingFeeSatang}, ${INITIAL_SETTINGS.commissionRateBps}, NULL, CURRENT_TIMESTAMP)`,
@@ -98,7 +97,10 @@ export type ResetLeftover = { object: string; found: string };
 export async function findResetLeftovers(): Promise<ResetLeftover[]> {
   const tables = (await listApplicationTables()).filter((name) => name !== "MarketplaceSettings");
   const counts = tables
-    .map((name) => `SELECT '${name}' AS object, count(*)::int AS n FROM ${quote(name)}`)
+    .map(
+      (name) =>
+        `SELECT ${quoteLiteral(name)} AS object, count(*)::int AS n FROM ${quoteIdentifier(name)}`,
+    )
     .join(" UNION ALL ");
   const [tableRows, sequenceRows, settingsRows] = await db.$transaction([
     db.$queryRawUnsafe<{ object: string; n: number }[]>(counts),

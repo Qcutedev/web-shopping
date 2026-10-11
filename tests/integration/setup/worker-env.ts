@@ -1,7 +1,9 @@
 /**
  * First setup file of every integration test file. It runs before the test file and before
- * worker-hooks.ts, and it must not import anything that loads `@/server/db`: the database
- * client is created at import from DATABASE_URL and is one per process.
+ * worker-hooks.ts, and so before anything uses the database: the database layer creates its one
+ * client per process on the first use of `db` (not at import), from the DATABASE_URL of that
+ * moment, and keeps it. DATABASE_URL must therefore name the worker's database before that first
+ * use, which is the reset in worker-hooks.ts. This file imports nothing that uses `db`.
  *
  * It points DATABASE_URL at the database of this worker. If the global setup did not run, or the
  * worker id is not one a database was created for, it throws, and no client is ever created.

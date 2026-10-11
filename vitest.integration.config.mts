@@ -18,8 +18,9 @@ const INTEGRATION_MAX_WORKERS = 4;
 // Isolation (docs/TEST_STRATEGY.md, "Test database reset under parallel files"):
 // - global-setup.ts refuses any database but the local test one, refuses to start while another
 //   integration run holds the run lock, migrates a template database, and creates one database
-//   per worker from it;
-// - worker-env.ts points DATABASE_URL at the worker's database before `@/server/db` is loaded;
+//   per worker from it; its teardown fails the run when the run lock was lost on the way;
+// - worker-env.ts points DATABASE_URL at the worker's database before the database layer is
+//   first used (the client is created on first use, not at import);
 // - worker-hooks.ts empties that database before the first test of every file.
 // A worker runs one file at a time, so no two files ever share a database at the same moment.
 export default defineConfig({

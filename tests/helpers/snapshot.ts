@@ -17,6 +17,7 @@
 import { db } from "@/server/db";
 
 import { listApplicationTables } from "./reset";
+import { quoteIdentifier, quoteLiteral } from "./sql";
 
 export type TableSnapshot = { rowCount: number; digest: string };
 
@@ -31,17 +32,13 @@ export type SnapshotOptions = {
   excludeTables?: readonly string[];
 };
 
-function quote(identifier: string): string {
-  return `"${identifier.replaceAll('"', '""')}"`;
-}
-
 export async function snapshotDatabase(options: SnapshotOptions = {}): Promise<DatabaseSnapshot> {
   const excluded = new Set(options.excludeTables ?? []);
   const tables = (await listApplicationTables()).filter((name) => !excluded.has(name));
   const perTable = tables.map(
     (name) =>
-      `SELECT '${name.replaceAll("'", "''")}' AS kind_name, 'table' AS kind, count(*)::int AS row_count, ` +
-      `coalesce(md5(string_agg(md5(t::text), '' ORDER BY t."id"::text)), '') AS value FROM ${quote(name)} t`,
+      `SELECT ${quoteLiteral(name)} AS kind_name, 'table' AS kind, count(*)::int AS row_count, ` +
+      `coalesce(md5(string_agg(md5(t::text), '' ORDER BY t."id"::text)), '') AS value FROM ${quoteIdentifier(name)} t`,
   );
   const sequences =
     "SELECT sequencename::text AS kind_name, 'sequence' AS kind, 0 AS row_count, last_value::text AS value " +

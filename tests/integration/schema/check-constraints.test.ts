@@ -523,9 +523,19 @@ const CHECK_CONSTRAINTS: Record<string, Cases> = {
       "moving the row to id 2": () =>
         db.marketplaceSettings.update({ where: { id: 1 }, data: { id: 2 } }),
     },
+    // Real writes, so that the constraint is evaluated on a row with id 1 here and not only by
+    // the migration. The delete and the insert are one transaction: no other session ever sees
+    // the table without its single row.
     accepts: {
-      "the row with id 1, which the migration inserted": () =>
-        db.marketplaceSettings.findUniqueOrThrow({ where: { id: 1 } }),
+      "an insert of the row with id 1, in the transaction that deleted it": () =>
+        db.$transaction([
+          db.marketplaceSettings.delete({ where: { id: 1 } }),
+          db.marketplaceSettings.create({
+            data: { id: 1, flatShippingFeeSatang: 4_000, commissionRateBps: 500 },
+          }),
+        ]),
+      "an update that writes id 1 again": () =>
+        db.marketplaceSettings.update({ where: { id: 1 }, data: { id: 1 } }),
     },
   },
 

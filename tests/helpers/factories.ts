@@ -1,21 +1,40 @@
 /**
- * Factories: each builds one valid row (and the parent rows it needs) through the database
- * layer, so a test states only what it is about.
+ * Schema-level row factories: each writes one row the database accepts (and the parent rows it
+ * needs) through the database layer, so a schema test states only what it is about.
+ *
+ * What they are, and what they are not (review finding CR-27):
+ * - Valid per row. With its defaults every row satisfies every constraint of its table (checks,
+ *   unique indexes, foreign keys). That is all a row factory promises.
+ * - NOT a valid state of the system. No service wrote these rows, and several defaults are
+ *   states no service can leave: `createShipment` puts a shipment on a seller order that is
+ *   still `PENDING` under an unpaid order; `createReview` writes a review by a user who did not
+ *   buy the item, on an item that was not delivered; `createOrderRow` writes an order with no
+ *   seller order, no item, and no payment; `createStore` writes an approved store with no seller
+ *   application and no audit entry; `createCartItem` can hold what no request can create.
+ *   They are for the schema tests (tests/integration/schema) and the harness tests. A test of a
+ *   service, a guard, or an endpoint must not start from them and assume the state is one the
+ *   application could be in.
+ * - Graph factories, which build a state the way the services leave it (an approved seller with
+ *   its application and audit entry, a delivered order with its shipment, a review by the buyer),
+ *   are not built yet. Each comes with the first service task that needs it
+ *   (docs/TEST_STRATEGY.md, "Test data"). `createOrder` below is the only one so far, and only
+ *   for a paid or pending order.
  *
  * Rules:
  * - Every factory goes through `@/server/db`. Nothing in tests/ imports the Prisma client.
  * - Money is integer satang.
- * - A factory writes a row the way a service would leave it, so every constraint holds. A test
- *   that wants a row the database must reject passes the violating value as an override; the
- *   override is written as given, and the database's refusal reaches the test unchanged.
+ * - A test that wants a row the database must reject passes the violating value as an override;
+ *   the override is written as given, and the database's refusal reaches the test unchanged.
  * - A parent that is not given is created. A parent that is given is used as it is.
  * - No factory depends on seed data, and none reads another test's rows.
  *
  * Two layers for orders:
  * - the row factories (`createOrderRow`, `createSellerOrderRow`, `createOrderItemRow`,
- *   `createPaymentRow`) write one row each with consistent default amounts;
+ *   `createPaymentRow`) write one row each with default amounts that agree within the row;
  * - `createOrder` writes a whole order from products, with the totals computed from the
- *   products' prices and the settings row, and takes the stock, as a checkout would.
+ *   products' prices and the settings row, and takes the stock. It follows DATA_MODEL.md, not
+ *   the checkout service, which does not exist yet (T-032); when that service lands, this
+ *   factory is compared with what the service writes.
  */
 import {
   db,
@@ -391,7 +410,11 @@ export type OrderLine = { productId: string; quantity: number };
 export type CreateOrderOptions = {
   /** The buyer. A new user when not given. */
   userId?: string;
-  /** What was bought. One piece of a new product when not given. */
+  /**
+   * What was bought. One piece of a new product when not given. At most one line per product:
+   * an order holds at most one item per product (DATA_MODEL.md section 6.12), because the cart it
+   * is made from has one line per product. Two lines for one product are refused, not merged.
+   */
   lines?: readonly OrderLine[];
   /**
    * `PAID` (the default) or `PENDING`. A failed order is not built here: what a failure leaves
@@ -399,7 +422,10 @@ export type CreateOrderOptions = {
    * service of T-032, and its factory is written with that task.
    */
   paymentStatus?: typeof PaymentStatus.PAID | typeof PaymentStatus.PENDING;
-  /** When the order was created. The database clock when not given. */
+  /**
+   * When the order was created: written to the `Order`, to every `SellerOrder` and `OrderItem`,
+   * and to the `Payment`. The database clock when not given.
+   */
   createdAt?: Date;
   /** When it was paid; only for `PAID`. Defaults to `createdAt`, or to now. */
   paidAt?: Date;
@@ -407,9 +433,9 @@ export type CreateOrderOptions = {
 };
 
 /**
- * A whole order as a successful checkout leaves it: one `Order`, one `SellerOrder` per store
- * with its `OrderItem` rows, one `Payment` of the mock provider, and the stock taken. Prices
- * are the products' current prices; the shipping fee and the commission are the current
+ * A whole order as DATA_MODEL.md describes one after a checkout: one `Order`, one `SellerOrder`
+ * per store with its `OrderItem` rows, one `Payment` of the mock provider, and the stock taken.
+ * Prices are the products' current prices; the shipping fee and the commission are the current
  * settings; every total is computed here from those values, in integer satang.
  */
 export async function createOrder(options: CreateOrderOptions = {}) {
@@ -417,12 +443,19 @@ export async function createOrder(options: CreateOrderOptions = {}) {
   if (paymentStatus !== PaymentStatus.PAID && options.paidAt !== undefined) {
     throw new Error("createOrder: paidAt can only be given for a PAID order.");
   }
+  if (options.lines?.length === 0) {
+    throw new Error("createOrder: an order needs at least one line.");
+  }
+  const productIds = (options.lines ?? []).map((line) => line.productId);
+  if (new Set(productIds).size !== productIds.length) {
+    throw new Error(
+      "createOrder: two lines name the same product. An order holds at most one item per product; give one line with the whole quantity.",
+    );
+  }
   const n = next();
   const userId = options.userId ?? (await createUser()).id;
   const lines = options.lines ?? [{ productId: (await createProduct()).id, quantity: 1 }];
-  if (lines.length === 0) {
-    throw new Error("createOrder: an order needs at least one line.");
-  }
+  const createdAt = options.createdAt === undefined ? {} : { createdAt: options.createdAt };
 
   const products = await db.product.findMany({
     where: { id: { in: lines.map((line) => line.productId) } },
@@ -484,7 +517,7 @@ export async function createOrder(options: CreateOrderOptions = {}) {
         shippingTotalSatang,
         grandTotalSatang,
         ...SHIPPING_ADDRESS,
-        ...(options.createdAt === undefined ? {} : { createdAt: options.createdAt }),
+        ...createdAt,
       },
     });
     const sellerOrders: SellerOrder[] = [];
@@ -499,12 +532,16 @@ export async function createOrder(options: CreateOrderOptions = {}) {
           itemsSubtotalSatang: part.itemsSubtotalSatang,
           shippingFeeSatang: settings.flatShippingFeeSatang,
           commissionRateBps: settings.commissionRateBps,
-          ...(options.createdAt === undefined ? {} : { createdAt: options.createdAt }),
+          ...createdAt,
         },
       });
       sellerOrders.push(sellerOrder);
       for (const item of part.items) {
-        items.push(await tx.orderItem.create({ data: { ...item, sellerOrderId: sellerOrder.id } }));
+        items.push(
+          await tx.orderItem.create({
+            data: { ...item, sellerOrderId: sellerOrder.id, ...createdAt },
+          }),
+        );
         await tx.product.update({
           where: { id: item.productId },
           data: { stock: { decrement: item.quantity } },
@@ -517,6 +554,7 @@ export async function createOrder(options: CreateOrderOptions = {}) {
         provider: PaymentProvider.MOCK,
         providerReference: paymentStatus === PaymentStatus.PAID ? `MOCK-${n}` : null,
         amountSatang: grandTotalSatang,
+        ...createdAt,
       },
     });
     return { order, sellerOrders, items, payment };
