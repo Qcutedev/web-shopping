@@ -6,6 +6,8 @@ Owner: devops agent.
 
 **Also true on 2026-10-11: no server log is collected anywhere, no backup of any database exists, and nothing in the system runs on a schedule.** The owner's rules on logs, sessions, and backups (D-025 OQ-21; D-026 OQ-47 to OQ-50; D-028) are written below as requirements for the staging runbook (T-071) and for T-015. Every one of them is marked **NOT IMPLEMENTED**: that label means no configuration, script, job, or check for it exists, and nothing in this document is evidence that the rule is met.
 
+**Added on 2026-10-12, documents only; no command was run for it and nothing was built.** The security rulings of D-032 point 3 (every restore deletes every session and re-applies restrictions; backups are encrypted and stored apart from the database host) are written into "Database backups" and "Restore procedure" as requirements. Code-review finding CR-16 is written into "Build and migration image" as a design for T-070 and T-071. The Prisma schema, its migrations, and the `db:migrate:deploy` script exist since T-013; no migration has been applied to any deployed database, because none exists.
+
 How to read the checks in this document: every check is either a command that can be run as written, or is marked **Manual** (a person looks and decides). A command marked **Planned** names the task that makes it runnable; until that task lands the command fails.
 
 ## Environments
@@ -209,6 +211,7 @@ Whichever option is chosen must be able to meet the owner's rules. None of the o
 | Can every person who operates the servers have an individual account, with no shared login? Do extra accounts cost money (then it is a paid addition and needs approval)? | "Log retention and access" (OQ-47) |
 | Is every copy of the logs, including the platform's own router or proxy log and any log export, deleted automatically within 90 days? A shorter period is acceptable | "Log retention and access" (OQ-48) |
 | Can database backups, snapshots, and any point-in-time recovery window be limited to 30 days with automatic deletion, and can access to them be limited to the same named people? | "Database backups" (OQ-50) |
+| Are backups encrypted where they are stored and on the way there, and stored somewhere other than the database host? If that needs a paid plan, it is a paid addition and needs approval | "Database backups" (SECURITY.md SR-07; D-032 point 3) |
 | Does the server process keep running with no traffic, or can a scheduled command be run without a paid add-on? | "Scheduled work" (OQ-49) |
 
 ## CI pipeline (Planned, T-070)
@@ -226,6 +229,8 @@ pnpm verify
 
 `pnpm verify` runs the format check, lint, type check, unit tests, and build. It does not run integration or end-to-end tests.
 
+Two things the workflow depends on, from "Build and migration image" (CR-16): the install is the full install, because `postinstall` runs `prisma generate` and `prisma` is a development dependency; and the first `prisma` command of a job downloads the schema engine, so the job that applies migrations to the PostgreSQL service container needs network access at that step. Neither has been run in CI.
+
 ## Release procedure (Planned)
 
 Never exercised: no environment exists to release to. Staging always goes first, with the same steps. Production additionally needs explicit human approval recorded in DECISIONS.md before step 3.
@@ -237,7 +242,7 @@ In the commands below `$baseUrl` is the origin of the environment being released
 | 1 | All checks pass on the commit to release | `pnpm verify`, then `pnpm test:integration` (**Planned**, T-023) and `pnpm test:e2e` (**Planned**, T-060). Each must exit 0. Once CI exists (T-070), the CI run on that commit replaces the local run |
 | 2 | No open Critical or High security finding | **Manual**: read the findings register in [SECURITY.md](SECURITY.md) |
 | 3 | Back up the target database and confirm the backup is restorable | **Planned**: the commands depend on the hosting provider, which is not chosen. See "Database backups". The pre-release backup is a database backup like any other: it is stored in the same place, readable by the same people, and deleted automatically after 30 days |
-| 4 | Apply migrations | `pnpm exec prisma migrate deploy` (**Planned**, lands with T-013; Prisma is not installed today and `package.json` has no script for this command yet, see below). Must exit 0 |
+| 4 | Apply migrations | `pnpm db:migrate:deploy`, which runs `prisma migrate deploy`, with `DATABASE_URL` set to the target database for that command. Must exit 0. **Planned** (T-071): the script exists since T-013, but where it runs in a deployment is not built; see "Build and migration image" below. On production this is a production migration and needs explicit human approval recorded in DECISIONS.md (CLAUDE.md, "Needs human approval") |
 | 5 | Deploy the new application version | **Planned**: depends on the hosting provider |
 | 6 | Health endpoint answers | `curl.exe --silent --show-error --output NUL --write-out "%{http_code}" "$baseUrl/api/health"` must print `200` (**Planned**: the endpoint lands with T-011) |
 | 7 | One read path works | `curl.exe --silent --show-error --output NUL --write-out "%{http_code}" "$baseUrl/"` must print `200` (**Planned**: the homepage lands with T-021) |
@@ -246,7 +251,29 @@ In the commands below `$baseUrl` is the origin of the environment being released
 | 10 | Scheduled work is running after the release | **Planned** (T-015 for the session purge and for what runs the jobs; T-032 for the payment timeout sweep): a start line and a first run line for each job appear in the logs, and the two check queries in "Scheduled work" return 0 |
 | 11 | Record the release in the release log below | **Manual** |
 
-About step 4: `pnpm db:migrate` runs `prisma migrate dev`, which is for local development only. It can reset a database and must never be pointed at staging or production. The command for a deployed database is `prisma migrate deploy`, which only applies migrations that are already committed. A `package.json` script for it has been requested from the orchestrator; when it exists, this section will name the script instead of the underlying command.
+About step 4: `pnpm db:migrate` runs `prisma migrate dev`, which is for local development only. It can reset a database and must never be pointed at staging or production. The command for a deployed database is `prisma migrate deploy`, which only applies migrations that are already committed; the `package.json` script for it is `db:migrate:deploy`. The Prisma CLI reads its configuration from `prisma7.config.ts` at the repository root (DATA_MODEL.md section 21.1): that file names the schema file and the migrations folder and takes the database address from `DATABASE_URL`. It loads a `.env` file only when one exists, and a variable already set in the environment wins. A deployed host has no `.env` file: `DATABASE_URL` comes from the host's secret configuration and is set for the command.
+
+### Build and migration image (Planned, T-070 and T-071; code-review finding CR-16)
+
+**NOT IMPLEMENTED. This is a design. No Dockerfile, image, or workflow exists, and no part of this section has been built or run.** It is built and verified in the Dockerfile task (T-071) and the CI task (T-070); until then every statement below about what an install or an image does is a requirement to check, not an observation.
+
+The finding: `postinstall` in `package.json` runs `prisma generate`, and `prisma` is a development dependency. A production-only install (`pnpm install --prod`) therefore fails: the script runs and the `prisma` command is not installed.
+
+Requirements that follow:
+
+1. **No production-only install is run, in the image build or anywhere in a deployment.** The image is built in a stage with the full install (`pnpm install --frozen-lockfile`), which runs `postinstall` and writes the generated client to `prisma/generated/prisma`. That stage runs `pnpm build`.
+2. **The runtime image ships the Next.js standalone output of that build**, not a second install. `next.config.ts` does not set the standalone output today; it is an orchestrator-owned file, and the setting is requested for T-071. T-071 checks that the standalone output contains everything the server needs at run time, the generated client and the database driver included.
+3. **`--ignore-scripts` alone is not a fix.** It makes the production-only install succeed, but `prisma generate` then never runs and the generated client is missing.
+4. **`prisma migrate deploy` does not run from the runtime image.** It needs four things that the standalone output does not carry: the `prisma` package, `prisma7.config.ts`, the schema and migration files under `prisma/`, and the schema engine. The install scripts of `prisma` and `@prisma/engines` are refused in `pnpm-workspace.yaml`, so the engine is not part of an install: the CLI downloads it the first time a command needs it, unless it was fetched in advance (DATA_MODEL.md section 21.1).
+5. **Migrations therefore run from the build image or from a dedicated migration image, with the schema engine already fetched** when the image is built. A migration step that downloads the engine at release time depends on network access from inside the deployment and on a download at the moment of a release; that is not accepted. How the engine is fetched in advance with the pinned Prisma version is established in T-071; no command for it is written here because none has been tried.
+6. The image that runs migrations holds development dependencies and the full source. It is run for the migration step only, receives `DATABASE_URL` and no other secret, and is not what serves requests.
+7. Production migrations still need explicit human approval recorded in DECISIONS.md (CLAUDE.md, "Needs human approval"). Nothing in this design applies a migration automatically on production; staging goes first with the same image.
+
+Checks for T-071 (**Planned**; none runnable today, because no Dockerfile exists):
+
+- The image builds from a clean checkout, and no step of the build runs a production-only install.
+- The migration image applies the committed migrations to an empty PostgreSQL database with network access switched off, and `prisma migrate status` then reports no pending migration.
+- The runtime image starts, and release procedure step 6 passes against it, with no `prisma` package and no development dependency inside it.
 
 ## First administrator (Planned, T-016)
 
@@ -333,7 +360,7 @@ For the production readiness checklist, **Manual** until T-015: read the logs of
 - Backups and restores follow "Database backups" below.
 - Destructive migrations require human approval and a written data plan.
 
-### Database backups (Planned; owner decisions OQ-50, D-026; D-028)
+### Database backups (Planned; owner decisions OQ-50, D-026; D-028; security requirements D-032 point 3)
 
 **NOT IMPLEMENTED** (staging runbook, T-071). No backup of any database exists, no backup or restore command has ever been run, and no hosting provider is chosen, so there is no place where a backup could be stored. Everything below is a requirement on the runbook. The exact commands are written here when the provider is chosen.
 
@@ -341,7 +368,13 @@ The owner's rules:
 
 - **Database backups are kept 30 days** (D-026, OQ-50).
 - A backup contains every table, session rows included, so it holds the IP address and browser details of sessions that existed when it was taken, for up to 30 days after those sessions are gone from the live database. **The owner accepted this** (D-028). The one-day limit of "Scheduled work" describes the live database only.
-- **A restore ends with the expired-session clean-up, before the application serves** (D-028).
+- **A restore ends with the expired-session clean-up, before the application serves** (D-028). The security requirement of D-032 point 3 contains this and goes further: every restore deletes every session ("Restore procedure").
+
+Security requirements, not owner choices and not recommendations (SECURITY.md SR-07 "Database backups"; D-032 point 3). A backup holds every password hash and every address, outside the database's access control:
+
+- **Every backup is stored encrypted.**
+- **Every backup is encrypted on the way to where it is stored.**
+- **A backup is not kept only on the database host.** It is stored apart from it.
 
 What the runbook must provide, whatever the provider (from SECURITY.md SR-07, "Database backups"):
 
@@ -352,62 +385,86 @@ What the runbook must provide, whatever the provider (from SECURITY.md SR-07, "D
 | A backup is readable, downloadable, and restorable only by the named people of "Log retention and access": individual accounts, no shared login, no application role. The list of accounts that can reach backups is shown together with the log access list | **NOT IMPLEMENTED** (T-071) |
 | The pre-release backup of release procedure step 3 is a database backup like any other: same storage, same people, deleted automatically after 30 days. It is not kept "just in case" beyond that | **NOT IMPLEMENTED** (T-071) |
 | Backups of logs are not database backups. They follow "Log retention and access" and its 90 days | **NOT IMPLEMENTED** (T-071) |
+| Encryption where the backup is stored. It covers every copy in the second row: a provider backup or snapshot, a `pg_dump` file, a copy moved to other storage, a copy on a person's machine. The runbook shows the setting or the command that encrypts each kind. The key or passphrase is a secret: it is kept in the host's secret configuration, reachable by the named people only, never beside the backup it opens, and never written into this document or a log | **NOT IMPLEMENTED** (T-071) |
+| Encryption on the way to the storage: a backup is never sent over an unencrypted connection, from the database to the tool that takes it or from there to where it is stored | **NOT IMPLEMENTED** (T-071) |
+| Storage apart from the database host: the loss of the database host or its disk does not take the backups with it. A dump file that exists only on the database host does not meet this | **NOT IMPLEMENTED** (T-071) |
 
-Plan made by devops, not an owner rule: one automatic backup a day, from the managed provider or a scheduled `pg_dump`, stored encrypted and separate from the database host. Whether 30 days is also the least a backup must be kept is not said by the decision (DEP-Q6). A backup service that costs money is a paid addition and needs owner approval first.
+Plan made by devops, not an owner rule: one automatic backup a day, from the managed provider or a scheduled `pg_dump`. Whether 30 days is also the least a backup must be kept is not said by the decision (DEP-Q6). A backup service that costs money is a paid addition and needs owner approval first; that includes a plan needed only to meet the encryption or storage requirement. A provider that cannot meet the three security requirements is not usable for backups without a second mechanism that does.
 
 Not covered by any decision: uploaded files live on a disk volume, not in the database, so a database backup does not contain them. Whether and how the upload volume is backed up is an open point for T-071.
 
 The local development and test databases hold no real person's data and are outside these rules. They are not backed up.
 
-### Restore procedure (Planned, T-071)
+### Restore procedure (Planned, T-071; security requirements SECURITY.md SR-07 "Restore", D-032 point 3)
 
 **NOT IMPLEMENTED** and never rehearsed. A restore overwrites a database: on production it is a destructive data operation and needs explicit human approval recorded in [DECISIONS.md](DECISIONS.md) before step 2. The same steps apply to staging, to a rehearsal, and to the rollback in "Rollback".
+
+Two security requirements bind every restore, into every database the application serves from, staging and a rehearsal with real data included (SR-07 "Restore"; D-032 point 3). They are not owner choices and not options of this procedure:
+
+- **Every session is deleted, before the application serves a request** (step 6).
+- **A restore does not lift a restriction.** Every user deactivation, store suspension, and product takedown or rejection that was in force just before the restore is in force again before the application serves (steps 3 and 7).
 
 | # | Step | Check |
 | --- | --- | --- |
 | 1 | One of the named people records which backup is restored, into which database, and why | **Manual**: an entry in the release log |
-| 2 | Stop the application so that it serves no request. It stays stopped until step 6 is done | **Planned** (T-071): depends on the hosting provider. Release procedure step 6 must fail at this point |
-| 3 | Restore the backup into the database | **Planned** (T-071): depends on the hosting provider |
-| 4 | Bring the schema to what the application version to be started expects | `pnpm exec prisma migrate status` reports no pending migration (**Planned**, T-013); if it reports any, `pnpm exec prisma migrate deploy` must exit 0 |
-| 5 | Delete any other copy made for this restore: a downloaded backup file, a scratch database | **Manual**. Such a copy is a backup copy under the 30-day rule and holds session data |
-| 6 | **Session clean-up. Always the last step, and the restore is not finished without it.** Run the purge of "Scheduled work" against the restored database. If the restore answers a security incident, delete every session instead (SECURITY.md SR-07) | **Planned** (T-015): the check below returns `0` |
+| 2 | Stop the application so that it serves no request. It stays stopped until step 8 is done | **Planned** (T-071): depends on the hosting provider. Release procedure step 6 must fail at this point |
+| 3 | **List the restrictions in force, before anything is overwritten.** See "Steps 3 and 7" below for the two sources | **Planned** (T-071). **Manual**: the release log entry of step 1 says which source was used and, when the source was the server log, which period could not be reconstructed |
+| 4 | Restore the backup into the database | **Planned** (T-071): depends on the hosting provider |
+| 5 | Bring the schema to what the application version to be started expects, with `DATABASE_URL` set to the restored database for each command | `pnpm exec prisma migrate status` reports no pending migration; if it reports any, `pnpm db:migrate:deploy` must exit 0. **Planned** (T-071): where these commands run in a deployment is in "Build and migration image". On production this is a production migration and is covered by the approval of this restore only if that approval says so |
+| 6 | **Delete every session. Not optional, at every restore, whatever its reason.** If T-015 finds that another table of the auth library holds something that works like a credential with a lifetime (`Verification`), it is emptied in the same step | **Planned** (T-015 validates the table name): the check below returns `0` |
+| 7 | **Re-apply the restrictions listed in step 3** to the restored database. Each one is written to the audit log like the admin action it repeats (SECURITY.md TM-25) | **Planned** (T-071): no script or query for it exists. Every id on the list that exists in the restored database carries the restricted status again |
+| 8 | Delete the list of step 3 and any other copy made for this restore: a downloaded backup file, a scratch database | **Manual**. A backup copy falls under the 30-day rule and holds session data; the list is deleted when the restore is finished (SR-07) |
 
-Step 6, the statement (the same purge the scheduled job runs; DATA_MODEL.md section 6.1):
+The application is started only after step 8, and only if the check of step 6, run once more immediately before the start, still returns `0`.
 
-```sql
-DELETE FROM "Session" WHERE "expiresAt" < now();
-```
-
-Step 6, when the restore answers a security incident (everyone signs in again):
+Step 6, the statement (everyone signs in again):
 
 ```sql
 DELETE FROM "Session";
 ```
 
-Step 6, the check; it must return `0`:
+Step 6, the check; it must return `0` before the application is started:
 
 ```sql
-SELECT count(*) FROM "Session" WHERE "expiresAt" < now();
+SELECT count(*) FROM "Session";
 ```
 
-All three are **Planned**: the table lands with T-013 and its names are validated in T-015. When T-015 provides the purge as a function, the runbook calls that function through a script instead of raw SQL; the script does not exist and its name is a request to the orchestrator.
+Both are **Planned** against a deployed database: the table exists since T-013 and its names are validated in T-015, and how a statement is run against a deployed database depends on the hosting provider (T-071). Neither has been run as part of a restore, because no restore has ever been done. If T-015 provides a function that ends every session, the runbook calls it through a script instead of raw SQL; no such script exists and its name is a request to the orchestrator.
 
-Why step 6 exists: a restored database contains the `Session` rows of the day the backup was taken. Those that have expired since then come back with their IP address and browser details, although the live database had already removed them.
+Why step 6 deletes every session and not only the expired ones (SR-07 "Restore" item 1):
 
-What the expired-session clean-up does not cover, stated so that nobody assumes it does:
+- A restored database contains the `Session` rows of the day the backup was taken. Those that have expired since then come back with their IP address and browser details, although the live database had already removed them. The owner required the expired-session clean-up for this (D-028); deleting every session contains it.
+- **A session that was ended after the backup was taken and has not expired yet is a valid session again in the restored database**: the user signed out, perhaps because the device was shared or lost, or the user was deactivated. Nothing in a restored row says whether it had been ended, and the expired-session clean-up does not touch it. Ending a session on the server is the owner's decision D-027; a restore must not undo it.
+- The cost is that every user signs in once after a restore. The owner is told this consequence; it is not a choice between two acceptable options (DEP-Q7, closed). Starting the application on a restored database with its old sessions would have to be recorded in SECURITY.md as an accepted risk with the owner as approver. This procedure has no such path.
 
-- **A session that ended by sign-out after the backup was taken, and has not expired yet, is valid again after the restore.** The same holds for the sessions of a user who was deactivated after the backup: the restore also brings the user back as active. D-027 says sessions end on sign-out and on deactivation; no decision says what a restore does to them. Deleting every session at every restore would close this. Devops recommends it, and it is not decided (DEP-Q7).
-- Everything written since the backup is lost, including orders, deactivations, store suspensions, and product takedowns. **Manual**: the admin repeats the admin actions taken since the backup. The restored database has no record of them; the server logs record admin actions (SR-04) and can be read only by the named people.
+#### Steps 3 and 7: restrictions (SR-07 "Restore" item 2)
+
+Deleting sessions does not undo the other half: a user deactivated after the backup is active again in the restored database and can sign in, a store suspended after it is approved again, and a product taken down or rejected after it is on sale again. These are put back **before the application serves**, not repeated by an admin afterwards while the application is already open.
+
+Where the list of step 3 comes from. SECURITY.md SR-07 names two sources and no other:
+
+| Case | Source | Conditions |
+| --- | --- | --- |
+| The database that is being replaced can still be read (a rollback) | That database. The ids under each restriction are listed from it before it is overwritten | The list holds ids and statuses only. It is reachable only by the named people of "Log retention and access". It is deleted when the restore is finished (step 8) |
+| It cannot be read (a loss) | The admin-action lines of the server log (SECURITY.md SR-04). They are the only source | They may not reach back far enough, because logs have no minimum retention ("How long logs are kept"; DEP-Q9). The record of the restore then says which period could not be reconstructed, **and the shop admin is told before the application serves** |
+
+What is not written anywhere yet, and is not invented here (DEP-Q12): the queries that produce the list from the database being replaced; the form and the place of the list; the mechanism that re-applies a restriction while the application is stopped, and which actor its audit log entry names; and how the admin-action log lines are turned into a list. SR-07 leaves "how" to T-071. The table and column names are those of DATA_MODEL.md; no statement is given here because none has been written or tried.
+
+What steps 3 and 7 do not give back:
+
+- Everything else written since the backup is lost, including orders and the audit log entries written since the backup. The re-applied restrictions get new audit log entries (step 7); the original entries are gone.
+- A restriction that was lifted after the backup (a user reactivated, a store's suspension ended) is in force again in the restored database, because the backup holds it. SR-07 does not cover this case. **Manual**: the shop admin lifts it again.
+- An id on the list that does not exist in the restored database (an account or product created after the backup) is skipped: there is nothing to restrict.
 - Orders that were awaiting payment in the backup are older than the timeout after a restore. The first run of the payment timeout sweep fails them and returns their items to the carts.
 
 After the restore: start the application, then run release procedure steps 6 to 11.
 
-A restore is rehearsed on staging, with a staging backup, before the first production release. A production backup restored anywhere else brings real people's data with it, and that place then falls under the same rules for access, the 30 days, and the session clean-up.
+A restore is rehearsed on staging, with a staging backup, before the first production release. The rehearsal includes steps 3, 6, and 7. A production backup restored anywhere else brings real people's data with it, and that place then falls under the same rules for access, encryption, the 30 days, the deletion of every session, and the restrictions.
 
 ## Rollback
 
 - Application: redeploy the previous image or commit.
-- Database: migrations are forward-only. There is no command that undoes one. If a migration must be undone, apply a corrective migration, or restore the pre-release backup by the "Restore procedure" (it ends with the session clean-up) and accept the loss of data written since. This is why step 3 of the release procedure is mandatory.
+- Database: migrations are forward-only. There is no command that undoes one. If a migration must be undone, apply a corrective migration, or restore the pre-release backup by the "Restore procedure" (it deletes every session and re-applies the restrictions in force before the application starts) and accept the loss of data written since. In a rollback the database being replaced can still be read, so the restrictions are listed from it (restore step 3). This is why step 3 of the release procedure is mandatory.
 - The pre-release backup can be used for a rollback only while it exists: it is deleted automatically after 30 days ("Database backups").
 - Prefer backward-compatible (expand then contract) migrations so the previous application version still runs against the new schema.
 
@@ -480,10 +537,11 @@ The procedure, following SR-06 item 8:
 | Place the hold | A person who may read the logs selects the relevant lines and sets them aside. Who may decide that a hold is placed is not said by the owner; until someone is named it is the system administrators (SR-06; DEP-Q3) | **Manual** |
 | Record it at the same time, not afterwards | The record names the investigation, the lines or the selection that produced them (time range and filter), the reason, who set them aside, and the date. The record contains no log line and no IP address | **Manual** |
 | Keep the lines | Under the same access rule as the logs (the named people only) and the same content rule (SR-04). Where the lines and the record are kept depends on the hosting provider and is settled in T-071 with the security agent (DEP-Q4); no place exists today | **Manual** |
+| Review the hold | Every open hold is looked at again at a fixed interval. Each look is added to the record with its date, who looked, and whether the investigation is still open. The interval is never longer than 90 days; a hold with no recorded look for more than 90 days is treated as a breach of SR-06 (item 8). The interval within that ceiling is the owner's (DEP-Q5) | **Manual** |
 | Normal deletion goes on | The hold stops nothing else: every line that was not set aside is still deleted at 90 days | **Planned** (T-071): the retention setting is shown unchanged |
 | Close the investigation | The lines that were set aside are deleted in every copy when the investigation is closed, and the record says when. The record itself stays | **Manual** |
 
-Not said by the owner: how long an investigation may stay open, and whether an open hold is looked at again at fixed intervals (DEP-Q5). Until that is answered there is no upper limit on a hold other than the closing of the investigation.
+Not said by the owner: how long an investigation may stay open, and how often an open hold is looked at again (DEP-Q5). The security minimum is set (SECURITY.md SR-06 item 8 and "Scheduled work: security minimums"): a dated review of every open hold, added to the record, at intervals of 90 days at most. 90 days is the period the hold is an exception to (OQ-48: a maximum for every copy), so it is the ceiling whatever the owner answers and until there is an answer. The hold itself still has no upper limit other than the closing of the investigation; the review is what shows that the lines are still evidence in an open investigation.
 
 #### Checks
 
@@ -492,7 +550,7 @@ For the production readiness checklist, all **Manual** until a provider is chose
 - Show the configured retention period of every place in the first row of the table under "How long logs are kept", and that none is above 90 days.
 - List the accounts that can read logs, held lines, and database backups, and compare the list with the access list.
 - Show that no shared login exists.
-- Show the hold records, or state that no hold has been placed.
+- Show the hold records, or state that no hold has been placed. For every open hold, show that the last recorded review is not older than 90 days.
 
 ## Production readiness checklist
 
@@ -502,13 +560,15 @@ Nothing below is done. Each item states how it is checked.
 - [ ] No open Critical or High security finding. **Manual**: findings register in SECURITY.md
 - [ ] Environment variables set and validated, values not exposed. Check: the application starts (**Planned**, T-011 makes startup fail on an invalid variable); **Manual**: no secret is visible in logs or the hosting console's public settings
 - [ ] `AUTH_SECRET` unique to the environment. **Manual**
-- [ ] Database backup taken and restore rehearsed on staging, ending with the session clean-up ("Restore procedure"). **Planned** (T-071): commands depend on the hosting provider
+- [ ] Database backup taken and restore rehearsed on staging, with every session deleted and the restrictions re-applied before the application starts ("Restore procedure" steps 3, 6, and 7; D-032 point 3). **Planned** (T-071): commands depend on the hosting provider
 - [ ] Backups deleted automatically after 30 days in every copy, and reachable only by the named people (OQ-50). **Manual** ("Database backups")
-- [ ] Migrations applied on staging first. Check: `pnpm exec prisma migrate status` against staging reports no pending migration (**Planned**, T-013)
+- [ ] Backups encrypted where they are stored and on the way there, and stored apart from the database host (SR-07; D-032 point 3). **Manual** ("Database backups")
+- [ ] The runtime image is built without a production-only install and holds no `prisma` package; migrations run from the build image or a migration image with the schema engine already fetched (CR-16). **Planned** (T-071): the checks in "Build and migration image"
+- [ ] Migrations applied on staging first. Check: `pnpm exec prisma migrate status` with `DATABASE_URL` set to the staging database reports no pending migration (**Planned**, T-071: no staging database exists)
 - [ ] Health check and logs verified on staging. Check: release procedure step 6; **Manual** for logs
 - [ ] No copy of the logs kept longer than 90 days, the platform's router or proxy log and log backups included, with automatic deletion (OQ-21, OQ-48). **Manual** ("Log retention and access", "Checks")
 - [ ] Log access limited to named individual accounts of the people who operate the servers; no shared login; access list compared with the real accounts (OQ-47). **Manual**
-- [ ] Investigation hold procedure has a place for the held lines and for the record (OQ-48). **Manual**
+- [ ] Investigation hold procedure has a place for the held lines and for the record, and a review interval of 90 days at most (OQ-48; SR-06 item 8). **Manual**
 - [ ] Session purge and payment timeout sweep run with no visitor present (OQ-49, D-028). Check: the two check queries in "Scheduled work" return 0 (**Planned**, T-015 and T-032); **Manual**: run lines of both jobs on a staging day without visitors
 - [ ] The open questions below that bind a production release are answered. **Manual**
 - [ ] Reverse proxy variables set and the hop count confirmed on staging (SR-01). **Manual**
@@ -532,13 +592,15 @@ Points the decisions do not cover. Nothing in this document treats a recommendat
 | DEP-Q2 | How often is the list of people with access checked against the accounts that really exist? | owner | Before every production release and at least every 90 days | "Who may read server logs" |
 | DEP-Q3 | Who may decide that an investigation hold is placed, and that an investigation is closed? SECURITY.md SR-06 uses the system administrators until someone is named | owner | The system administrators, and the owner is told each time | "Investigation hold" |
 | DEP-Q4 | Where are held log lines and the hold record kept? | devops and security, T-071 | Depends on the hosting provider; the record is kept apart from the lines and contains none of them | "Investigation hold" |
-| DEP-Q5 | May a hold stay open without limit while the investigation is open, or is it looked at again at fixed intervals? | owner | Each open hold is reviewed every 30 days and the review is added to the record | "Investigation hold" |
+| DEP-Q5 | How often is an open hold reviewed? The ceiling is no longer open: security's minimum is a dated review of every open hold, added to the record, at intervals of 90 days at most, and a hold with no recorded review for more than 90 days is a breach (SECURITY.md SR-06 item 8, "Scheduled work: security minimums"; 90 days is the maximum of OQ-48, which the hold is an exception to). The question is only how much shorter than 90 days the interval is | owner | Each open hold is reviewed every 30 days and the review is added to the record (the security agent agrees). Until the owner answers, 90 days at most applies | "Investigation hold" |
 | DEP-Q6 | Is 30 days only the longest a database backup may be kept, or also the least (a backup must still exist 30 days back)? OQ-50 says "kept 30 days" | owner | Both: one backup a day, each kept 30 days and then deleted. If the provider's plan that does this costs money, that is a separate approval | "Database backups" |
-| DEP-Q7 | After a restore, are all sessions deleted (everyone signs in again), or only the expired ones? D-028 requires the expired-session clean-up; SR-07 adds all sessions after a security incident; nothing covers sessions that were ended after the backup and come back valid | owner | Delete all sessions at every restore | "Restore procedure" |
+| DEP-Q7 | **CLOSED** (D-032 point 3; SECURITY.md SR-07 "Restore"). Was: after a restore, are all sessions deleted, or only the expired ones? Ruling: every restore deletes every session before the application serves, so everyone signs in once after a restore. It is a security requirement, not an owner choice; it contains the expired-session clean-up of D-028. The same ruling requires restrictions to be re-applied before the application serves | closed; the owner is told the consequence | None: ruled, not recommended | "Restore procedure" |
 | DEP-Q8 | How soon after the 15 minutes must an unpaid order actually be failed? D-028 gives the 15 minutes, not the delay allowed on top | owner, then T-032 | The sweep runs every minute; an order is failed within about 16 minutes; the check query allows 20 | "Scheduled work" |
 | DEP-Q9 | Is there a least time that logs must be kept, so that an incident can still be investigated? OQ-48 sets only the maximum | owner | Aim for at least 30 days where the chosen host offers it without extra cost; anything paid is a separate approval | "How long logs are kept" |
 | DEP-Q10 | Which mechanism runs the two jobs? | auth with devops, T-015 (D-029) | Candidate A, the in-process timer, if the host keeps the process running with no traffic | "Scheduled work" |
 | DEP-Q11 | Is the upload volume backed up, and under which retention? | devops, T-071; owner if it costs money | Not formed yet | "Database backups" |
+| DEP-Q12 | How are restrictions listed and re-applied at a restore? SR-07 "Restore" item 2 names the two sources (the database being replaced when it can be read, otherwise the admin-action lines of the server log) and leaves the rest to T-071: the queries that produce the list, its form and place, the mechanism that re-applies a restriction while the application is stopped, which actor the audit log entry names, and how log lines become a list | devops and security, T-071; backend-api if a service function or script is needed | Not formed yet. A script that calls the same service functions as the admin actions would keep the audit log entry in one place; no such function exists | "Restore procedure" |
+| DEP-Q13 | How is the schema engine fetched in advance into the image that runs migrations, and is that image the build image or a dedicated one (CR-16)? | devops, T-071 and T-070 | A dedicated migration image, so that the build image is not kept and run in a deployment; to be tried in T-071 | "Build and migration image" |
 
 ## Release log
 
