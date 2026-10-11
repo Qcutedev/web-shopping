@@ -35,6 +35,8 @@ Decisions marked `PROPOSED` are not yet validated against the installed stack; e
 | D-025 | 2026-10-11 | Owner answers to open questions OQ-01 to OQ-19 and OQ-21 to OQ-24 | ACCEPTED |
 | D-026 | 2026-10-11 | Owner answers to open questions OQ-25 to OQ-50 | ACCEPTED |
 | D-027 | 2026-10-11 | Sessions end on logout and user deactivation, not on store suspension (supersedes part of D-004) | ACCEPTED |
+| D-028 | 2026-10-11 | Owner answers to the follow-up questions raised by D-026 (REQUIREMENTS Q31 to Q37 and others) | ACCEPTED |
+| D-029 | 2026-10-11 | A `GET` never writes; checkout stores a lowered quantity and stops; `storeId` in a seller body is rejected | ACCEPTED |
 
 ## Details
 
@@ -184,6 +186,37 @@ On 2026-10-11 (third session) the owner answered OQ-25 to OQ-50, choosing the re
 
 ### D-027 When sessions are revoked
 Supersedes one phrase of D-004 ("server-side revocation on logout, deactivation, and suspension"); the rest of D-004 stands. Sessions are deleted on logout and when a user is deactivated. Suspending a store does **not** end its owner's sessions: BR-14 requires a suspended store's seller to stay able to log in and fulfil existing orders. The store status is read from the database on every request instead. Detail: DATA_MODEL.md section 6.1.
+
+### D-028 Owner answers to the follow-up questions raised by D-026
+On 2026-10-11 (third session) the owner answered the questions the agents raised while writing D-026 into the documents (REQUIREMENTS Q31 to Q37, DATA_MODEL DM-Q8 to DM-Q12, and the open points of API_CONTRACTS section 8.1), choosing the recommended option for each. The answers are rules. Each owner writes them into its document.
+
+| Point | Answer |
+| --- | --- |
+| What counts as a "correction" that resubmits a rejected or taken-down product (Q31, DM-Q8) | A change to title, description, category, the set of pictures, or the **price** resubmits it. A change only to stock, SKU, or picture order does not. |
+| Is a published product still awaiting approval "on sale" for the low-stock and sold-out figures (DM-Q10) | No. It is in neither figure. |
+| Is an approved, published product hidden by a suspended store or a switched-off category counted in those figures (Q32, DM-Q11) | Yes, it is still counted. |
+| Items of a store's part that was cancelled before the payment failed (Q33, DM-Q9) | They do not return to the cart. Only the parts not already cancelled return. BR-20 "every item" is narrowed accordingly. |
+| Telling the customer later that a returned quantity was cut, after a timeout failure (Q34, DM-Q12) | Not required. The cart showing the real quantity is enough. |
+| A cart line whose product is hidden (taken down, store suspended, category off) (Q36) | Treated like a sold-out line: it stays, is marked as not buyable now, and is left out of the totals. |
+| Bootstrap script given an email that already has an account (Q37) | If the account is already an admin, the script finishes without change. If it is a customer or seller, the script refuses; it never promotes an existing account. |
+| What a seller with a suspended store may do besides handling orders | View only: the seller may read their own products, store, and summary. Creating or editing products, adjusting stock, publishing, unpublishing, and archiving are refused until the store is reinstated. |
+| Admin dashboard summary figures | All four groups: items waiting for review (pending seller applications, pending products); user count and store count by status; order count; total sales. Order count and sales follow D-026 OQ-34, over all time. |
+| May a seller change the store's contact phone | Yes, without approval. |
+| Payment timeout | An order still awaiting payment after 15 minutes is failed. |
+| Which date the sales report's range uses | The date the order was paid. |
+| Thai texts (Q35) | Order mark: "ชำระเงินไม่สำเร็จ". Adding a sold-out product: "สินค้าหมด ไม่สามารถเพิ่มลงตะกร้าได้". Returned quantity cut: "ปรับจำนวนในตะกร้าเป็น {quantity} ชิ้น". |
+| May an admin approve or reject a product the seller has not published, by opening it directly | No. Moderation decisions apply only to published products awaiting approval (takedown of a live product is unchanged). |
+| Order of the approval queue | Oldest first by the time the product was submitted for approval: publishing a product sets that time, so a long-standing draft does not jump the queue. |
+| Session IP address and browser details inside database backups | Accepted: they remain in a backup until that backup is deleted (30 days, D-026 OQ-50). It is stated in the privacy notes, and a restore ends with the expired-session clean-up before the application serves. |
+
+### D-029 Technical rulings on three cross-document disagreements
+Made by the orchestrator on 2026-10-11; technical, following the security agent's position, and consistent with the owner's answers.
+
+1. **A `GET` never changes state, with no exception (SECURITY TM-16).** The cart read reports a lowered quantity (derived as stored quantity above stock, stock at least 1) but does not store it. TEST_STRATEGY's "the cart read stores 3" is changed by qa.
+2. **Where the lowered quantity is stored.** It is stored by the next mutation. When checkout finds a quantity above stock (stock at least 1), the checkout request itself stores the lowered quantity in the cart and is refused with the new quantities and total; the order is not created. The customer confirms by submitting checkout again (D-026 OQ-30, REQUIREMENTS BR-22 case (b)). API_CONTRACTS section 5.5.3 ("checkout does not lower anything") is changed by backend-api; the transaction shape (savepoint or validate-first) is validated in T-013 and T-032.
+3. **`storeId` in a seller request body is rejected as an unknown key** (strict schemas, SECURITY), not ignored. TEST_STRATEGY K5 is changed by qa.
+
+Also confirmed for T-013: the two `OrderItem` columns that record a cart return (`cartQuantityBeforeReturn`, `cartQuantityAfterReturn`) stay in the model; they serve the idempotent replay of a failed checkout even though no later notice is required. The session clean-up needs a scheduled run; choosing it is part of T-015 with devops and supersedes "no scheduled jobs" in the known limitations when it lands.
 
 ## Pending decisions for the user
 
