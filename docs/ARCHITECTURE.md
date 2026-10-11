@@ -31,7 +31,7 @@ graph TD
 | Presentation | `src/app/(storefront)`, `src/app/seller`, `src/app/admin`, `src/components` | guards, services (read functions), schemas, UI | Rendering, forms, states |
 | API | `src/app/api/v1` | guards, services, schemas | Parse, authenticate, delegate, map errors |
 | Domain | `src/modules/<domain>` | repositories, other modules' public exports, providers, `src/server/auth/actor.ts` (D-022) | Business rules, authorization, transactions |
-| Auth | `src/server/auth` | db (pending D-021) | Sessions, actor resolution, guards; `actor.ts` is pure and imports nothing below it |
+| Auth | `src/server/auth` | db (D-021) | Sessions, actor resolution, guards; `actor.ts` is pure and imports nothing below it |
 | Data | `src/server/db`, `prisma` | Prisma | Client, transaction helper, schema |
 | Platform | `src/server` (logger, env, rate limit, errors) | none of the above | Cross-cutting utilities |
 
@@ -71,11 +71,16 @@ docs/
 
 ## Request flow for a mutation
 
-1. Route handler checks the `Origin` header and applies the rate limiter where configured.
-2. Body, query, and params are parsed with the module's Zod schema.
-3. `requireActor` resolves the session to an `Actor` with role and store loaded from the database.
-4. The service is called with `(actor, input)`. It checks role and ownership, opens a transaction when needed, and returns a result or throws a typed domain error.
-5. The handler maps the result to the response envelope and logs one structured line with the request id.
+The order of refusals is fixed by D-031 point 4 as amended by D-032 point 1; the full ten steps and their status codes are in [API_CONTRACTS.md](API_CONTRACTS.md) section 1.8 and are not repeated here. In outline:
+
+1. The route handler checks the `Origin` header and the `Content-Type` header. Neither needs the body or the session.
+2. `requireActor` resolves the session to an `Actor` with role and store loaded from the database, and the access level of the endpoint is judged: the role, then the store status on an endpoint open only to an approved store.
+3. The rate limiter is applied where configured.
+4. Only then is the body read, within its size limit, and the body, query, and params are parsed with the module's Zod schema. Validation makes no database query.
+5. The service is called with `(actor, input)`. It checks role, store status, and ownership again (the check in step 2 is a refusal made sooner, never the control), opens a transaction when needed, and returns a result or throws a typed domain error.
+6. The handler maps the result to the response envelope and logs one structured line with the request id.
+
+Not implemented yet: the handler pattern in `src/server/http.ts` still reads the body before it resolves the caller (CR-09), and `src/server/auth` does not exist (T-015).
 
 ## Authorization model
 
