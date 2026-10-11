@@ -54,6 +54,10 @@
      --border stay for cards and dividers. */
   --control-border: var(--border-contrast);
 
+  /* Border of form controls and outline buttons while the pointer is over them. Decided by the
+     owner (D-026, OQ-45): the main text (ink) colour, not the accent. */
+  --control-border-hover: var(--ink);
+
   /* Fill of the selected page, tab, and navigation item. Decided by the owner (D-025, OQ-03):
      dark ink, as the selected chip. */
   --selected: var(--ink);
@@ -110,6 +114,7 @@
   --color-border-strong: var(--border-strong);
   --color-border-contrast: var(--border-contrast);
   --color-control-border: var(--control-border);
+  --color-control-border-hover: var(--control-border-hover);
 
   --color-foreground: var(--text);
   --color-foreground-secondary: var(--text-secondary);

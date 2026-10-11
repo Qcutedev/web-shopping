@@ -46,7 +46,7 @@ export function Checkbox({
             aria-invalid={hasError ? true : undefined}
             className={cn(
               "peer border-control-border bg-surface col-start-1 row-start-1 size-5 cursor-pointer appearance-none rounded-[6px] border",
-              "focus-ring hover:border-border-contrast transition-colors duration-150",
+              "focus-ring hover:border-control-border-hover transition-colors duration-150",
               "checked:border-primary checked:bg-primary checked:hover:border-primary-hover checked:hover:bg-primary-hover",
               "disabled:border-border disabled:bg-surface-muted disabled:checked:border-foreground-disabled disabled:checked:bg-foreground-disabled disabled:cursor-not-allowed",
               "aria-invalid:border-danger",

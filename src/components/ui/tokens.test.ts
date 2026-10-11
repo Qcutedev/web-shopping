@@ -119,6 +119,10 @@ const BOUNDARY_PAIRS: Array<[string, string, number]> = [
   ["--border-contrast", "--surface-muted", 3.32],
   ["--control-border", "--background", 3.63],
   ["--control-border", "--surface-muted", 3.32],
+  // Hover border of form controls and outline buttons (D-026, OQ-45). The hovered outline button
+  // has the muted fill, so both backgrounds are checked.
+  ["--control-border-hover", "--background", 17.99],
+  ["--control-border-hover", "--surface-muted", 16.45],
   ["--danger", "--background", 6.57],
   ["--info", "--info-soft", 6.16],
   ["--success", "--success-soft", 4.66],
@@ -169,5 +173,20 @@ describe("design tokens", () => {
     expect(tokens.get("--on-selected")).toBe("var(--on-ink)");
     expect(hex("--selected")).toBe("#14171a");
     expect(hex("--selected")).not.toBe(hex("--primary"));
+  });
+
+  it("maps the hover border of controls to ink, not the accent (D-026, OQ-45)", () => {
+    expect(tokens.get("--control-border-hover")).toBe("var(--ink)");
+    expect(hex("--control-border-hover")).toBe(hex("--text"));
+    expect(hex("--control-border-hover")).not.toBe(hex("--primary"));
+    // Darker than the border at rest on both backgrounds a control sits on.
+    expect(contrast("--control-border-hover", "--background")).toBeGreaterThan(
+      contrast("--control-border", "--background"),
+    );
+    expect(contrast("--control-border-hover", "--surface-muted")).toBeGreaterThan(
+      contrast("--control-border", "--surface-muted"),
+    );
+    // The class name the primitives use exists in the Tailwind theme.
+    expect(css).toContain("--color-control-border-hover: var(--control-border-hover);");
   });
 });

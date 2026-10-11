@@ -63,4 +63,14 @@ describe("Button", () => {
       expect(classes).toContain("h-11");
     }
   });
+
+  it("gives only the outline (secondary) variant the ink hover border (D-026, OQ-45)", () => {
+    const hoverBorder = "hover:border-control-border-hover";
+    expect(buttonVariants({ variant: "secondary" }).split(" ")).toContain(hoverBorder);
+    for (const variant of ["primary", "dark", "ghost", "danger"] as const) {
+      expect(buttonVariants({ variant }).split(" ")).not.toContain(hoverBorder);
+    }
+    // No hover border in the accent colour.
+    expect(buttonVariants({ variant: "secondary" })).not.toContain("hover:border-primary");
+  });
 });

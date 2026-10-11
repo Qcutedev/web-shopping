@@ -4,12 +4,13 @@ import { ErrorIcon } from "./icons";
 
 /**
  * Class names shared by Input, Textarea, and Select.
- * Border colour comes from --control-border (see globals.css).
+ * Border colour comes from --control-border, and from --control-border-hover under the pointer
+ * (see globals.css). The disabled and error borders are emitted later and win over the hover one.
  */
 export const controlClassName =
   "block w-full min-h-11 rounded-sm border border-control-border bg-surface px-3.5 type-body text-foreground " +
   "placeholder:text-foreground-muted transition-colors duration-150 focus-ring " +
-  "hover:border-border-contrast " +
+  "hover:border-control-border-hover " +
   "disabled:cursor-not-allowed disabled:border-border disabled:bg-surface-muted disabled:text-foreground-disabled " +
   "aria-invalid:border-danger";
 

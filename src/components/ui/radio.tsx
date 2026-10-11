@@ -29,7 +29,7 @@ export function Radio({ label, wrapperClassName, className, id, ...props }: Radi
           id={inputId}
           className={cn(
             "peer border-control-border bg-surface col-start-1 row-start-1 size-5 cursor-pointer appearance-none rounded-full border",
-            "focus-ring hover:border-border-contrast transition-colors duration-150",
+            "focus-ring hover:border-control-border-hover transition-colors duration-150",
             "checked:border-primary checked:hover:border-primary-hover",
             "disabled:border-border disabled:bg-surface-muted disabled:cursor-not-allowed",
             "forced-colors:appearance-auto",

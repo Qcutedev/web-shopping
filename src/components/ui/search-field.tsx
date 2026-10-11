@@ -45,7 +45,7 @@ export function SearchField({
       method={method}
       className={cn(
         "border-control-border bg-surface flex h-13 w-full items-center gap-1 rounded-full border pr-[3px] pl-5",
-        "focus-ring-within hover:border-border-contrast transition-colors duration-150",
+        "focus-ring-within hover:border-control-border-hover transition-colors duration-150",
         className,
       )}
       {...props}

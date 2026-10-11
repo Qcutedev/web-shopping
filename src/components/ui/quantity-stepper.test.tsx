@@ -125,6 +125,35 @@ describe("clampQuantity", () => {
   });
 });
 
+describe("QuantityStepper hover border (D-026, OQ-45)", () => {
+  const hoverBorder = "hover:border-control-border-hover";
+  const wrapperClasses = () => (input().parentElement?.className ?? "").split(" ");
+
+  it("has the ink hover border when enabled and valid", () => {
+    render(<QuantityStepper {...labels} value={2} max={5} onChange={() => {}} />);
+    expect(wrapperClasses()).toContain(hoverBorder);
+  });
+
+  it("keeps the error border when invalid and the disabled border when disabled or unavailable", () => {
+    const { unmount } = render(
+      <QuantityStepper {...labels} value={2} max={5} invalid onChange={() => {}} />,
+    );
+    expect(wrapperClasses()).not.toContain(hoverBorder);
+    expect(wrapperClasses()).toContain("border-danger");
+    unmount();
+
+    const disabled = render(
+      <QuantityStepper {...labels} value={2} max={5} disabled onChange={() => {}} />,
+    );
+    expect(wrapperClasses()).not.toContain(hoverBorder);
+    expect(wrapperClasses()).toContain("border-border");
+    disabled.unmount();
+
+    render(<QuantityStepper {...labels} value={2} max={0} onChange={() => {}} />);
+    expect(wrapperClasses()).not.toContain(hoverBorder);
+  });
+});
+
 describe("QuantityStepper", () => {
   it("gives both buttons and the input Thai accessible names", () => {
     render(<Harness initial={2} max={5} />);

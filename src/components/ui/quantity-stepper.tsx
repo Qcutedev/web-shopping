@@ -237,7 +237,9 @@ export function QuantityStepper({
       role={groupLabel ? "group" : undefined}
       aria-label={groupLabel || undefined}
       className={cn(
-        "border-control-border bg-surface inline-flex h-11 items-stretch rounded-sm border",
+        "border-control-border bg-surface inline-flex h-11 items-stretch rounded-sm border transition-colors duration-150",
+        // Hover border in ink (D-026, OQ-45). The error and disabled borders stay as they are.
+        !invalid && !isDisabled && "hover:border-control-border-hover",
         invalid && "border-danger",
         isDisabled && "border-border",
         className,

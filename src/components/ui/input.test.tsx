@@ -2,6 +2,8 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { Checkbox } from "./checkbox";
 import { Input, InputField } from "./input";
+import { Radio } from "./radio";
+import { SearchField } from "./search-field";
 import { SelectField } from "./select";
 import { TextareaField } from "./textarea";
 
@@ -94,6 +96,45 @@ describe("TextareaField and SelectField", () => {
     expect(select.tagName).toBe("SELECT");
     expect(select.getAttribute("aria-invalid")).toBe("true");
     expect(describedByText(select)).toBe("กรุณาเลือกหมวดหมู่");
+  });
+});
+
+describe("hover border of form controls (D-026, OQ-45)", () => {
+  it("is the ink hover token on the input, textarea, select, checkbox, radio, and search field", () => {
+    render(
+      <>
+        <InputField label="อีเมล" />
+        <TextareaField label="รายละเอียด" />
+        <SelectField label="หมวดหมู่">
+          <option value="">-</option>
+        </SelectField>
+        <Checkbox label="ยอมรับเงื่อนไข" />
+        <Radio label="จัดส่งมาตรฐาน" name="shipping" />
+        <SearchField name="q" label="ค้นหาสินค้า" submitLabel="ค้นหา" />
+      </>,
+    );
+    const controls = [
+      screen.getByLabelText("อีเมล"),
+      screen.getByLabelText("รายละเอียด"),
+      screen.getByLabelText("หมวดหมู่"),
+      screen.getByRole("checkbox", { name: "ยอมรับเงื่อนไข" }),
+      screen.getByRole("radio", { name: "จัดส่งมาตรฐาน" }),
+      screen.getByRole("search"),
+    ];
+    for (const control of controls) {
+      const classes = control.className.split(" ");
+      expect(classes).toContain("border-control-border");
+      expect(classes).toContain("hover:border-control-border-hover");
+      // The border at rest is no longer repeated as the hover border.
+      expect(classes).not.toContain("hover:border-border-contrast");
+    }
+  });
+
+  it("keeps the error border class on an invalid control", () => {
+    render(<InputField label="อีเมล" errorText="กรุณากรอกอีเมลให้ถูกต้อง" />);
+    expect(screen.getByLabelText("อีเมล").className.split(" ")).toContain(
+      "aria-invalid:border-danger",
+    );
   });
 });
 

@@ -22,7 +22,7 @@ const VARIANTS: Record<ButtonVariant, string> = {
   primary: "bg-primary text-on-primary hover:bg-primary-hover active:bg-primary-active",
   dark: "bg-ink text-on-ink hover:bg-ink-hover active:bg-ink-active",
   secondary:
-    "border-control-border bg-surface text-foreground hover:bg-surface-muted active:bg-border",
+    "border-control-border bg-surface text-foreground hover:border-control-border-hover hover:bg-surface-muted active:bg-border",
   ghost: "bg-transparent text-foreground hover:bg-surface-muted active:bg-border",
   danger: "bg-danger text-on-danger hover:bg-danger-hover active:bg-danger-active",
 };
