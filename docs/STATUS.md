@@ -18,12 +18,19 @@ Before starting, check the machine: Docker Desktop running and `docker compose u
 
 Done this session (each committed): lint allow-list for rule 7 (55 probes); D-025 answers written into REQUIREMENTS.md (BR-17 to BR-30), DESIGN_SYSTEM.md with tokens, Badge, and QuantityStepper, SECURITY.md (SR-06, SR-07), DATA_MODEL.md (rewritten, 20 sections), TEST_STRATEGY.md, DEPLOYMENT.md; database image pinned by digest; SEC-019 closed, SEC-020 registered.
 
+Third session (2026-10-11), progress so far. The owner asked for at most two or three agents at a time.
+
+- Step 1 done: the owner answered OQ-25 to OQ-50 (D-026, recommended option each time). Not yet committed.
+- Step 2 in progress: backend-api fixed `readBytesUpTo` (uncommitted; its own `pnpm verify`: exit 0, 1101 passed, 0 expected failures, not yet re-run by the orchestrator); the security re-check of SEC-020 and SEC-008 is running.
+- Step 3 in progress: backend-api is writing API_CONTRACTS.md, now against D-026.
+- D-026 still has to be written into the owning documents: REQUIREMENTS.md (product-requirements, running), then DATA_MODEL.md (database; OQ-35 changes its picture-reorder rule, also OQ-33, OQ-38, OQ-40, OQ-49), TEST_STRATEGY.md (qa; R3 to R9), SECURITY.md and DEPLOYMENT.md (OQ-47 to OQ-50), DESIGN_SYSTEM.md and the primitives (OQ-45, OQ-46).
+
 Next steps, in order:
 
-1. Ask the owner the second batch of questions (OQ-25 to OQ-50 below), in plain Thai with a recommendation each. None blocks T-013.
+1. ~~Ask the owner the second batch of questions~~ Done, D-026.
 2. backend-api: fix `src/server/http.ts` `readBytesUpTo` for SEC-020 (remedy in SECURITY.md; then turn the 5 `it.fails` in `tests/security/sec019-body-limit-recheck.test.ts` into `it` without touching their bodies), then security re-checks. Must land before the first handler that reads a body.
-3. backend-api: fix API_CONTRACTS.md. The agent was launched and died on the usage limit before writing anything; relaunch it. It must match DATA_MODEL.md and REQUIREMENTS.md, mark undecided points `OPEN (owner)`, and cover B3, B4, B5, S4, S5, S7 to S9, S11 to S15, M1, M5, M9 (timezone), M11, plus the requests in the database and product-requirements reports (store status values, `TAKEN_DOWN`, `contentRevision`, no `REFUNDED`, settings bounds, uploads, `isSample`, failed-payment response).
-4. code-review: check that REQUIREMENTS.md, DATA_MODEL.md, and API_CONTRACTS.md agree, and review this session's T-017 follow-up (commit `66a0cfa`) and the T-019 rounds two and three. Known disagreement: picture reordering (OQ-35). product-requirements: small follow-ups from the database report (REQ-A-03 "creates" the store, payment table without `REFUNDED`).
+3. backend-api: fix API_CONTRACTS.md. It must match DATA_MODEL.md, REQUIREMENTS.md, and D-026, mark undecided points `OPEN (owner)`, and cover B3, B4, B5, S4, S5, S7 to S9, S11 to S15, M1, M5, M9 (timezone), M11, plus the requests in the database and product-requirements reports (store status values, `TAKEN_DOWN`, `contentRevision`, no `REFUNDED`, settings bounds, uploads, `isSample`, failed-payment response).
+4. code-review: check that REQUIREMENTS.md, DATA_MODEL.md, and API_CONTRACTS.md agree (after D-026 is written into all three), and review the T-017 follow-up (commit `66a0cfa`), the T-019 rounds two and three, and the SEC-020 fix. product-requirements: small follow-ups from the database report (REQ-A-03 "creates" the store, payment table without `REFUNDED`), running with the D-026 write-up.
 5. Orchestrator: add BR-17 to BR-30 to the "Covers" columns in PROJECT_PLAN.md; supersede D-004's "revocation on suspension" wording (store suspension does not end sessions, user deactivation does); add script `db:migrate:deploy` with T-013; decide whether Markdown stays excluded from Prettier (`.prettierignore` has `*.md`, so `format:check` proves nothing about docs).
 6. T-013 schema (database), pinning Prisma and widening the driver lint pattern (re-review item N3); then T-023 integration-test harness (qa); then T-011 env validation and health (devops, including SR-01 proxy variables, `APP_URL`, and the SEC-009 refusals); then T-015 auth, T-014 seed, T-016 admin bootstrap, T-018 app shell, T-020 catalog API, T-021 storefront pages, T-072 security headers.
 7. Milestone 1 report to the owner, with OQ-20 shown on real pages.
@@ -88,9 +95,9 @@ Parked questions per D-019. Work that depends on an open question waits; everyth
 | OQ-23 | When stock drops below the quantity a customer already chose (in the cart or on a product page): lower their quantity automatically and say so, or keep their number and ask them to change it? | code-review of T-017 | T-021, T-031, T-034 |
 | OQ-24 | Quantity is above the available stock and the customer presses the Up arrow key: nothing happens (like the disabled plus button), or jump to the highest quantity that can be bought (current behaviour)? | code re-review of T-017 | QuantityStepper detail before T-021 |
 
-### Second batch, not yet asked (raised 2026-10-11 while writing the answers into the documents)
+### Second batch (raised 2026-10-11 while writing the answers into the documents)
 
-Each has a recommendation in the document named; none is in effect until the owner answers. None blocks T-013.
+**Answered 2026-10-11:** the owner answered every question in this batch. The answers are in DECISIONS.md D-026 and are binding; the table is kept for the question wording only.
 
 | Id | Question | Source | Blocks |
 | --- | --- | --- | --- |

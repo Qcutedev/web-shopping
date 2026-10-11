@@ -33,6 +33,7 @@ Decisions marked `PROPOSED` are not yet validated against the installed stack; e
 | D-023 | 2026-10-11 | Checkout is serialised per cart; payment completion is one guarded transaction | ACCEPTED (supersedes parts of D-006 and D-009) |
 | D-024 | 2026-10-11 | Every status transition is a conditional update | ACCEPTED |
 | D-025 | 2026-10-11 | Owner answers to open questions OQ-01 to OQ-19 and OQ-21 to OQ-24 | ACCEPTED |
+| D-026 | 2026-10-11 | Owner answers to open questions OQ-25 to OQ-50 | ACCEPTED |
 
 ## Details
 
@@ -147,6 +148,38 @@ On 2026-10-11 the owner accepted the orchestrator's recommendation for every ope
 | OQ-22 | The login's IP address and browser details may be stored with the session and are deleted when the session ends or expires. |
 | OQ-23 | When stock drops below a quantity the customer already chose, the quantity is lowered automatically to what is available and the customer is told. |
 | OQ-24 | With the quantity above the available stock, the Up arrow key does nothing, the same as the disabled plus button (and Down does nothing below 1). |
+
+### D-026 Owner answers to the second batch of questions
+On 2026-10-11 (third session) the owner answered OQ-25 to OQ-50, choosing the recommended option for each. The answers are rules from now on. Where a document was written for a different reading (OQ-35 in DATA_MODEL.md), its owner changes it. The owning documents do not all contain these answers yet; each owner writes them in before the task that depends on them. OQ-20 stays open until milestone 1.
+
+| Question | Answer |
+| --- | --- |
+| OQ-25 | An order whose payment failed stays visible to the customer in their order history and to the admin, marked as payment failed, with no further action possible on it. (Sellers do not see it, D-025 OQ-07.) |
+| OQ-26 | When the items of a failed payment return to the cart and the same product is already there, the quantities are added together, capped at 99 and at the available stock. The customer is told if a cap applied. |
+| OQ-27 | An order that fails because the payment system never answered (timeout) returns its items to the cart in the same way as any other failed payment. |
+| OQ-28 | Adding a sold-out product to the cart is refused. Asking for more than is in stock lowers the quantity to the available stock and the customer is told. |
+| OQ-29 | A product in a cart that sells out stays as a cart line marked "สินค้าหมด". It is not counted in the totals and cannot be bought; the customer removes it. (At checkout D-025 OQ-09 applies.) |
+| OQ-30 | The customer is told about a lowered quantity on the cart page and at checkout. If the quantity is found to be too high at the moment the order is placed, checkout stops, shows the new quantity and total, and the customer confirms again. |
+| OQ-31 | When a deactivated store owner is reactivated, or a switched-off category is switched on again, the store and its products come back by themselves. |
+| OQ-32 | Paid orders of a deactivated store owner are cancelled by the admin by hand. Nothing is automatic. |
+| OQ-33 | "Low stock" counts products with 1 to 5 in stock. Sold-out products (0) are shown as a separate figure. Both count only products that are on sale, not drafts, rejected, taken-down, or archived products. |
+| OQ-34 | Sales figures add up the price of the goods only, without the shipping fee. The order count includes only paid orders that are not cancelled; an order with only some stores' parts cancelled still counts as one order. |
+| OQ-35 | Changing only the order of a product's pictures, or which one is first, does not need approval again. Only adding, removing, or replacing a picture does. |
+| OQ-36 | Saving a correction to a rejected or taken-down product sends it back for approval automatically. There is no separate button and no resubmission without a change. |
+| OQ-37 | The bootstrap script may be run again to create further admins. |
+| OQ-38 | The commission rate is a whole number of percent. No decimals. |
+| OQ-39 | A seller cannot create a product in, or move a product to, a switched-off category. The request is refused. |
+| OQ-40 | The largest stock quantity a seller may enter for one product is 1,000,000. |
+| OQ-41 | A seller sees an order only once it is paid, not while its payment is being processed. |
+| OQ-42 | The admin approval queue does not include products the seller has saved but not yet published. |
+| OQ-43 | A never-ordered product deleted by its seller disappears from customers' carts without a message. Accepted for the MVP. |
+| OQ-44 | Order numbers that count upwards are accepted for the MVP. |
+| OQ-45 | Form controls and outline buttons get a darker border on hover, in the main text (ink) colour. Not accent green. The owner sees it on real pages at milestone 1. |
+| OQ-46 | The "quantity was lowered" message is "สินค้าเหลือ {available} ชิ้น ระบบปรับจำนวนเป็น {available} ชิ้นให้แล้ว". |
+| OQ-47 | "System administrators" who may read server logs are only the named people who operate the servers. The application's `ADMIN` role gives no access to logs. |
+| OQ-48 | 90 days is a maximum, not a promise that logs are available that long. It covers every copy, including log backups. Exception: log lines that are evidence in an open security investigation may be kept until the investigation is closed, limited to the relevant lines, with a written record of what is kept and why. |
+| OQ-49 | The IP address and browser details of an expired session must be gone within one day of expiry (a daily clean-up is enough). |
+| OQ-50 | Database backups are kept 30 days. |
 
 ## Pending decisions for the user
 
