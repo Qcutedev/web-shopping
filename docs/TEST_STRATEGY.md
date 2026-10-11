@@ -2,7 +2,7 @@
 
 Owner: qa agent. This document says what is tested, at which level, and by which rule. It does not record task status or run history for the whole project: those are in [STATUS.md](STATUS.md).
 
-**State of the qa-owned suites on 2026-10-11:** no integration test and no end-to-end test exists, and neither suite can run yet (see [Environment requirements](#environment-requirements)). Every case below is a plan, not a result.
+**State of the qa-owned suites on 2026-10-12:** the integration harness exists and runs (see [Integration harness as built](#integration-harness-as-built-t-023)). The integration tests that exist are the harness's own tests and the database constraint tests; they are listed under [Traceability](#traceability) and their runs under [Results](#results). **Every other case in this document is still a plan, not a result**: no test of an endpoint, a service, a guard, or a concurrency scenario exists, because the code they would test does not. No end-to-end test exists and that suite cannot run yet (see [Environment requirements](#environment-requirements)).
 
 **Sources.** Product rules cited as OQ-nn are the owner's answers in [DECISIONS.md](DECISIONS.md): OQ-01 to OQ-24 in D-025, OQ-25 to OQ-50 in D-026. The owner's follow-up answers are cited as D-028. Two technical rulings also bind the cases here: D-027 (when sessions are revoked) and D-029 (a `GET` never stores, where a lowered quantity is stored, `storeId` in a seller body). Status codes, error codes, and field names are those of [API_CONTRACTS.md](API_CONTRACTS.md); BR and REQ ids are those of [REQUIREMENTS.md](REQUIREMENTS.md). Where REQUIREMENTS.md or DATA_MODEL.md still differs from a decision, D-025 to D-029 win. Points on which two documents disagree, or which no document makes testable, are listed under [Risks and open concerns](#risks-and-open-concerns) and are not asserted on a guess.
 
@@ -18,7 +18,7 @@ Prove, with tests that can fail, that money, stock, and permissions behave corre
 | Component | Vitest, jsdom, Testing Library | `src/**/*.test.tsx` next to source | nothing | `pnpm test` |
 | Security, no database | Vitest, Node | `tests/security/**` | nothing | `pnpm test` |
 | Integration and API | Vitest | `tests/integration/**` | PostgreSQL test database, harness from T-023 | `pnpm test:integration` |
-| Security, with database | Vitest | `tests/security/**` (owner: security) | PostgreSQL test database, harness from T-023 | to settle in T-023 (see [To validate in T-023](#to-validate-in-t-023)) |
+| Security, with database | Vitest | `tests/security/**/*.itest.ts` (owner: security) | PostgreSQL test database, harness from T-023 | `pnpm test:integration` (the pattern is configured; no such file exists yet, so it has not been exercised) |
 | End-to-end | Playwright | `e2e/**` | running app, prepared database, browsers (T-060) | `pnpm test:e2e` |
 | Static | ESLint, `tsc`, Prettier | | | `pnpm lint`, `pnpm typecheck`, `pnpm format:check` |
 | Build | Next.js | | | `pnpm build` |
@@ -121,7 +121,7 @@ Rules decided by the owner or by a technical ruling have their cases in the two 
 | Admin reports and summary (REQ-A-08, REQ-A-01, BR-33) | **Paid date (D-028).** Rows are built by the factory with chosen `createdAt` and `paidAt`. Created inside the range and paid after its end: not counted. Created before the range and paid inside it: counted. `paidAt` equal to `from` is counted and equal to `to` is not (the range is half-open). `from` not earlier than `to`, an instant without an offset, and a date without a time are each 400. A seller order cancelled after payment leaves the figures of the range its payment fell in and appears in no other range. `orderCount` and `paidRevenueSatang` follow OQ-08 below. `newUserCount` uses the user's creation time and `newSellerCount` the store's. Two paid orders near the BR-04 cap give a `paidRevenueSatang` above 2,147,483,647, returned exactly. **Summary.** `pendingApplicationCount`, `pendingProductCount` (the size of the approval queue, so a `PENDING` draft is not counted), `userCount`, `storesByStatus`, `orderCount`, and `paidRevenueSatang` over all time, each compared with a count made from the rows the test created. **`paidAt` through the real payment path:** null while `PENDING`, set when `PAID`, null for ever when `FAILED`, and unchanged by a later cancel or fulfilment move. Whether any response carries the paid time is question T3 |
 | Admin bootstrap (REQ-A-11, BR-26) | The script is run against the test database. An email with no account: one user with role `ADMIN` exists afterwards and can log in. A second run with another email: a second admin exists and the first is unchanged (OQ-37). A run with the first admin's email and a different password: no row is inserted or changed, and the first password still works. A run with an email that belongs to a customer: refused; the role is still `CUSTOMER`, no user or account row is inserted or changed, and the customer's own password still works. A run with an email that belongs to a seller: refused; the role is still `SELLER` and the store is unchanged. A password that fails the REQ-C-01 policy, and a missing input variable: nothing is created, and the message names the variable and not its value. After every run no existing user's role differs from before (the script never promotes). The exit status and message of the refusal and of the no-change run, and the same email in another letter case, are question T8 |
 | No `GET` changes state (D-029 point 1, SECURITY TM-16) | One table-driven test per class of `GET` endpoint: public reads (K1: catalog lists, product page, reviews, store page, health, file serving), own data (K3 and K4: `/me`, addresses, cart, order list and detail, seller application), seller reads (K5 and K6: store, summary, product list and detail, order list and detail), and admin reads (K7: every list and detail, settings, summary, reports, audit log). Before and after each request the test takes a snapshot of every application table (row count and a digest of every column, `updatedAt` included), and the two must be equal. Each class is also run in the states where a write would be tempting: a cart line above stock, a sold-out line, a hidden line, and no cart row; an order still `PENDING` past the timeout; a product awaiting approval opened by an admin; a suspended store; an unknown or foreign id (404). The list of `GET` routes is taken from the route files, so a new `GET` handler without a case fails the test. Whether the `Session` table belongs in the snapshot is question T10; until it is answered that table is left out, and the result says so |
-| Database | `CHECK` constraints reject, when written directly: negative stock; a negative price and a price outside 100 to 100,000,000 satang; a cart or order quantity of 0 and of 100; a settings fee above 100,000; a settings commission of 250 and of 10,100; an order that is `PAID` without `paidAt`, and one that is not `PAID` with it; a grand total that is not the sum of its two parts, or above the cap; one cart-return column set without the other, and `cartQuantityAfterReturn` above `cartQuantityBeforeReturn + quantity` (DATA_MODEL sections 6.9 to 6.16). A direct write of stock above 1,000,000 is accepted: that limit is a service rule, not a constraint (DATA_MODEL section 7.3) |
+| Database | `CHECK` constraints reject, when written directly: negative stock; a negative price and a price outside 100 to 100,000,000 satang; a cart or order quantity of 0 and of 100; a settings fee above 100,000; a settings commission of 250 and of 10,100; an order that is `PAID` without `paidAt`, and one that is not `PAID` with it; a grand total that is not the sum of its two parts, or above the cap; one cart-return column set without the other, and `cartQuantityAfterReturn` above `cartQuantityBeforeReturn + quantity` (DATA_MODEL sections 6.9 to 6.16). A direct write of stock above 1,000,000 is accepted: that limit is a service rule, not a constraint (DATA_MODEL section 7.3). **These are real tests that ran** (`tests/integration/schema/`), and they go further than this row: every named constraint, unique index, primary key, and foreign key of the migration has cases; see [Database constraints](#database-constraints-real-tests) |
 | Environment | Missing or malformed configuration fails at startup with a message naming the variable and not its value; the payment-timeout setting is one of the variables once it has a name (question T9) |
 
 ### Owner-decided behaviours (D-025, D-026, D-028)
@@ -255,15 +255,16 @@ An automated scan finds only part of what WCAG covers. Passing it is not a claim
 
 ## Test data
 
-- Factories in `tests/helpers/factories.ts` for user, admin, approved store, product, cart, paid order.
+- Factories in `tests/helpers/factories.ts`. **Built and tested** (`tests/integration/harness/factories.test.ts`): one row factory per table (user, admin, session, account, verification, address, store, seller application, category, product, upload, product image, cart, cart line, order, seller order, order item, payment, shipment, review, audit log entry), and `createOrder`, which writes a whole order from products with totals computed from the product prices and the settings row, takes the stock, and accepts a chosen `paymentStatus`, `createdAt`, and `paidAt`. A parent that is not given is created; a value given as an override is written as it is, so a constraint test passes the violating value and the database's refusal reaches the test unchanged.
+- Not built yet, added with the task that first needs them: a ready-made suspended store, an inactive category, and a seller order in each fulfilment state as named factories (today a test sets these through the overrides of the row factories).
 - The cases above also need: a suspended store; a category that is switched off; a product in each combination of `status` and `moderationStatus`; an upload owned by a store; a cart line written directly (for a quantity above stock, and for the own-store line no request can create); an order in each payment state with chosen `createdAt` and `paidAt`; a seller order in each fulfilment state. A factory writes rows the way the services would leave them, so that every `CHECK` constraint holds.
 - No dependence on seed data. No production data, ever.
 
 ### Test database reset under parallel files
 
-Chosen rule: **one database per Vitest worker; files inside a worker run one at a time; every test file empties all tables before its first test.**
+Chosen rule: **one database per Vitest worker; files inside a worker run one at a time; every test file empties all tables before its first test.** This rule is built and ran; how it is built is in [Integration harness as built](#integration-harness-as-built-t-023).
 
-- Global setup applies the migrations once to a template database on the test PostgreSQL instance. Each worker creates its own database from that template and points the database layer at it before any module that opens a connection is loaded.
+- Global setup applies the migrations once to a template database on the test PostgreSQL instance and creates one database per worker from that template. Each worker points the database layer at its own database before any module that opens a connection is loaded.
 - A file starts by truncating every application table in its worker's database. It does not clean up afterwards, so a failed file leaves its rows for inspection until the next file starts.
 - Tests within one file run in order and share that file's data only through what the file itself creates.
 
@@ -272,22 +273,68 @@ Why this rule and not the alternatives:
 - A single shared database with truncation between files is wrong once files run in parallel: one file's reset deletes another file's rows mid-test.
 - Wrapping each test in a transaction that is rolled back cannot be used, because the checkout and concurrency tests need several real connections and committed transactions.
 - Some rules are about the whole table (the last admin, the single settings row, "the only admins are the ones the factories created"). They need a database nobody else is writing to, which a per-worker database gives and unique ids alone do not.
-- Running every file serially against one database is correct and simpler, but its run time grows with every file. It is the fallback: if per-worker databases cannot be made reliable in T-023, the integration config disables file parallelism and uses one database, and this section is updated to say so.
+- Running every file serially against one database is correct and simpler, but its run time grows with every file. It was the fallback and was not needed: per-worker databases work. The serial form is still available as `--maxWorkers=1` and passes (see the timings below).
 
 The test PostgreSQL instance keeps its data in memory and is empty after every container start, so global setup always creates the template and never assumes it exists.
 
-### To validate in T-023
+### Integration harness as built (T-023)
 
-The rule above is a design, not yet run. T-023 confirms or revises each point against the installed versions:
+Everything in this section exists and ran on 2026-10-12; the runs are under [Results](#results). Task status is in [STATUS.md](STATUS.md).
 
-- That the installed Vitest gives each worker a stable identifier usable in a database name, and runs a worker's files one at a time.
-- That the database layer can be pointed at the worker's database before its client is created.
-- That creating a database from the template works with the pinned PostgreSQL and Prisma versions, including the hand-written constraints and partial indexes.
-- That the reset leaves no rows between files (the T-023 acceptance check), proven by a test that fails if a row survives.
-- Review item V2: whether guards and services can be called in-process under Vitest, or whether integration tests must go over HTTP. If over HTTP, each worker also needs its own application server bound to its own database.
-- Where the security tests that need a database run, so that `tests/security/**` is not picked up twice or missed.
-- That a factory can write `Order.createdAt` and `Order.paidAt` with chosen values (the timeout and paid-date cases depend on it), and that the paid-order factory satisfies the check that ties `paidAt` to `paymentStatus`.
-- That the snapshot helper of the "No `GET` changes state" cases (row count and a digest of every column, per table) is fast enough to run around every `GET` case, and fails when a single `updatedAt` moves.
+**How to run it.** Start the containers (`docker compose up -d --wait`), then `pnpm test:integration` (configuration: `vitest.integration.config.mts`). One file: `pnpm test:integration tests/integration/schema/check-constraints.test.ts`. `pnpm test` and `pnpm verify` do not run this configuration and need no database.
+
+**Which database, and what is refused** (`tests/helpers/test-database-url.ts`, called by `tests/integration/setup/global-setup.ts` before anything connects). The suite uses the database named by `DATABASE_URL_TEST`, read from the process environment and otherwise from `.env`; the file is parsed without loading it into the environment, so the development `DATABASE_URL` never reaches a test worker. The run stops, having touched no database, when the variable is unset or blank, is not a PostgreSQL URL, is equal to `DATABASE_URL` or names the same host, port, and database (with `localhost`, `127.0.0.1`, and `[::1]` treated as one machine), names a host that is not this machine, or names a database that does not consist of lower-case letters, digits, and underscores ending in `_test` (at most 50 characters). Every refusal names the variable and the rule, and never contains the URL or a part of it. Behind that, `resetDatabase` checks the name of the database it is connected to and empties nothing unless it is a worker database of the harness.
+
+**Template and one database per worker.** With `<base>` the database name in `DATABASE_URL_TEST`, the global setup drops and recreates `<base>_template`, applies the migrations to it with `prisma migrate deploy`, and creates `<base>_w1` to `<base>_wN` as copies of it, where N is `maxWorkers` of the configuration (4; `--maxWorkers` on the command line changes the number of workers and of databases together). Worker databases left by an earlier run with more workers are dropped too. Nothing is ever created in, or dropped from, the base database itself. `tests/integration/setup/worker-env.ts` runs first in every test file and sets `DATABASE_URL` to the database of the worker (`VITEST_POOL_ID`, 1 to N) before the database layer is loaded; the pool is `forks`, and a worker runs one file at a time.
+
+**Reset rule** (`tests/helpers/reset.ts`, `tests/integration/setup/worker-hooks.ts`). Before the first test of every file, in one transaction: every application table is truncated (the tables are read from the catalogue, so a new table needs no change here; the migration history table is left alone), every sequence is restarted, and the single `MarketplaceSettings` row is put back at its initial values (the truncation empties that table as well, because it refers to `User`). The hook then checks the result and fails the file if a row, a used sequence, or changed settings survived. A test may call `resetDatabase()` again inside a file. Nothing is cleaned after a file.
+
+**One run at a time** (`tests/helpers/run-lock.ts`). Two integration runs on one machine would destroy each other's databases, because each drops and recreates the template and the worker databases. The global setup therefore takes a PostgreSQL advisory lock on the base test database before it drops anything and holds it until the run ends. A second run started meanwhile stops at once with "another integration run is using the test database on this machine" and touches no database. PostgreSQL releases the lock when the first run's process ends, however it ends, so a crashed run leaves no stale lock; a run that is still alive but orphaned keeps the lock, and its `vitest` process has to be stopped. Limits: the lock is held for at most 24 hours (a watch session open longer loses it without notice); it protects one PostgreSQL server, so it says nothing about a second checkout of the repository pointed at another server; and it does not cover anything else that writes to the test server by hand during a run.
+
+**Other helpers.** `tests/helpers/database-error.ts` reads the PostgreSQL code and the constraint name from a rejected write, and never returns the message or the failing row. `tests/helpers/snapshot.ts` is the snapshot of the "No `GET` changes state" cases: row count and a digest of every column per table, and the last value of every sequence, with an option to leave a table out (question T10).
+
+**Measured on 2026-10-12** (this machine, Windows 11, Docker Desktop, PostgreSQL in memory; 12 files, 417 tests):
+
+| Measure | Value |
+| --- | --- |
+| Template migrated | 1.3 to 1.5 s per run |
+| Worker databases created from the template | about 15 ms each (56 to 61 ms for 4, 103 ms for 8) |
+| Whole run, 4 workers (the configured value) | 6.7 to 7.1 s reported by Vitest, 7.3 to 7.7 s wall clock |
+| Whole run, 1 worker | 14.0 s |
+| Whole run, 2 workers | 8.8 s |
+| Whole run, 8 workers | 6.9 s, no gain over 4 at this size |
+| Second run refused by the run lock, or by the database rule | the three refusals of `run-guards.test.ts` together take under 3 s, including starting three processes |
+| Snapshot helper | not timed on its own; its 14-test file, each test with a reset, a few factory rows, and at least two snapshots, takes about 1.1 s |
+
+The reset was not timed on its own either. These numbers describe a suite of 12 files; they are measured again when the suite grows.
+
+**What T-023 was asked to validate, and the outcome:**
+
+| Point | Outcome |
+| --- | --- |
+| The installed Vitest gives each worker a stable identifier usable in a database name, and runs a worker's files one at a time | Confirmed: `VITEST_POOL_ID` is 1 to `maxWorkers` with the `forks` pool. `worker-env.ts` stops a file whose worker id is outside that range before a client is created; that check has no test of its own |
+| The database layer can be pointed at the worker's database before its client is created | Confirmed: a setup file sets `DATABASE_URL` before `@/server/db` is imported; `reset.test.ts` asserts the connection is to a worker database |
+| Creating a database from the template works, including the hand-written constraints and partial indexes | Confirmed: the constraint tests run on the copies and read 31 check constraints, 21 unique indexes (three of them partial), 21 primary keys, and 28 foreign keys from the catalogue |
+| The reset leaves no rows between files | Confirmed by `isolation-a`, `-b`, `-c`: each asserts an empty database, sequence value 1 for its first order, and initial settings, then leaves rows, a used sequence, and changed settings behind. The suite has more files than workers, so in every run files start on a database that another file dirtied. Also passes with one worker, where every file follows another on the same database |
+| A factory can write `Order.createdAt` and `Order.paidAt`, and the paid order satisfies the `paidAt` check | Confirmed (`factories.test.ts`) |
+| The snapshot helper fails when a single `updatedAt` moves | Confirmed, for a move of one millisecond (`snapshot.test.ts`). Its speed: see the table above |
+| Where the security tests that need a database run | The integration configuration includes `tests/security/**/*.itest.ts`; the unit run includes `tests/security/**/*.test.ts`, so a file is picked up by exactly one of them. **Not exercised:** no `.itest.ts` file exists. The security agent confirms the suffix when it writes the first one |
+| Review item V2: can guards and services be called in-process, or must integration tests go over HTTP | **Still open.** The database layer and the factories work in-process. No guard, service, or route handler exists to try, so this is settled with the first of them (T-015, T-020). If tests must go over HTTP, each worker needs its own application server bound to its own database |
+
+### Database constraints: real tests
+
+`tests/integration/schema/` holds one group of cases per named constraint of the migration `20261011121529_init_schema_v1` (DATA_MODEL.md section 21). Each rejected write is matched on the PostgreSQL error code **and** on the name of the constraint the database reports, so a case cannot pass because some other constraint refused the row. Each file ends with a test that reads the names from the database catalogue and fails when a constraint has no cases, or cases name a constraint that does not exist; a constraint added by a later migration therefore fails the suite until it has cases.
+
+| Kind | In the migration | With cases | File | What each case group holds |
+| --- | --- | --- | --- | --- |
+| Named `CHECK` constraints | 31 | 31 | `check-constraints.test.ts` | Rejected writes (code 23514) and accepted writes at the edges, so a moved bound fails too |
+| Unique indexes managed by Prisma | 18 | 18 | `unique-constraints.test.ts` | A duplicate is rejected (23505); near-duplicates the index allows are accepted |
+| Partial unique indexes, hand-written | 3 | 3 | `unique-constraints.test.ts` | Both sides of the condition, by insert and by an update that brings a row into the index |
+| Primary keys | 21 | 21 | `unique-constraints.test.ts` | A second row with the same id is rejected (23505) |
+| Foreign keys | 28 | 28 | `foreign-keys.test.ts` | A child without its parent is rejected (23503); the delete rule: 23 `RESTRICT` (23001, both rows kept) and 5 `CASCADE` (child gone) |
+| **Total** | **101** | **101** | | |
+
+Not constraints, and without cases of their own: the 8 enum types (a value outside an enum cannot be written through the typed client) and the non-unique indexes.
 
 End-to-end tests use their own database, separate from every integration database. Whether Playwright runs with one worker or isolates data per worker is decided in T-060.
 
@@ -299,7 +346,7 @@ End-to-end tests use their own database, separate from every integration databas
 | Integration and API | The test PostgreSQL container from `docker compose` (127.0.0.1:5433), the schema, and the harness | T-012, T-013, T-023 |
 | End-to-end | The above, a built or running application, Playwright and its browsers | T-060 |
 
-Whether each of these is in place is recorded in [STATUS.md](STATUS.md), not here. On 2026-10-11 the first row is satisfied; the schema, the harness, and Playwright are not installed, so `pnpm test:integration` and `pnpm test:e2e` cannot run and no task that depends on them can be marked `VERIFIED`.
+Whether each of these is in place is recorded in [STATUS.md](STATUS.md), not here. On 2026-10-12 the first two rows are satisfied on the development machine and `pnpm test:integration` runs there. Playwright is not installed, so `pnpm test:e2e` cannot run and no task that depends on it can be marked `VERIFIED`. The integration suite has not run in CI: no workflow exists yet (T-070).
 
 ## Risks and open concerns
 
@@ -368,11 +415,22 @@ Both are already recorded for the owner (STATUS.md, "Resume here"). Neither is a
 
 ## Traceability
 
-Filled in as tests are written. No qa-owned test file exists yet.
+Filled in as tests are written. "Ran, passed" means the file was in the runs under [Results](#results); it is not a task status, which is in [STATUS.md](STATUS.md). A requirement is listed only where a test asserts something that requirement states; the database tests show that the database refuses a bad row, not that any endpoint or service behaves as the requirement says. All paths are under `tests/integration/`.
 
-| Requirement | Test file | Status |
-| --- | --- | --- |
-| | | |
+| Requirement or source | Test file | Tests | Status |
+| --- | --- | --- | --- |
+| DATA_MODEL section 21.3: the 31 named `CHECK` constraints (among them the price range of BR-02, the order cap of BR-04, the settings bounds of BR-28, quantities 1 to 99, `paidAt` tied to `paymentStatus`, the cart-return columns of BR-32); stock above 1,000,000 accepted by the database (BR-34) | `schema/check-constraints.test.ts` | 165 | Ran, passed |
+| DATA_MODEL sections 21.3 and 21.4: 21 unique indexes (three partial: one default address, one pending application, SKU unique among products that are not archived) and 21 primary keys; one order per user and idempotency key (the database backstop of D-023) | `schema/unique-constraints.test.ts` | 47 | Ran, passed |
+| DATA_MODEL sections 14 and 21.4: 28 foreign keys and their delete rules; a product referenced by an order item cannot be deleted (the database side of BR-12); a category with products cannot be deleted (the database side of REQ-A-06) | `schema/foreign-keys.test.ts` | 60 | Ran, passed |
+| T-023: the harness refuses any database but the local test one and never prints the URL | `harness/test-database-url.test.ts` (the rules), `harness/run-guards.test.ts` (a real second run with a wrong URL) | 74, 8 | Ran, passed |
+| T-023: one integration run at a time | `harness/run-guards.test.ts` (the lock helper, and a real second run refused while the first holds the lock, with every database unchanged) | counted above | Ran, passed |
+| T-023: the reset restores the single settings row, restarts sequences, leaves no row, and refuses a database that is not a worker database | `harness/reset.test.ts` | 12 | Ran, passed |
+| T-023: files are isolated from each other | `harness/isolation-a.test.ts`, `-b`, `-c` | 2 each | Ran, passed |
+| T-023: factories build rows the database accepts; order amounts equal a recomputation in integer satang; chosen `createdAt` and `paidAt`; the mock payment row is labelled `MOCK` | `harness/factories.test.ts` | 13 | Ran, passed |
+| D-029 point 1, SECURITY TM-16: the snapshot helper detects every kind of write (the helper only; no `GET` endpoint is tested yet) | `harness/snapshot.test.ts` | 14 | Ran, passed |
+| SECURITY SR-04: only the error code and the constraint name are read from a database error | `harness/database-error.test.ts` | 18 | Ran, passed |
+
+Every row of the [Integration test matrix](#integration-test-matrix) other than "Database", every row of [Concurrency tests](#concurrency-tests-t-033), and every [end-to-end journey](#end-to-end-journeys) has no test yet.
 
 ## Results
 
@@ -380,4 +438,11 @@ Runs of `pnpm verify` and of the unit, component, and security projects are reco
 
 | Date | Command | Total | Passed | Failed | Skipped | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| | no integration or end-to-end run yet | | | | | |
+| 2026-10-12 | `pnpm test:integration` (run 1 of 2, one after the other) | 417 | 417 | 0 | 0 | 12 files, exit 0, 6.68 s (7.3 s wall clock), 4 workers |
+| 2026-10-12 | `pnpm test:integration` (run 2 of 2) | 417 | 417 | 0 | 0 | 12 files, exit 0, 7.10 s (7.7 s wall clock), 4 workers |
+| 2026-10-12 | `pnpm exec vitest run --config vitest.integration.config.mts --maxWorkers=1` | 417 | 417 | 0 | 0 | 12 files, exit 0, 14.03 s; every file follows another on one database |
+| 2026-10-12 | the same with `--maxWorkers=2` | 417 | 417 | 0 | 0 | 12 files, exit 0, 8.79 s |
+| 2026-10-12 | the same with `--maxWorkers=8` | 417 | 417 | 0 | 0 | 12 files, exit 0, 6.86 s |
+| 2026-10-12 | `pnpm test:integration` with the run lock switched off in the global setup, on purpose, then restored | not recorded | not recorded | at least 43 | not recorded | Exit 255. Shows that `run-guards.test.ts` can fail: without the lock the second run it starts destroys the first run's databases. Not a defect |
+
+No end-to-end run yet.
