@@ -14,7 +14,7 @@ A new session should read CLAUDE.md, this file, DECISIONS.md (D-017 to D-029), P
 
 Standing rules from the owner (D-019): never guess, park questions here and ask in batches; commit locally after each task passes its checks, never push without being told; stop for owner review at the five milestones. Run at most two or three agents at a time (owner, third session). Milestone 1 (foundation plus browsable storefront) is in progress.
 
-Before starting, check the machine: Docker Desktop running and `docker compose up -d --wait` (the test database is empty after every container start); `pnpm install --frozen-lockfile`; `pnpm verify` should exit 0 with 1191 passed and 0 expected failures.
+Before starting, check the machine: Docker Desktop running and `docker compose up -d --wait` (the test database is empty after every container start); `pnpm install --frozen-lockfile`; `pnpm verify` should exit 0 with 1199 passed and 0 expected failures.
 
 Done in the third session (each committed):
 
@@ -27,8 +27,11 @@ Fourth session (2026-10-11, evening), each item committed unless marked:
 - Machine checked: Docker up, both databases healthy, `pnpm verify` exit 0 with 1191 passed.
 - Step 3 done (`7532fc6`): BR-17 to BR-38 are in the PROJECT_PLAN.md "Covers" columns; T-016 acceptance states the BR-26 behaviour; D-030 keeps Markdown out of Prettier. Left over: script `db:migrate:deploy` is added with T-013; REQUIREMENTS.md still says the Covers columns lack BR-17 to BR-38 ("gap" sentence above its second traceability table), to be removed by product-requirements in the fix round after the cross-document check.
 - DEPLOYMENT.md finished by devops (`b94de02`): OQ-47 to OQ-50, D-028, D-029; new sections "Scheduled work", "Database backups", "Restore procedure", "Open questions" (DEP-Q1 to DEP-Q11). Not yet reviewed by security against SR-06 and SR-07.
-- **Running when this was written:** qa on `docs/TEST_STRATEGY.md` (partial, uncommitted edit in the tree; if it died, read `git diff` and relaunch with the step 1 brief) and ui-ux-design on DESIGN_SYSTEM.md, the primitives, and `src/i18n/th.ts` (OQ-45, OQ-46, the three D-028 texts; uncommitted until `pnpm verify` passes).
-- Not started: step 2 (code-review cross-document check, then the code reviews).
+- Step 1 is finished. TEST_STRATEGY.md by qa (`4e48dd6`): every case is a plan, no test was run; disagreements between documents are its T1 to T12 under "Risks and open concerns"; qa reports nothing blocks T-013 or T-023. Design system by ui-ux-design (`e1bbaa6`): OQ-45 hover border through `--control-border-hover`, the four approved Thai texts in `src/i18n/th.ts`; `pnpm verify` exit 0 with **1199 passed** (the new baseline).
+- **Running when this was written (both read-only, nothing to recover from the tree if they died; relaunch):** code-review cross-document check of REQUIREMENTS.md, DATA_MODEL.md, and API_CONTRACTS.md against D-025 to D-029 with a per-id verdict for reviews/T-004-findings.md (step 2, first half); code-review of the code in `66a0cfa`, `e1bbaa6`, `4407b71`, `28c92d1`, `e2a4a7a`, `9c9158b`, `d4ff53e` (step 2, second half).
+- After both report: hand each owner its findings (product-requirements, database, backend-api, ui-ux-design), two agents at a time; update the register and close T-004; then step 4 (T-013).
+
+Technical points qa raised that need a ruling, none blocking T-013: T6 (a checkout request that carries amounts: "ignored" in REQ-C-11 and CLAUDE.md rule 3, but `400` unknown key in API_CONTRACTS 1.1 and 5.5.1) and T11 (which refusal comes first when a request is both invalid and not permitted) for the orchestrator; T10 (the auth library deleting an expired session during a `GET` against D-029 point 1) for auth and security in T-015; T1 and T5 before T-032; T4, T7 for backend-api; T8 for T-016; T9 for T-011. DATA_MODEL.md section 19.3 still lists two suspended-store points as open although BR-14 decides them.
 
 Raised by devops, for other owners: the start-up hook file an in-process timer would need (Next.js instrumentation file) has no owner in AGENT_WORKFLOW.md, assign one before T-015; script names for running the purge and the sweep on demand are needed with T-015 and T-032; T-011 fixes the timeout variable (proposed `PAYMENT_TIMEOUT_MINUTES`, integer, default 15); security rules on restored sessions (DEP-Q7) and settles DEP-Q4 with devops in T-071; KNOWN_LIMITATIONS.md "no background job runner" is updated when T-015 lands.
 
@@ -36,6 +39,7 @@ Parked for the owner (ask in plain Thai with a recommendation, with the next bat
 
 - Q38 (REQUIREMENTS.md): the Thai mark on a cart line whose product is hidden; must not say why. Recommended: "สินค้านี้ไม่พร้อมจำหน่ายในขณะนี้".
 - Confirm the shared reading of "view only" for a suspended store: all three documents also refuse editing the store profile (name, description, logo, contact phone), uploading, and deleting a product. The owner was told in chat and has not objected; no schema effect either way.
+- Chips: should filter chips also show the ink border on hover? D-026 OQ-45 names form controls and outline buttons only, so chips were left unchanged. Recommended: decide on real pages at milestone 1 with OQ-20.
 - DEPLOYMENT.md "Open questions" DEP-Q1 to DEP-Q3 and DEP-Q5 to DEP-Q9 (who the system administrators are and who approves one; how often access is checked; who may place and close an investigation hold and how often a hold is reviewed; whether 30 days is also the shortest time a backup is kept; whether a restore signs everyone out; how soon after 15 minutes an unpaid order must fail; a shortest time for logs). Each has a recommendation in the document. None blocks T-013; DEP-Q7 and DEP-Q8 should be answered before T-015 and T-032.
 
 Next steps, in order:
