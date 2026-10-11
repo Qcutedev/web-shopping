@@ -38,6 +38,7 @@ Decisions marked `PROPOSED` are not yet validated against the installed stack; e
 | D-028 | 2026-10-11 | Owner answers to the follow-up questions raised by D-026 (REQUIREMENTS Q31 to Q37 and others) | ACCEPTED |
 | D-029 | 2026-10-11 | A `GET` never writes; checkout stores a lowered quantity and stops; `storeId` in a seller body is rejected | ACCEPTED |
 | D-030 | 2026-10-11 | Markdown stays excluded from Prettier; `format:check` is not evidence about documents | ACCEPTED |
+| D-031 | 2026-10-11 | Technical rulings after the cross-document check: Prisma and Better Auth versions, `contentRevision` on a price correction, amounts in a request body, order of refusals, refused-checkout mechanism | ACCEPTED |
 
 ## Details
 
@@ -223,6 +224,16 @@ Also confirmed for T-013: the two `OrderItem` columns that record a cart return 
 Made by the orchestrator on 2026-10-11; tooling only, no product effect.
 
 `.prettierignore` keeps `*.md`. The documents are hand-formatted, with wide tables and Mermaid blocks, and several agents edit them in parallel: turning Prettier on would rewrite every table in one commit and make each later diff harder to review. The consequence is stated so nobody relies on it: `pnpm format:check` and `pnpm verify` prove nothing about a Markdown file. Documents are checked by review (code-review and the documentation drift audit, T-080), and an agent that edits a document is responsible for well-formed tables and for section references that resolve.
+
+### D-031 Technical rulings after the cross-document check
+Made by the orchestrator on 2026-10-11 from the code-review findings X-01 to X-16 and qa's T1 to T12 (TEST_STRATEGY.md "Risks and open concerns"). Technical only; no owner answer is changed. Owner questions found by the same review are parked in STATUS.md.
+
+1. **Versions (X-01).** Prisma is pinned at `7.10.0` for both `prisma` and `@prisma/client` in T-013. The `latest` tag of the `prisma` package pointed at `8.0.0-rc.22` on 2026-10-11; a release candidate is not used, and Better Auth `1.7.7` declares `prisma` and `@prisma/client` `^5 || ^6 || ^7` as peers. T-013 creates the four auth tables from the published schema of Better Auth `1.7.7`; T-015 installs exactly that version. If T-015 has to move to another version, the difference is a corrective migration (DATA_MODEL.md section 6.1). This fills in D-020.
+2. **`contentRevision` on a price-only correction (X-02, T2).** Resubmitting a `REJECTED` or `TAKEN_DOWN` product with only the price changed raises `contentRevision` by one, as DATA_MODEL.md section 4.2 says. Reason: an approve sent from a screen opened before the rejection must not put a price the admin never saw on sale. API_CONTRACTS.md sections 3.3 and 5.9.3 and DATA_MODEL.md section 6.6 are corrected to match.
+3. **Amounts in a request body (X-09, T6).** A price, total, discount, or fee in a request body is an unknown key: `400 VALIDATION_ERROR`, nothing created or changed, the same as `storeId` (D-029 point 3). This is the strict form of CLAUDE.md rule 3: a client amount is never used. REQ-C-11 keeps its meaning and its wording is changed from "ignored" to "never used; a request that carries one is refused".
+4. **Order of refusals (CR-09, T11).** A handler identifies the caller and checks the role before it reads or parses the request body: an anonymous caller gets `401` and a wrong role gets `403` whatever the body contains, and the server does not read a body for a caller it will refuse. Validation (`400`) comes next, then the store-state and ownership checks inside the service (`403 SELLER_NOT_APPROVED`, `404`). CLAUDE.md rule 1 lists what a handler does, not the order. Endpoints that take a body from an anonymous caller (register, login) are limited by rate before the body is read. backend-api writes this into API_CONTRACTS.md section 1.8 and the handler pattern in `src/server/http.ts`; security reviews it.
+5. **Mechanism of the refused checkout (X-04, T5).** The outcome in D-029 point 2 is binding. The mechanism is not fixed by the contract: API_CONTRACTS.md describes the outcome only, and DATA_MODEL.md section 7.1's two-transaction shape is an admissible candidate beside the two D-029 names. T-013 validates the candidates; T-032 chooses. If the chosen shape can answer "try again", backend-api gives that answer a code in API_CONTRACTS.md section 2.3 before T-032 starts.
+6. **Left to their tasks.** Whether the auth library deleting an expired session during a `GET` is an exception to D-029 point 1 (X-07, T10): auth and security in T-015. The blind resend of a refused checkout (X-05, T1): backend-api and security before T-032; a server-side guard would be an additive migration.
 
 ## Pending decisions for the user
 
