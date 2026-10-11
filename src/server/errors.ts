@@ -253,6 +253,34 @@ export function jsonBodyTooDeep(maxDepth: number): AppError {
 }
 
 /**
+ * PROVISIONAL (docs/API_CONTRACTS.md item 8.2-12): the `code` of the field error for a JSON body
+ * that parses but contains a string that is not well-formed Unicode, a surrogate half without
+ * its other half, in a value or in a key (SR-05 item 11, SEC-028). Ruled: such a body is refused
+ * with 400 VALIDATION_ERROR. Not ruled: the field code, which follows whatever item 8.2-12
+ * decides for a body that is valid JSON and refused all the same. Until then the existing
+ * `invalid_json` is reused, so no new public code exists. A ruling changes this one line (and
+ * the contract). Kept apart from JSON_TOO_DEEP_FIELD_CODE so that the two can be ruled apart.
+ */
+export const JSON_STRING_NOT_WELL_FORMED_FIELD_CODE: string = INVALID_JSON_CODE;
+
+/**
+ * 400 VALIDATION_ERROR for a JSON body that contains a string that is not well-formed Unicode:
+ * `details.fields = [{ path: "", code: JSON_STRING_NOT_WELL_FORMED_FIELD_CODE, message }]`. The
+ * path is the root on purpose: where the string stands is not reported, because the path to it
+ * may run through a key that is itself such a string. Nothing of the body is in it, and no
+ * cause is kept.
+ */
+export function jsonStringNotWellFormed(): AppError {
+  return validationError([
+    {
+      path: "",
+      code: JSON_STRING_NOT_WELL_FORMED_FIELD_CODE,
+      message: "The request body contains a string that is not well-formed Unicode.",
+    },
+  ]);
+}
+
+/**
  * PROVISIONAL, not ruled (docs/API_CONTRACTS.md item 8.2-13): the error code, and through
  * ERROR_STATUS the status, of the answer to a request body that stops arriving (SR-05 item 10,
  * SEC-024). Fixed by SR-05: a client error, below 500. Not fixed: which one. Until it is ruled,
@@ -265,16 +293,39 @@ export const ABORTED_BODY_ERROR_CODE: ErrorCode = "VALIDATION_ERROR";
 /** Upper bound, in characters, on the class name and the code copied from a source error. */
 const MAX_SOURCE_ERROR_LABEL_LENGTH = 64;
 
-/** `value[key]` when it is a string or a finite number, clipped; undefined otherwise. Never throws. */
-function readLabel(value: unknown, key: string): string | undefined {
+/**
+ * The form of the two labels copied from a source error (SECURITY.md SEC-027). A label is kept
+ * only when it has the form of what it claims to be; the form is what keeps prose, an address,
+ * a phone number, or a piece of a body out of the log, so no list of known names is needed.
+ *
+ *   name: an identifier, as a class name is (`TypeError`, `AbortError`), at most 64 characters;
+ *   code: letters, digits, `_`, `.`, and `-` (`ECONNRESET`, `UND_ERR_SOCKET`, `-4077`), 1 to 64.
+ *
+ * Neither pattern has the `m` flag, so `$` is the end of the string and a line end never passes.
+ */
+const SOURCE_ERROR_LABEL_PATTERNS = {
+  name: /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/,
+  code: /^[A-Za-z0-9_.-]{1,64}$/,
+} as const;
+
+/**
+ * `value[key]` when it has the form of SOURCE_ERROR_LABEL_PATTERNS; undefined otherwise. A
+ * `code` may also be a finite number, written as its digits when they have that form. A value
+ * of another form is dropped whole: it is not cut to fit, nothing is put in its place, and
+ * nothing records that it was dropped. The property is read once. Never throws.
+ */
+function readLabel(value: unknown, key: "name" | "code"): string | undefined {
   try {
     if (typeof value !== "object" || value === null) return undefined;
     const found: unknown = (value as Record<string, unknown>)[key];
-    if (typeof found === "string" && found.length > 0) {
-      return clip(found, MAX_SOURCE_ERROR_LABEL_LENGTH);
-    }
-    if (typeof found === "number" && Number.isFinite(found)) return String(found);
-    return undefined;
+    let label: string;
+    if (typeof found === "string") label = found;
+    else if (key === "code" && typeof found === "number" && Number.isFinite(found)) {
+      label = String(found);
+    } else return undefined;
+    // The length is judged first, so the pattern never runs over a long text.
+    if (label.length > MAX_SOURCE_ERROR_LABEL_LENGTH) return undefined;
+    return SOURCE_ERROR_LABEL_PATTERNS[key].test(label) ? label : undefined;
   } catch {
     return undefined;
   }
@@ -287,7 +338,9 @@ function readLabel(value: unknown, key: string): string | undefined {
  *
  * The error of the body's source is NOT kept: no `cause`, no message, no stack. Only its class
  * name and its `code` are copied, as two short strings, for the one warn-level line that
- * `errorResponse` writes. Neither is ever sent to a client.
+ * `errorResponse` writes, and each only when it has the form of a class name or of an error
+ * code (SOURCE_ERROR_LABEL_PATTERNS; SEC-027); otherwise the field is absent. Neither is ever
+ * sent to a client.
  */
 export class RequestBodyAbortedError extends AppError {
   /** `name` of the error the body's source failed with, for example `TypeError` or `AbortError`. */

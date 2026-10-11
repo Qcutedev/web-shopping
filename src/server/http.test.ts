@@ -12,6 +12,7 @@ import {
   ERROR_STATUS,
   forbidden,
   fromZodError,
+  JSON_STRING_NOT_WELL_FORMED_FIELD_CODE,
   JSON_TOO_DEEP_FIELD_CODE,
   notFound,
   rateLimited,
@@ -1436,8 +1437,11 @@ describe("readJsonBody refuses bytes that are not valid UTF-8 (SR-05 item 11, SE
   it("keeps accepting valid UTF-8: Thai text, four-byte characters, escapes, a byte order mark", async () => {
     const title = "เสื้อยืด \u{1f600}";
     expect(await readJsonBody(postBytes(utf8(JSON.stringify({ title }))))).toEqual({ title });
-    // A lone surrogate written as a JSON escape is plain ASCII on the wire, so valid UTF-8.
-    expect(await readJsonBody(postBytes(utf8('{"a":"\\ud800"}')))).toEqual({ a: "\ud800" });
+    // A character written as escapes is plain ASCII on the wire, so valid UTF-8. (A surrogate
+    // half written that way passes the decoder too and is refused later: SEC-028, below.)
+    expect(await readJsonBody(postBytes(utf8('{"a":"\\u0e01\\ud83d\\ude00"}')))).toEqual({
+      a: "ก\u{1f600}",
+    });
     // A leading byte order mark is accepted and removed.
     expect(await readJsonBody(postBytes([0xef, 0xbb, 0xbf, ...utf8('{"quantity":2}')]))).toEqual({
       quantity: 2,
@@ -1464,6 +1468,184 @@ describe("readJsonBody refuses bytes that are not valid UTF-8 (SR-05 item 11, SE
     const error = await thrownBy(() => readJsonBody(postBytes(bytes), { maxBytes: 1_000 }));
     expect(error.status).toBe(413);
   });
+});
+
+describe("readJsonBody refuses a string that is not well-formed Unicode (SR-05 item 11, SEC-028)", () => {
+  const NOT_WELL_FORMED_PUBLIC = {
+    code: "VALIDATION_ERROR",
+    message: "The request is invalid.",
+    details: {
+      fields: [
+        {
+          path: "",
+          code: JSON_STRING_NOT_WELL_FORMED_FIELD_CODE,
+          message: "The request body contains a string that is not well-formed Unicode.",
+        },
+      ],
+    },
+  };
+  const jsonPost = (text: string): Request => post(text, JSON_HEADERS);
+  const HIGH = "\\ud83d";
+  const LOW = "\\ude00";
+
+  async function expectRefused(text: string, options = {}): Promise<void> {
+    // The control under test is the only thing between this body and a parsed value: the bytes
+    // are valid UTF-8, the text is valid JSON, and the parser hands out the half (written back
+    // as an escape by `JSON.stringify`, which is how it is seen here).
+    expect(() => new TextDecoder("utf-8", { fatal: true }).decode(utf8(text)), text).not.toThrow();
+    expect(JSON.stringify(JSON.parse(text)), text).toMatch(/\\ud[89a-f][0-9a-f]{2}/);
+    const error = await thrownBy(() => readJsonBody(jsonPost(text), options));
+    expect(error.status, text).toBe(400);
+    expect(error.toPublic(), text).toEqual(NOT_WELL_FORMED_PUBLIC);
+    expect(error.cause, text).toBeUndefined();
+  }
+
+  it("the reproduction of SEC-028: a surrogate half written as an escape is 400", async () => {
+    await expectRefused(`{"note":"A${HIGH}B"}`);
+    // Without the refusal, two different bodies would be stored as one value, A U+FFFD B.
+    const stored = (text: string): number[] =>
+      Array.from(utf8((JSON.parse(text) as { note: string }).note));
+    expect(stored(`{"note":"A${HIGH}B"}`)).toEqual(stored('{"note":"A\\ud83eB"}'));
+    await expectRefused('{"note":"A\\ud83eB"}');
+  });
+
+  it.each([
+    ["a high half alone", `"${HIGH}"`],
+    ["a low half alone", `"${LOW}"`],
+    ["the first and the last half there is", '["\\ud800","\\udfff"]'],
+    ["a high half at the end of a string", `"abc${HIGH}"`],
+    ["a low half at the start of a string", `"${LOW}abc"`],
+    ["two high halves", `"${HIGH}${HIGH}"`],
+    ["a pair in the wrong order", `"${LOW}${HIGH}"`],
+    ["a high half followed by an escaped character that is not a low half", `"${HIGH}\\u0041"`],
+    ["a half next to a complete pair", `"${HIGH}${LOW}${HIGH}"`],
+    ["a half written with upper-case digits", '"\\uD83D"'],
+    ["a half between Thai letters", `"ก${HIGH}ข"`],
+    ["a half in a key", `{"k${HIGH}":1}`],
+    ["a half that is the whole key", `{"${LOW}":1}`],
+    ["a half in a key of an inner object", `{"a":{"b":[{"c${HIGH}":null}]}}`],
+    ["a half in the last element of an array", `[1,true,null,"ok","${HIGH}"]`],
+    ["a half under the last of many keys", `{"a":"x","b":[1,2],"c":{"d":"${LOW}"}}`],
+    ["a half in a key whose value is an array", `{"${HIGH}":[]}`],
+    ["a half under the key __proto__", `{"__proto__":{"a":"${HIGH}"}}`],
+    ["a half in a key beside the key __proto__", `{"__proto__":1,"${HIGH}":2}`],
+  ])("refuses %s", async (_label, text) => {
+    await expectRefused(text);
+  });
+
+  it("refuses a half at every depth the nesting limit allows, in arrays and in objects", async () => {
+    for (const depth of [1, 2, 31, 32]) {
+      await expectRefused(`${"[".repeat(depth)}"${HIGH}"${"]".repeat(depth)}`);
+      await expectRefused(`${'{"k":'.repeat(depth)}"${LOW}"${"}".repeat(depth)}`);
+      await expectRefused(`${'{"k":'.repeat(depth - 1)}{"${HIGH}":1}${"}".repeat(depth - 1)}`);
+    }
+  });
+
+  it("keeps accepting well-formed text, however it is written", async () => {
+    const accepted: [string, unknown][] = [
+      [`"${HIGH}${LOW}"`, "\u{1f600}"],
+      ['"\\uD83D\\uDE00"', "\u{1f600}"],
+      [`"${HIGH}${LOW}${HIGH}${LOW}"`, "\u{1f600}\u{1f600}"],
+      ['"\\ud7ff\\ue000"', "퟿"],
+      ['"\\ufffd"', "�"],
+      ['"\\u0000"', "\u0000"],
+      // An escaped backslash followed by the letters: six ordinary characters, not an escape.
+      ['"\\\\ud83d"', "\\ud83d"],
+      [`{"${HIGH}${LOW}":"${HIGH}${LOW}"}`, { "\u{1f600}": "\u{1f600}" }],
+      [JSON.stringify({ title: "เสื้อยืด \u{1f600}", tags: ["ก", "\u{10ffff}"] }), undefined],
+      ["[]", []],
+      ["{}", {}],
+      ['""', ""],
+      ["null", null],
+      ["0", 0],
+      ["true", true],
+    ];
+    for (const [text, expected] of accepted) {
+      const value = await readJsonBody(jsonPost(text));
+      expect(value, text).toEqual(expected === undefined ? JSON.parse(text) : expected);
+      expect(JSON.stringify(value).isWellFormed(), text).toBe(true);
+    }
+  });
+
+  it("hands out the parsed value itself when nothing is refused, __proto__ key included", async () => {
+    const value = (await readJsonBody(jsonPost('{"__proto__":{"a":"ok"},"b":[1]}'))) as Record<
+      string,
+      unknown
+    >;
+    expect(Object.keys(value)).toEqual(["__proto__", "b"]);
+    expect(Object.getPrototypeOf(value)).toBe(Object.prototype);
+    expect(({} as Record<string, unknown>).a).toBeUndefined();
+  });
+
+  it("the other refusals come first: too large is 413, too deep and not JSON keep their answers", async () => {
+    const large = `"${HIGH}${"a".repeat(2_000)}"`;
+    expect((await thrownBy(() => readJsonBody(jsonPost(large), { maxBytes: 1_000 }))).status).toBe(
+      413,
+    );
+    const deep = `${"[".repeat(33)}"${HIGH}"${"]".repeat(33)}`;
+    const tooDeep = await thrownBy(() => readJsonBody(jsonPost(deep)));
+    expect(tooDeep.toPublic().details).toEqual({
+      fields: [
+        {
+          path: "",
+          code: JSON_TOO_DEEP_FIELD_CODE,
+          message: "The request body nests arrays and objects more than 32 levels deep.",
+        },
+      ],
+    });
+    const notJson = await thrownBy(() => readJsonBody(jsonPost(`{"a":"${HIGH}"`)));
+    expect(notJson.toPublic()).toEqual(INVALID_JSON_PUBLIC);
+    // An escape that is not four hexadecimal digits is not JSON at all.
+    const badEscape = await thrownBy(() => readJsonBody(jsonPost('"\\ud83"')));
+    expect(badEscape.toPublic()).toEqual(INVALID_JSON_PUBLIC);
+  });
+
+  it("writes no log line and echoes nothing of the body, in the error or in the response", async () => {
+    const { logger, lines } = captureLog();
+    const text = `{"note":"MARKER-IN-BODY${HIGH}","MARKER-IN-KEY${LOW}":1}`;
+    const error = await thrownBy(() => readJsonBody(jsonPost(text)));
+    expect(`${String(error)}\n${error.stack ?? ""}\n${JSON.stringify(error)}`).not.toContain(
+      "MARKER",
+    );
+    const response = errorResponse(error, { requestId, logger });
+    expect(response.status).toBe(400);
+    const sent = await response.text();
+    expect(sent).not.toContain("MARKER");
+    expect(sent).not.toMatch(/\\ud[89a-f]/i);
+    expect(sent.isWellFormed()).toBe(true);
+    expect(lines).toHaveLength(0);
+  });
+
+  it("the walk does not recurse and follows the size of the document, at the 1 MiB ceiling", async () => {
+    const ceiling = { maxBytes: MAX_JSON_BODY_LIMIT_BYTES };
+    const megabyte = MAX_JSON_BODY_LIMIT_BYTES;
+    // The half is the very last thing in each document, so the whole of it is walked.
+    const shapes: [string, string][] = [
+      ["a flat array of numbers", `[${"0,".repeat((megabyte - 20) / 2)}"${HIGH}"]`],
+      ["a flat array of short strings", `[${'"a",'.repeat((megabyte - 20) / 4)}"${HIGH}"]`],
+      ["many empty arrays", `[${"[],".repeat((megabyte - 20) / 3)}"${HIGH}"]`],
+      ["many small objects", `[${'{"a":1},'.repeat((megabyte - 24) / 8)}"${HIGH}"]`],
+      ["one long string", `["${"a".repeat(megabyte - 20)}","${HIGH}"]`],
+      [
+        "many keys in one object",
+        `{${Array.from({ length: 60_000 }, (_, index) => `"k${index}":"v"`).join(",")},"z":"${HIGH}"}`,
+      ],
+      [
+        "a comb at the nesting limit",
+        `[${`${"[".repeat(31)}${"]".repeat(31)},`.repeat(16_000)}"${HIGH}"]`,
+      ],
+    ];
+    for (const [name, text] of shapes) {
+      expect(utf8(text).byteLength, name).toBeLessThanOrEqual(megabyte);
+      const started = performance.now();
+      await expectRefused(text, ceiling);
+      // A megabyte is read, scanned, parsed, and walked in well under a second on any machine.
+      expect(performance.now() - started, name).toBeLessThan(1_500);
+    }
+    // The same shapes without the half are accepted: the walk refuses nothing by its size.
+    const flat = `[${"0,".repeat((megabyte - 20) / 2)}"ok"]`;
+    expect(await readJsonBody(jsonPost(flat), ceiling)).toHaveLength((megabyte - 20) / 2 + 1);
+  }, 60_000);
 });
 
 describe("readJsonBody caps JSON nesting (SR-05 item 12, SEC-023)", () => {
@@ -1761,10 +1943,20 @@ describe("a request body that stops arriving (SR-05 item 10, SEC-024)", () => {
     }
     expect(labelsOf({ name: { nested: true }, code: ["E"] })).toEqual([undefined, undefined]);
     expect(labelsOf({ name: "", code: Number.NaN })).toEqual([undefined, undefined]);
-    // A long value is clipped; a getter that throws is survived.
-    const [longName, longCode] = labelsOf({ name: "N".repeat(5_000), code: "C".repeat(5_000) });
-    expect(longName).toHaveLength(64);
-    expect(longCode).toHaveLength(64);
+    // The longest label that is kept has 64 characters; a longer one is dropped, not cut
+    // (SEC-027). A getter that throws is survived.
+    expect(labelsOf({ name: "N".repeat(64), code: "C".repeat(64) })).toEqual([
+      "N".repeat(64),
+      "C".repeat(64),
+    ]);
+    expect(labelsOf({ name: "N".repeat(65), code: "C".repeat(65) })).toEqual([
+      undefined,
+      undefined,
+    ]);
+    expect(labelsOf({ name: "N".repeat(5_000), code: "C".repeat(5_000) })).toEqual([
+      undefined,
+      undefined,
+    ]);
     const hostile = {
       get name(): string {
         throw new Error("name getter");
@@ -1775,6 +1967,115 @@ describe("a request body that stops arriving (SR-05 item 10, SEC-024)", () => {
     };
     expect(labelsOf(hostile)).toEqual([undefined, undefined]);
     expect(requestBodyAborted().sourceErrorName).toBeUndefined();
+  });
+
+  it("the reproduction of SEC-027: a label that is free text is not written, and nothing stands in for it", async () => {
+    const text = `${MARKER} free text, 0812345678, 12 Sukhumvit Road`;
+    // Short enough to have been written whole before the fix.
+    expect(text.length).toBeLessThanOrEqual(64);
+    const { request } = breakingOff(Object.assign(new Error("x"), { name: text, code: text }));
+    const error = await rejectionOf(readJsonBody(request));
+    expect((error as RequestBodyAbortedError).sourceErrorName).toBeUndefined();
+    expect((error as RequestBodyAbortedError).sourceErrorCode).toBeUndefined();
+    const { logger, lines } = captureAll();
+    errorResponse(error, { requestId, logger });
+    // Still exactly the one line, with the fields absent: no placeholder, no note of the drop.
+    expect(lines).toHaveLength(1);
+    const line = JSON.parse(lines[0] ?? "") as Record<string, unknown>;
+    expect(Object.keys(line).sort()).toEqual(
+      ["code", "level", "message", "requestId", "status", "timestamp"].sort(),
+    );
+    expect(line).toMatchObject({
+      level: "warn",
+      message: "Request body was not received completely",
+    });
+    for (const leaked of [MARKER, "free text", "0812345678", "Sukhumvit"]) {
+      expect(lines[0]).not.toContain(leaked);
+    }
+  });
+
+  it("keeps a label only when it has the form of a class name or of an error code (SEC-027)", () => {
+    const nameOf = (name: unknown) => requestBodyAborted({ name }).sourceErrorName;
+    const codeOf = (code: unknown) => requestBodyAborted({ code }).sourceErrorCode;
+
+    for (const name of ["Error", "TypeError", "AbortError", "_Private", "$jq", "E", "Http2Error"]) {
+      expect(nameOf(name), name).toBe(name);
+    }
+    for (const code of [
+      "ECONNRESET",
+      "UND_ERR_SOCKET",
+      "ERR_STREAM_PREMATURE_CLOSE",
+      "E",
+      "20",
+      "-4077",
+      "a.b-c_d",
+    ]) {
+      expect(codeOf(code), code).toBe(code);
+    }
+    // A numeric code is written as its digits; a number is never a class name.
+    expect(codeOf(104)).toBe("104");
+    expect(codeOf(-4077)).toBe("-4077");
+    expect(codeOf(0)).toBe("0");
+    expect(codeOf(1.5)).toBe("1.5");
+    expect(codeOf(1e21)).toBeUndefined(); // "1e+21": the `+` is not of the form
+    expect(codeOf(Number.NaN)).toBeUndefined();
+    expect(codeOf(Number.NEGATIVE_INFINITY)).toBeUndefined();
+    expect(nameOf(12)).toBeUndefined();
+
+    const refusedAsEither = [
+      "",
+      " ",
+      "two words",
+      "Error ",
+      " Error",
+      "Error\n",
+      "\nError",
+      "Error\r",
+      "Error ",
+      "Error\u0000",
+      'a\n{"level":"error"}',
+      "somchai@example.com",
+      "0812345678 somchai",
+      "12 Sukhumvit Road",
+      "password=hunter2",
+      "token:abc",
+      "https://user:pw@host.example/",
+      "a/b",
+      "a\\b",
+      "a,b",
+      "(x)",
+      '"quoted"',
+      "<b>",
+      "ก",
+      "Ｅｒｒｏｒ",
+      "Errór",
+      "\u{1f600}",
+    ];
+    for (const text of refusedAsEither) {
+      expect(nameOf(text), JSON.stringify(text)).toBeUndefined();
+      expect(codeOf(text), JSON.stringify(text)).toBeUndefined();
+    }
+    // The two forms differ: a name is an identifier, a code may start with a digit or hold `.`
+    // and `-`, and `$` belongs to names only.
+    for (const text of ["1Error", "a.b", "a-b", "-4077", "0812345678", "."]) {
+      expect(nameOf(text), text).toBeUndefined();
+      expect(codeOf(text), text).toBe(text);
+    }
+    expect(nameOf("$jq")).toBe("$jq");
+    expect(codeOf("$jq")).toBeUndefined();
+    // Not a string and not a number: nothing is converted, so no `toString` of the value runs.
+    let conversions = 0;
+    const sly = {
+      toString() {
+        conversions += 1;
+        return "Error";
+      },
+    };
+    expect(nameOf(sly)).toBeUndefined();
+    expect(codeOf(sly)).toBeUndefined();
+    expect(codeOf(BigInt(10))).toBeUndefined();
+    expect(codeOf(true)).toBeUndefined();
+    expect(conversions).toBe(0);
   });
 
   it("never logs the source's message, stack, or other properties, and redacts the two it copies", async () => {

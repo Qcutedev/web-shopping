@@ -67,8 +67,8 @@
  * memory, and a body that is not valid JSON makes `request.json()` throw a SyntaxError, which
  * `errorResponse` would turn into a 500 with an error-level log line per request.
  * `readJsonBody` checks the content type first (415), reads at most a fixed number of bytes
- * (413), and maps a body that is not valid UTF-8, is not valid JSON, or nests too deep to 400
- * VALIDATION_ERROR.
+ * (413), and maps a body that is not valid UTF-8, is not valid JSON, nests too deep, or holds a
+ * string that is not well-formed Unicode to 400 VALIDATION_ERROR.
  *
  * Validation errors: only request input becomes 400 VALIDATION_ERROR, and only
  * because the handler says so, by calling `readJsonBody`, `parseInput` (or
@@ -89,6 +89,7 @@ import {
   invalidJsonBody,
   isAppError,
   jsonBodyTooDeep,
+  jsonStringNotWellFormed,
   payloadTooLarge,
   RateLimitedError,
   requestBodyAborted,
@@ -435,6 +436,48 @@ function nestsDeeperThan(text: string, maxDepth: number): boolean {
 }
 
 /**
+ * True when `value`, as `JSON.parse` returned it, holds a string that is not well-formed
+ * Unicode: a surrogate half without its other half, in a string value or in an object key, at
+ * any depth (SR-05 item 11, SEC-028). The bytes of a body are strict UTF-8 and cannot carry
+ * such a string, but an escape can: `"\ud83d"` is valid JSON in plain ASCII.
+ *
+ * No recursion: the arrays and objects still to be looked at are kept on a list. Every array,
+ * object, key, and string is looked at once and `isWellFormed` is one pass over its string, so
+ * the cost is in proportion to the size of the document, which the byte limit bounds. Numbers,
+ * booleans, and `null` are passed over where they stand and never put on the list. The walk
+ * stops at the first such string, and nothing of it is kept.
+ *
+ * Written for what `JSON.parse` returns: plain arrays and plain objects with own data
+ * properties, a tree with no value shared between two places. It runs no code of the value.
+ */
+function holdsStringNotWellFormed(value: unknown): boolean {
+  if (typeof value === "string") return !value.isWellFormed();
+  if (typeof value !== "object" || value === null) return false;
+
+  const pending: object[] = [value];
+  /** Judges one child: a string at once, an array or object later. True when it is refused. */
+  const refuses = (child: unknown): boolean => {
+    if (typeof child === "string") return !child.isWellFormed();
+    if (typeof child === "object" && child !== null) pending.push(child);
+    return false;
+  };
+  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+    if (Array.isArray(node)) {
+      const items: readonly unknown[] = node;
+      for (let index = 0; index < items.length; index += 1) {
+        if (refuses(items[index])) return true;
+      }
+    } else {
+      const record = node as Record<string, unknown>;
+      for (const key of Object.keys(record)) {
+        if (!key.isWellFormed() || refuses(record[key])) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
  * Reads the JSON body of a mutation. The one way a handler reads a JSON body (SR-05), in this
  * order:
  *
@@ -454,7 +497,14 @@ function nestsDeeperThan(text: string, maxDepth: number): boolean {
  *      `jsonBodyTooDeep` in src/server/errors.ts, whose `code` is provisional
  *      (docs/API_CONTRACTS.md item 8.2-12);
  *   6. a body that is not valid JSON (an empty body included) is 400 VALIDATION_ERROR with
- *      `details.fields = [{ path: "", code: "invalid_json", message }]`.
+ *      `details.fields = [{ path: "", code: "invalid_json", message }]`;
+ *   7. a body that parses but holds a string that is not well-formed Unicode (a surrogate half
+ *      without its other half, written as a `\u` escape), in a value or in a key, is 400
+ *      VALIDATION_ERROR (SR-05 item 11, SEC-028): what would later be stored for it is U+FFFD,
+ *      a text the client did not send. It is never repaired and never handed out. Its field
+ *      error is `jsonStringNotWellFormed` in src/server/errors.ts, whose `code` is provisional
+ *      (docs/API_CONTRACTS.md item 8.2-12). A complete pair written as two escapes is ordinary
+ *      text.
  *
  * 413 and 400 are ordinary client errors: nothing is logged, nothing of the body is kept, and
  * the decoder's and the parser's errors (the parser's message quotes a piece of the body) are
@@ -504,12 +554,17 @@ export async function readJsonBody(
   if (nestsDeeperThan(text, MAX_JSON_NESTING_DEPTH)) {
     throw jsonBodyTooDeep(MAX_JSON_NESTING_DEPTH);
   }
+  let parsed: unknown;
   try {
-    return JSON.parse(text) as unknown;
+    parsed = JSON.parse(text) as unknown;
   } catch (error) {
     if (error instanceof Error && error.name === "SyntaxError") throw invalidJsonBody();
     throw error;
   }
+  // SEC-028: the parsed value is at most MAX_JSON_NESTING_DEPTH deep and no larger than the
+  // byte limit allows. The walk is iterative all the same, so it depends on neither.
+  if (holdsStringNotWellFormed(parsed)) throw jsonStringNotWellFormed();
+  return parsed;
 }
 
 /**

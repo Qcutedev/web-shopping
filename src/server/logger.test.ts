@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AppError, notFound } from "./errors";
 import {
@@ -1578,4 +1581,188 @@ describe("level of the process-wide logger (setLogLevel)", () => {
       expect(getLogLevel()).toBe("warn");
     },
   );
+});
+
+/**
+ * One process can hold more than one copy of this module: measured with Next.js 16.4.0, the
+ * start-up hook and the route handlers each get their own. `vi.resetModules()` followed by a
+ * second dynamic import gives the same situation here: two evaluations of the file, each with
+ * its own module variables, in one process with one `globalThis`. Every case below fails when
+ * the level is kept in a module variable.
+ */
+describe("the level is one per process, shared by every copy of the module", () => {
+  type LoggerModule = typeof import("./logger");
+
+  const LEVEL_KEY = Symbol.for("marketplace.logger.processLevel");
+  const globalRecord = globalThis as unknown as Record<symbol, unknown>;
+
+  /** A copy of the module as a separately compiled bundle would hold it. */
+  async function freshCopy(): Promise<LoggerModule> {
+    vi.resetModules();
+    return import("./logger");
+  }
+
+  /** The levels a logger writes to stdout when asked for one line of each. */
+  function levelsWrittenBy(log: Logger): unknown[] {
+    const levels: unknown[] = [];
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      levels.push((JSON.parse(String(chunk)) as Record<string, unknown>).level);
+      return true;
+    });
+    try {
+      log.debug("d");
+      log.info("i");
+      log.warn("w");
+      log.error("e");
+    } finally {
+      spy.mockRestore();
+    }
+    return levels;
+  }
+
+  /** Back to a process in which no level was ever set. */
+  function clearProcessLevel(): void {
+    Reflect.deleteProperty(globalThis, LEVEL_KEY);
+  }
+
+  beforeEach(clearProcessLevel);
+
+  afterEach(() => {
+    clearProcessLevel();
+    vi.resetModules();
+  });
+
+  it("the two copies really are two: different functions, different logger objects", async () => {
+    const hook = await freshCopy();
+    const handlers = await freshCopy();
+    expect(handlers).not.toBe(hook);
+    expect(handlers.logger).not.toBe(hook.logger);
+    expect(handlers.setLogLevel).not.toBe(hook.setLogLevel);
+    expect(handlers.logger).not.toBe(logger);
+  });
+
+  it("the reproduction: a level set through one copy is the level the other copy logs at", async () => {
+    const hook = await freshCopy();
+    const handlers = await freshCopy();
+    // What src/server/env.ts does in the start-up hook, with LOG_LEVEL=warn.
+    hook.setLogLevel("warn");
+    expect(handlers.getLogLevel()).toBe("warn");
+    // What src/server/health.ts does in a route handler: its `info` line must not be written.
+    expect(levelsWrittenBy(handlers.logger.child({ requestId: "req-copies-0001" }))).toEqual([
+      "warn",
+      "error",
+    ]);
+    // And the copy this file imported at the top is a third one.
+    expect(getLogLevel()).toBe("warn");
+    expect(levelsWrittenBy(logger)).toEqual(["warn", "error"]);
+  });
+
+  it.each([
+    ["debug", ["debug", "info", "warn", "error"]],
+    ["info", ["info", "warn", "error"]],
+    ["warn", ["warn", "error"]],
+    ["error", ["error"]],
+  ] as const)("%s set in one copy makes another copy write %j", async (level, written) => {
+    const hook = await freshCopy();
+    const handlers = await freshCopy();
+    hook.setLogLevel(level);
+    expect(levelsWrittenBy(handlers.logger)).toEqual(written);
+    expect(levelsWrittenBy(hook.logger)).toEqual(written);
+  });
+
+  it("works in both directions and reaches a copy loaded after the level was set", async () => {
+    const first = await freshCopy();
+    const second = await freshCopy();
+    second.setLogLevel("error");
+    expect(first.getLogLevel()).toBe("error");
+    first.setLogLevel("debug");
+    expect(second.getLogLevel()).toBe("debug");
+    // A handler bundle that is loaded on its first request, long after the hook ran.
+    const late = await freshCopy();
+    expect(late.getLogLevel()).toBe("debug");
+    expect(levelsWrittenBy(late.logger)).toEqual(["debug", "info", "warn", "error"]);
+  });
+
+  it("reaches a child made from another copy before the level was set", async () => {
+    const hook = await freshCopy();
+    const handlers = await freshCopy();
+    const child = handlers.logger.child({ component: "early" }).child({ requestId: "req-0002" });
+    hook.setLogLevel("error");
+    expect(levelsWrittenBy(child)).toEqual(["error"]);
+  });
+
+  it("a logger made with createLogger in any copy keeps its own level", async () => {
+    const hook = await freshCopy();
+    const handlers = await freshCopy();
+    const lines: string[] = [];
+    const own = handlers.createLogger({ level: "debug", write: (line) => lines.push(line) });
+    hook.setLogLevel("error");
+    own.debug("d");
+    expect(lines).toHaveLength(1);
+  });
+
+  it("importing a copy reads no environment variable, writes nothing to the process, and cannot throw", async () => {
+    // The code of the module (comments removed) names no environment at all.
+    const code = readFileSync(fileURLToPath(new URL("./logger.ts", import.meta.url)), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+    expect(code.length).toBeGreaterThan(10_000);
+    expect(code).not.toMatch(/process\s*\.\s*env|import\s*\.\s*meta\s*\.\s*env|\bLOG_LEVEL\b/);
+
+    vi.stubEnv("LOG_LEVEL", "debug");
+    try {
+      expect(LEVEL_KEY in globalThis).toBe(false);
+      const copy = await freshCopy();
+      // Nothing was put on `globalThis` by the import: the level is simply the default.
+      expect(LEVEL_KEY in globalThis).toBe(false);
+      expect(copy.getLogLevel()).toBe("info");
+      expect(levelsWrittenBy(copy.logger)).toEqual(["info", "warn", "error"]);
+      expect(LEVEL_KEY in globalThis).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it.each([
+    ["an unknown word", "loud"],
+    ["upper case", "DEBUG"],
+    ["a number", 10],
+    ["null", null],
+    ["an object that looks like the old level cell", { current: "debug" }],
+    ["a property of every object", "constructor"],
+  ])(
+    "falls back to info, without throwing, when the process slot holds %s",
+    async (_label, value) => {
+      globalRecord[LEVEL_KEY] = value;
+      const copy = await freshCopy();
+      expect(copy.getLogLevel()).toBe("info");
+      expect(getLogLevel()).toBe("info");
+      expect(levelsWrittenBy(copy.logger)).toEqual(["info", "warn", "error"]);
+      // The next valid call repairs it for every copy.
+      copy.setLogLevel("error");
+      expect(getLogLevel()).toBe("error");
+    },
+  );
+
+  it("a slot that throws when it is read cannot break a log line or an import", async () => {
+    Object.defineProperty(globalThis, LEVEL_KEY, {
+      configurable: true,
+      get() {
+        throw new Error("hostile slot");
+      },
+    });
+    const copy = await freshCopy();
+    expect(copy.getLogLevel()).toBe("info");
+    expect(levelsWrittenBy(copy.logger)).toEqual(["info", "warn", "error"]);
+  });
+
+  it("a refused value leaves the shared level as it was, for every copy", async () => {
+    const hook = await freshCopy();
+    const handlers = await freshCopy();
+    hook.setLogLevel("warn");
+    const untyped = handlers.setLogLevel as (level: unknown) => void;
+    expect(() => untyped("loud")).toThrow(TypeError);
+    expect(hook.getLogLevel()).toBe("warn");
+    expect(handlers.getLogLevel()).toBe("warn");
+  });
 });

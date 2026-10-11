@@ -843,7 +843,7 @@ describe("SEC-024 re-check: a body that breaks off is a client error that keeps 
   // 64 characters; nothing checks that they have the form of a class name or an error code. The
   // runtime sets both today, so no caller can choose them from the network; the helper itself
   // does not enforce that, and it is the reader the upload task will reuse.
-  it.fails("SEC-027 a label that is not a class name or an error code is not written", async () => {
+  it("SEC-027 a label that is not a class name or an error code is not written", async () => {
     const text = `${MARKER} free text, 0812345678, 12 Sukhumvit Road`;
     const { request } = breaksOff(Object.assign(new Error("x"), { name: text, code: text }));
     const sent = await answer(await rejection(readJsonBody(request)));
@@ -944,7 +944,7 @@ describe("SEC-028 a string that is not well-formed Unicode reaches the caller th
   // out is then a string that cannot be written as UTF-8: whatever encodes it (the database
   // driver, a file, a hash) replaces the half by U+FFFD, so two different bodies become one
   // stored value, which is what SR-05 item 11 exists to prevent.
-  it.fails("SEC-028 a lone surrogate escape is refused or never handed out", async () => {
+  it("SEC-028 a lone surrogate escape is refused or never handed out", async () => {
     for (const body of [
       '{"note":"A\\ud83dB"}',
       '{"note":"\\udc00"}',

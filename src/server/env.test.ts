@@ -13,7 +13,7 @@ import {
   readDatabaseUrl,
 } from "./env";
 import { assertSameOrigin } from "./http";
-import { createLogger } from "./logger";
+import { createLogger, DEFAULT_LOG_LEVEL, setLogLevel } from "./logger";
 
 // Made-up values. Each is unmistakable, so a test can assert that none of it reaches a message.
 const DATABASE_URL = "postgresql://shop_app:Zq7canaryPw@db.example.test:5432/shop";
@@ -48,6 +48,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   vi.resetModules();
+  // The level is one per process and outlives a module reset, so each case starts from the default.
+  setLogLevel(DEFAULT_LOG_LEVEL);
 });
 
 describe("parseEnv: a valid environment", () => {

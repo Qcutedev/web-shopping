@@ -19,8 +19,10 @@ import {
   invalidJsonBody,
   invalidStateTransition,
   isAppError,
+  JSON_STRING_NOT_WELL_FORMED_FIELD_CODE,
   JSON_TOO_DEEP_FIELD_CODE,
   jsonBodyTooDeep,
+  jsonStringNotWellFormed,
   MAX_CONFLICT_REASON_LENGTH,
   MAX_FIELD_ERRORS,
   MAX_FIELD_MESSAGE_LENGTH,
@@ -465,8 +467,29 @@ describe("jsonBodyTooDeep and requestBodyAborted (provisional, items 8.2-12 and 
     });
   });
 
-  it("the provisional choices add no public code: both reuse what the contract already has", () => {
+  it("jsonStringNotWellFormed is a 400 VALIDATION_ERROR with one root field error and no cause", () => {
+    const error = jsonStringNotWellFormed();
+    expect(error.status).toBe(400);
+    expect(error.cause).toBeUndefined();
+    expect(error.toPublic()).toEqual({
+      code: "VALIDATION_ERROR",
+      message: "The request is invalid.",
+      details: {
+        fields: [
+          {
+            path: "",
+            code: JSON_STRING_NOT_WELL_FORMED_FIELD_CODE,
+            message: "The request body contains a string that is not well-formed Unicode.",
+          },
+        ],
+      },
+    });
+  });
+
+  it("the provisional choices add no public code: all reuse what the contract already has", () => {
     expect(JSON_TOO_DEEP_FIELD_CODE).toBe(INVALID_JSON_CODE);
+    // SEC-028 as ruled: the existing field code for a refused JSON body, until 8.2-12 is ruled.
+    expect(JSON_STRING_NOT_WELL_FORMED_FIELD_CODE).toBe(INVALID_JSON_CODE);
     expect(ABORTED_BODY_ERROR_CODE).toBe("VALIDATION_ERROR");
     expect(Object.keys(DOCUMENTED)).toContain(ABORTED_BODY_ERROR_CODE);
     expect(DOCUMENTED[ABORTED_BODY_ERROR_CODE]).toBeLessThan(500);
@@ -505,5 +528,37 @@ describe("jsonBodyTooDeep and requestBodyAborted (provisional, items 8.2-12 and 
     }
     expect(error.message).not.toContain("10.0.0.7");
     expect(error.stack ?? "").not.toContain("10.0.0.7");
+  });
+
+  it("requestBodyAborted drops a label that is not a class name or an error code (SEC-027)", () => {
+    const text = "MARKER free text, 0812345678, 12 Sukhumvit Road";
+    const error = requestBodyAborted(Object.assign(new Error("x"), { name: text, code: text }));
+    // Absent, not cut and not replaced: nothing of the text is anywhere on the error.
+    expect(error.sourceErrorName).toBeUndefined();
+    expect(error.sourceErrorCode).toBeUndefined();
+    const everything = Reflect.ownKeys(error)
+      .map((key) => String((error as unknown as Record<PropertyKey, unknown>)[key]))
+      .join("\n");
+    for (const leaked of ["MARKER", "0812345678", "Sukhumvit"]) {
+      expect(everything).not.toContain(leaked);
+    }
+    // One label of the right form beside one of the wrong form: each is judged by itself.
+    const mixed = requestBodyAborted({ name: "TypeError", code: "socket hang up" });
+    expect([mixed.sourceErrorName, mixed.sourceErrorCode]).toEqual(["TypeError", undefined]);
+    const other = requestBodyAborted({ name: "not a name", code: "ECONNRESET" });
+    expect([other.sourceErrorName, other.sourceErrorCode]).toEqual([undefined, "ECONNRESET"]);
+    // Each property is read once.
+    const reads = { name: 0, code: 0 };
+    requestBodyAborted({
+      get name() {
+        reads.name += 1;
+        return "Error";
+      },
+      get code() {
+        reads.code += 1;
+        return "E1";
+      },
+    });
+    expect(reads).toEqual({ name: 1, code: 1 });
   });
 });

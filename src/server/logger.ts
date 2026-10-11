@@ -816,7 +816,7 @@ export const DEFAULT_LOG_LEVEL: LogLevel = "info";
 
 /** The level of one logger and of every child made from it. Read at each line, so it can change. */
 interface LevelCell {
-  current: LogLevel;
+  readonly current: LogLevel;
 }
 
 export function createLogger(options: LoggerOptions = {}): Logger {
@@ -878,34 +878,74 @@ function buildLogger(options: Omit<LoggerOptions, "level">, levelCell: LevelCell
   };
 }
 
-/** The level of the process-wide logger. Module state: importing this file reads no variable. */
-const processLevel: LevelCell = { current: DEFAULT_LOG_LEVEL };
+function isLogLevel(value: unknown): value is LogLevel {
+  return typeof value === "string" && Object.hasOwn(LEVEL_ORDER, value);
+}
+
+/**
+ * Where the level of the process-wide logger is kept: one property of `globalThis`, under a key
+ * from the global symbol registry, holding the level as a string.
+ *
+ * Not module state, because one process can hold more than one copy of this module. Measured
+ * with Next.js 16.4.0, in development and in production mode: the start-up hook
+ * (src/instrumentation.ts) and the route handlers are compiled separately and each gets its own
+ * copy of this file. With the level in a module variable, `setLogLevel` called from the hook
+ * changed the hook's copy only and every handler kept logging at the default. `globalThis` and
+ * the symbol registry are the two things all copies share, as src/server/db/client.ts relies on
+ * for the database client.
+ *
+ * Importing this file does not touch the property: nothing is read or written until a line is
+ * logged or one of the two functions below is called. While the property is absent, or holds
+ * anything that is not a level, the level is DEFAULT_LOG_LEVEL.
+ */
+const PROCESS_LEVEL_KEY = Symbol.for("marketplace.logger.processLevel");
+
+type GlobalWithProcessLevel = typeof globalThis & { [PROCESS_LEVEL_KEY]?: unknown };
+
+/** Never throws: a logger must not fail a request over where its level is kept. */
+function readProcessLevel(): LogLevel {
+  try {
+    const stored = (globalThis as GlobalWithProcessLevel)[PROCESS_LEVEL_KEY];
+    return isLogLevel(stored) ? stored : DEFAULT_LOG_LEVEL;
+  } catch {
+    return DEFAULT_LOG_LEVEL;
+  }
+}
+
+/** The level of the process-wide logger, read from the process at every line. */
+const processLevel: LevelCell = {
+  get current(): LogLevel {
+    return readProcessLevel();
+  },
+};
 
 /**
  * Process-wide logger. Use `logger.child({ requestId })` inside a request.
  *
- * Its level is DEFAULT_LOG_LEVEL until `setLogLevel` is called. This module never reads the
- * environment, at import or later: src/server/env.ts is the one place that does, and it imports
- * this module, so the validated `LOG_LEVEL` is handed over by a call, not fetched from here.
+ * Its level is DEFAULT_LOG_LEVEL until `setLogLevel` is called, in this copy of the module or in
+ * any other copy in the same process. This module never reads the environment, at import or
+ * later: src/server/env.ts is the one place that does, and it imports this module, so the
+ * validated `LOG_LEVEL` is handed over by a call, not fetched from here.
  */
 export const logger: Logger = buildLogger({}, processLevel);
 
 /**
  * Sets the level of the process-wide logger and of every child made from it, before or after
- * this call. For the server's start-up code, with the validated `LOG_LEVEL`
- * (`getEnv().logLevel` of src/server/env.ts). A logger made with `createLogger` is not affected.
+ * this call, in every copy of this module that the process holds (see PROCESS_LEVEL_KEY). For
+ * the server's start-up code, with the validated `LOG_LEVEL` (`getEnv().logLevel` of
+ * src/server/env.ts). A logger made with `createLogger` is not affected.
  *
  * A value that is not a level is a programming error and throws a TypeError; the level is left
  * as it was. The message names nothing of the value.
  */
 export function setLogLevel(level: LogLevel): void {
-  if (typeof level !== "string" || !Object.hasOwn(LEVEL_ORDER, level)) {
+  if (!isLogLevel(level)) {
     throw new TypeError("setLogLevel: the level must be debug, info, warn, or error.");
   }
-  processLevel.current = level;
+  (globalThis as GlobalWithProcessLevel)[PROCESS_LEVEL_KEY] = level;
 }
 
 /** The current level of the process-wide logger. */
 export function getLogLevel(): LogLevel {
-  return processLevel.current;
+  return readProcessLevel();
 }
