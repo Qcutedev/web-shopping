@@ -21,8 +21,10 @@
  * literal host, an explicit port and user, a plain test database name, at most the one query
  * parameter `schema`, and exactly the spelling the URL parser gives back. `tests/` may not import
  * the driver's parser (architecture rule 7; the lint rule covers `pg-*`), so the rules are not
- * checked against it here; the global setup asks the server which database and user it reached
- * (`assertConnectedToTestDatabase`) before it drops or creates anything.
+ * checked against it here; the global setup asks the database layer what the driver reads from
+ * the URL (`describeConnectionTarget`, compared by `assertDriverReadsTestDatabase`, CR-42) and
+ * asks the server which database and user it reached (`assertConnectedToTestDatabase`) before it
+ * drops or creates anything.
  */
 
 /** Thrown when the configured test database is not acceptable. The message holds no URL. */
@@ -50,6 +52,9 @@ export type TestDatabase = {
   /** The database DATABASE_URL_TEST names. The harness only issues CREATE/DROP DATABASE from it. */
   baseUrl: string;
   baseName: string;
+  /** The host as `URL.hostname` gives it, without brackets and in lower case. */
+  host: string;
+  port: number;
   /** The user DATABASE_URL_TEST names, decoded. Compared with the server's answer; never printed. */
   user: string;
   /** Holds the migrated schema; every worker database is a copy of it. */
@@ -80,8 +85,12 @@ const DERIVED_DATABASE_NAME = /^[a-z][a-z0-9_]*$/;
  * `sslrootcert`, `sslcert`, or `sslkey` it reads files).
  */
 export const ALLOWED_QUERY_PARAMETERS: readonly string[] = ["schema"];
-/** The whole query, when there is one: `schema=<name>`, written plainly. */
-const ALLOWED_QUERY = /^schema=[A-Za-z_][A-Za-z0-9_]*$/;
+/**
+ * The whole query, when there is one: exactly `schema=public` (CR-39). The reset helper
+ * (reset.ts) works in the `public` schema only, so another schema name could only make the
+ * migrated tables and the emptied ones differ.
+ */
+const ALLOWED_QUERY = /^schema=public$/;
 
 /** A blank of any kind, a control character, or a backslash. */
 function hasForbiddenCharacter(value: string): boolean {
@@ -197,6 +206,13 @@ function assertStrictForm(testUrl: string, url: URL): void {
       "the user or the password in DATABASE_URL_TEST is not validly percent-encoded.",
     );
   }
+  // CR-40: with no password in the URL the driver takes PGPASSWORD, or reads a password file,
+  // and neither can be masked in a message the way the URL's own password is.
+  if (url.password === "") {
+    throw new TestDatabaseRefusedError(
+      "DATABASE_URL_TEST names no password; the database driver would take one from the environment or from a password file.",
+    );
+  }
   if (!TEST_HOSTS.has(url.hostname.toLowerCase())) {
     throw new TestDatabaseRefusedError(
       "the host in DATABASE_URL_TEST is not this machine (127.0.0.1 or localhost).",
@@ -230,7 +246,7 @@ function assertStrictForm(testUrl: string, url: URL): void {
   const queryStart = testUrl.indexOf("?");
   if (queryStart !== -1 && !ALLOWED_QUERY.test(testUrl.slice(queryStart + 1))) {
     throw new TestDatabaseRefusedError(
-      "the query of DATABASE_URL_TEST is not written as a plain `schema=<name>` (letters, digits, and underscores, nothing encoded).",
+      "the query of DATABASE_URL_TEST is not exactly `schema=public` (the only schema the harness works in; nothing encoded).",
     );
   }
   // Last: whatever the rules above did not think of. If the parser gives back another string
@@ -270,9 +286,21 @@ export function resolveTestDatabase(input: TestDatabaseInput): TestDatabase {
     if (other === testUrl) {
       throw new TestDatabaseRefusedError("DATABASE_URL_TEST is equal to DATABASE_URL.");
     }
+    // CR-36: a DATABASE_URL the parser rejects, or one that leaves the host or the port empty
+    // (the driver would take it from PGHOST or PGPORT, which this function does not see), cannot
+    // be shown to name another server than the test database. It is refused, not skipped.
     const otherUrl = parsePostgresUrl(other);
     if (otherUrl === undefined) {
-      continue;
+      throw new TestDatabaseRefusedError(
+        "DATABASE_URL is not a valid PostgreSQL URL, so it cannot be compared with DATABASE_URL_TEST; fix it or unset it for the integration run.",
+      );
+    }
+    const namedHost = lastNonEmpty(otherUrl.searchParams.getAll("host")) ?? otherUrl.hostname;
+    const namedPort = lastNonEmpty(otherUrl.searchParams.getAll("port")) ?? otherUrl.port;
+    if (namedHost === "" || namedPort === "") {
+      throw new TestDatabaseRefusedError(
+        "DATABASE_URL names no host or no port, so it cannot be compared with DATABASE_URL_TEST; write both, as the database driver would take the missing one from the environment.",
+      );
     }
     const otherTarget = driverTarget(otherUrl);
     if (!sameMachine(otherTarget.host, target.host) || otherTarget.port !== target.port) {
@@ -298,6 +326,8 @@ export function resolveTestDatabase(input: TestDatabaseInput): TestDatabase {
   return {
     baseUrl: testUrl,
     baseName,
+    host: url.hostname.replace(/^\[(.+)\]$/, "$1").toLowerCase(),
+    port: Number(url.port),
     user: safeDecode(url.username) ?? "",
     templateName,
     templateUrl: withDatabase(testUrl, templateName),
@@ -375,6 +405,48 @@ export function assertConnectedToTestDatabase(
       "the server reached through DATABASE_URL_TEST answered as another user than the one the URL names.",
     );
   }
+}
+
+/** What the installed database driver makes of a connection string (`describeConnectionTarget`). */
+export type DriverTarget = { host: string; port: number; database: string; user: string };
+
+/**
+ * CR-42: compares what the driver itself reads from DATABASE_URL_TEST with what this file
+ * validated, so that "no reader understands the URL differently" is checked on every run and
+ * does not rest on a hand reading of one driver version. Called by the global setup before the
+ * first connection. The driver's answer comes from `@/server/db/connection-target`; it is passed
+ * in, so that this file stays free of the database layer.
+ */
+export function assertDriverReadsTestDatabase(
+  expected: Pick<TestDatabase, "host" | "port" | "baseName" | "user">,
+  driver: DriverTarget,
+): void {
+  const driverHost = driver.host.replace(/^\[(.+)\]$/, "$1").toLowerCase();
+  const wrong: string[] = [];
+  if (driverHost !== expected.host) wrong.push("host");
+  if (driver.port !== expected.port) wrong.push("port");
+  if (driver.database !== expected.baseName) wrong.push("database");
+  if (driver.user !== expected.user) wrong.push("user");
+  if (wrong.length > 0) {
+    throw new TestDatabaseRefusedError(
+      `the database driver reads DATABASE_URL_TEST as another ${wrong.join(", ")} than the URL names.`,
+    );
+  }
+}
+
+/**
+ * CR-41: the names in `environment` that must not reach the Prisma CLI or a test worker once
+ * DATABASE_URL_TEST is validated: every `PG*` variable of the driver and libpq, and
+ * DATABASE_URL_TEST itself (the workers get the validated URL from the global setup). Compared
+ * without regard to letter case, as Windows does.
+ */
+export function inheritedDatabaseVariableNames(
+  environment: Readonly<Record<string, string | undefined>>,
+): string[] {
+  return Object.keys(environment).filter((name) => {
+    const upper = name.toUpperCase();
+    return upper.startsWith("PG") || upper === "DATABASE_URL_TEST";
+  });
 }
 
 /** Name of the database that belongs to one Vitest worker (`VITEST_POOL_ID`, 1 to maxWorkers). */

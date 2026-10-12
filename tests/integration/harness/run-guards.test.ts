@@ -35,6 +35,7 @@ import {
   RUN_LOCK_KEY,
   RunLockLostError,
 } from "../../helpers/run-lock";
+import { inheritedDatabaseVariableNames } from "../../helpers/test-database-url";
 
 const CHILD_TIMEOUT_MS = 90_000;
 // Invented values. They are distinctive so that a leak into the output is found by text.
@@ -268,6 +269,64 @@ describe("runProcess", () => {
   }, 30_000);
 });
 
+describe("what a worker inherits (CR-41)", () => {
+  // The global setup removes the PG* variables and DATABASE_URL_TEST from the environment after
+  // it validated them, before any worker is started. Run with PGHOST (or any PG* variable) set to
+  // see this case say something: it fails when the global setup leaves them in place.
+  it("has no PG* variable and no DATABASE_URL_TEST in its environment", () => {
+    expect(inheritedDatabaseVariableNames(process.env)).toEqual([]);
+  });
+});
+
+describe("a global teardown that throws (CR-37)", () => {
+  const FIXTURE_ROOT = resolve(process.cwd(), "tests/integration/fixtures/teardown");
+
+  /** One Vitest run of the stand-in global setup of the fixture directory; no database is used. */
+  function runTeardownFixture(mode: "throw" | "end"): Promise<ProcessRun> {
+    const env: NodeJS.ProcessEnv = { NODE_ENV: process.env.NODE_ENV };
+    for (const [name, value] of Object.entries(process.env)) {
+      if (!name.toUpperCase().startsWith("VITEST")) {
+        env[name] = value;
+      }
+    }
+    env["FIXTURE_TEARDOWN"] = mode;
+    return runProcess(
+      process.execPath,
+      [
+        resolve(process.cwd(), "node_modules/vitest/vitest.mjs"),
+        "run",
+        "--root",
+        FIXTURE_ROOT,
+        "--config",
+        resolve(FIXTURE_ROOT, "vitest.config.mts"),
+      ],
+      { cwd: FIXTURE_ROOT, env, timeoutMs: CHILD_TIMEOUT_MS },
+    );
+  }
+
+  // The real teardown throws RunLockLostError when the run lock was lost. That the run then ends
+  // with a non-zero exit code is a property of Vitest, and the fixture is what proves it for the
+  // installed version: a green exit here would turn a lost lock into a passing run.
+  it(
+    "makes the run exit with a non-zero code although every test passed",
+    async () => {
+      const control = await runTeardownFixture("end");
+      expect(control.timedOut).toBe(false);
+      expect(control.exitCode).toBe(0);
+      expect(control.output).toMatch(/Tests\s+1 passed/);
+
+      const run = await runTeardownFixture("throw");
+
+      expect(run.timedOut).toBe(false);
+      expect(run.exitCode).not.toBe(0);
+      expect(run.exitCode).not.toBeNull();
+      expect(run.output).toMatch(/Tests\s+1 passed/);
+      expect(run.output).toContain("fixture teardown failed on purpose");
+    },
+    CHILD_TIMEOUT_MS * 2 + 10_000,
+  );
+});
+
 describe("a second integration run started during this one", () => {
   it.each([
     [
@@ -304,6 +363,27 @@ describe("a second integration run started during this one", () => {
       `postgresql://${SECRET_USER}:${SECRET_PASSWORD}@127.0.0.1:5433/marketplace_test`,
       { PGOPTIONS: `-c application_name=${SECRET_OPTION}` },
       "PGOPTIONS is set in the environment",
+    ],
+    [
+      // CR-36: a DATABASE_URL that is not a PostgreSQL URL cannot be shown to name another server.
+      "a DATABASE_URL that is not a PostgreSQL URL",
+      `postgresql://${SECRET_USER}:${SECRET_PASSWORD}@127.0.0.1:5433/marketplace_test`,
+      { DATABASE_URL: "file:./dev.db" },
+      "DATABASE_URL is not a valid PostgreSQL URL",
+    ],
+    [
+      // CR-40: the driver would take PGPASSWORD, which no message could mask.
+      "a URL with no password",
+      `postgresql://${SECRET_USER}@127.0.0.1:5433/marketplace_test`,
+      { PGPASSWORD: SECRET_PASSWORD },
+      "DATABASE_URL_TEST names no password",
+    ],
+    [
+      // CR-39: the reset helper works in `public` only.
+      "a schema other than public",
+      `postgresql://${SECRET_USER}:${SECRET_PASSWORD}@127.0.0.1:5433/marketplace_test?schema=${SECRET_NAME}`,
+      {},
+      "is not exactly `schema=public`",
     ],
   ])(
     "is refused for %s, and prints no part of the URL",

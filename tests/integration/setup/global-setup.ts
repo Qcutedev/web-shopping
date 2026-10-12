@@ -3,6 +3,10 @@
  *
  * 1. Refuses to continue unless DATABASE_URL_TEST names the local test database
  *    (tests/helpers/test-database-url.ts). Nothing is connected to before that check passes.
+ * 1b. Asks the database layer what the installed driver reads from the URL
+ *    (`describeConnectionTarget`) and refuses when it is not the host, port, database, and user
+ *    that were validated (CR-42). Then removes the PG* variables and DATABASE_URL_TEST from the
+ *    environment, so that the Prisma CLI and the workers do not inherit them (CR-41).
  * 2. Sets DATABASE_URL of this process to the test URL, so that nothing started from here can
  *    inherit the development URL.
  * 3. Connects, asks the server which database and user it reached, and refuses to continue when
@@ -25,14 +29,19 @@ import { parseEnv } from "node:util";
 
 import type { TestProject } from "vitest/node";
 
+import { describeConnectionTarget, type ConnectionTarget } from "@/server/db/connection-target";
+
 import { describeMigrateFailure } from "../../helpers/migrate-output";
 import { acquireRunLock, type RunLock } from "../../helpers/run-lock";
 import { quoteIdentifier } from "../../helpers/sql";
 import {
   assertConnectedToTestDatabase,
+  assertDriverReadsTestDatabase,
   assertNoDriverEnvironmentOverride,
+  inheritedDatabaseVariableNames,
   resolveTestDatabase,
   staleWorkerDatabaseNames,
+  TestDatabaseRefusedError,
   workerDatabaseName,
   type ConnectedTarget,
   type TestDatabase,
@@ -67,14 +76,16 @@ function nonEmpty(value: string | undefined): string | undefined {
   return value === undefined || value === "" ? undefined : value;
 }
 
-function migrateTemplate(database: TestDatabase): void {
+function migrateTemplate(database: TestDatabase, emptied: Record<string, string>): void {
   const cli = resolve(process.cwd(), "node_modules/prisma/build/index.js");
   // prisma7.config.ts reads DATABASE_URL and never overrides a variable that is already set.
+  // `emptied` holds the PG* names of the `.env` file, set to empty so that loading that file
+  // cannot bring them back (CR-41); process.env no longer has any PG* variable at this point.
   // The time limit stops the CLI process itself. On Windows a process it started (the schema
   // engine) is not stopped with it; that one ends when its pipes close.
   const result = spawnSync(process.execPath, [cli, "migrate", "deploy"], {
     cwd: process.cwd(),
-    env: { ...process.env, DATABASE_URL: database.templateUrl },
+    env: { ...process.env, ...emptied, DATABASE_URL: database.templateUrl },
     encoding: "utf8",
     timeout: MIGRATE_TIMEOUT_MS,
     killSignal: "SIGKILL",
@@ -112,6 +123,33 @@ export default async function setup(project: TestProject): Promise<() => Promise
     testUrl: nonEmpty(process.env["DATABASE_URL_TEST"]) ?? nonEmpty(fileEnv["DATABASE_URL_TEST"]),
     otherUrls: [process.env["DATABASE_URL"], fileEnv["DATABASE_URL"]],
   });
+
+  // CR-42, on every run: what the installed driver reads from the URL is what was validated.
+  // This is the driver's own parser, asked before anything connects; PG* variables are still in
+  // the environment here, so a difference they would cause is seen too.
+  let driverTarget: ConnectionTarget;
+  try {
+    driverTarget = describeConnectionTarget(database.baseUrl);
+  } catch {
+    throw new TestDatabaseRefusedError(
+      "the database driver cannot read DATABASE_URL_TEST as a host, port, database, and user.",
+    );
+  }
+  assertDriverReadsTestDatabase(database, driverTarget);
+
+  // CR-41: from here on nothing needs the PG* variables or DATABASE_URL_TEST of the environment,
+  // and the Prisma CLI and the workers must not inherit them (the driver and libpq read PG*
+  // variables, and PGPASSWORD or a password file cannot be masked in an error message).
+  // The `.env` file is loaded by prisma7.config.ts without overriding a variable that is already
+  // set, so the names it holds are set to empty for the CLI, whose own copy of `process.env`
+  // this is not.
+  for (const name of inheritedDatabaseVariableNames(process.env)) {
+    delete process.env[name];
+  }
+  const migrateEnv: Record<string, string> = {};
+  for (const name of inheritedDatabaseVariableNames(fileEnv)) {
+    migrateEnv[name] = "";
+  }
 
   // From here on the only database URL this process and its children know is a test one.
   process.env["DATABASE_URL"] = database.baseUrl;
@@ -162,7 +200,7 @@ export default async function setup(project: TestProject): Promise<() => Promise
       await db.$executeRawUnsafe(`DROP DATABASE IF EXISTS ${quoteIdentifier(name)} WITH (FORCE)`);
     }
     await db.$executeRawUnsafe(`CREATE DATABASE ${template}`);
-    migrateTemplate(database);
+    migrateTemplate(database, migrateEnv);
     const migratedAt = performance.now();
     for (const name of workerNames) {
       await db.$executeRawUnsafe(`CREATE DATABASE ${quoteIdentifier(name)} TEMPLATE ${template}`);

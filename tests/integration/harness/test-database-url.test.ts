@@ -12,7 +12,9 @@ import { describe, expect, it } from "vitest";
 import {
   ALLOWED_QUERY_PARAMETERS,
   assertConnectedToTestDatabase,
+  assertDriverReadsTestDatabase,
   assertNoDriverEnvironmentOverride,
+  inheritedDatabaseVariableNames,
   isWorkerDatabaseName,
   REFUSED_ENVIRONMENT_VARIABLES,
   resolveTestDatabase,
@@ -42,7 +44,10 @@ const OTHER_NAME = "name_must_not_leak";
 const NOT_ALLOWED =
   "DATABASE_URL_TEST has a query parameter that is not allowed (only `schema` is)";
 const DUPLICATE = "DATABASE_URL_TEST has the same query parameter more than once.";
-const NOT_PLAIN_QUERY = "the query of DATABASE_URL_TEST is not written as a plain `schema=<name>`";
+const NOT_PLAIN_QUERY = "the query of DATABASE_URL_TEST is not exactly `schema=public`";
+const NO_PASSWORD = "DATABASE_URL_TEST names no password";
+const OTHER_URL_INVALID = "DATABASE_URL is not a valid PostgreSQL URL";
+const OTHER_URL_NO_HOST_OR_PORT = "DATABASE_URL names no host or no port";
 const FORBIDDEN_CHARACTER =
   "DATABASE_URL_TEST contains a blank, a control character, or a backslash.";
 const FRAGMENT = "DATABASE_URL_TEST contains a '#' (a fragment)";
@@ -107,10 +112,20 @@ describe("resolveTestDatabase accepts the local test database", () => {
     expect(new URL(database.templateUrl).password).toBe("p%40ss%23word");
   });
 
-  it.each(["public", "app_schema", "_x", "S1"])("accepts the schema name %s", (schema) => {
+  it("accepts the schema public", () => {
     expect(
-      resolveTestDatabase({ testUrl: `${PLAIN_URL}?schema=${schema}`, otherUrls: [] }).baseName,
+      resolveTestDatabase({ testUrl: `${PLAIN_URL}?schema=public`, otherUrls: [] }).baseName,
     ).toBe("shop_test");
+  });
+
+  it("returns the host and port as the URL names them", () => {
+    const database = resolveTestDatabase({ testUrl: urlFor("[::1]", "shop_test"), otherUrls: [] });
+
+    expect(database.host).toBe("::1");
+    expect(database.port).toBe(5433);
+    expect(
+      resolveTestDatabase({ testUrl: urlFor("LOCALHOST", "shop_test"), otherUrls: [] }).host,
+    ).toBe("localhost");
   });
 
   it("allows exactly one query parameter, schema", () => {
@@ -309,6 +324,11 @@ describe("resolveTestDatabase refuses a query that could change the target (CR-2
     ["with a dot in the value", "schema=a.b"],
     ["with a quote in the value", 'schema="public"'],
     ["with a semicolon and a second parameter in the value", "schema=public;host=example"],
+    // CR-39: the reset helper works in `public` only, so no other schema name is accepted.
+    ["with a schema other than public", "schema=app_schema"],
+    ["with a schema that starts with an underscore", "schema=_x"],
+    ["with a schema in capitals", "schema=PUBLIC"],
+    ["with a schema that only starts like public", "schema=public2"],
     ["followed by an empty parameter", "schema=public&"],
     ["after an empty parameter", "&schema=public"],
     ["as an empty query", ""],
@@ -374,6 +394,14 @@ describe("resolveTestDatabase refuses a URL another reader could understand diff
     ["no credentials and no host", "postgresql:///shop_test"],
   ])("refuses %s: the driver would take the user from the environment", (_label, value) => {
     expect(refusal(value)).toContain(NO_USER);
+  });
+
+  // CR-40: an empty password makes `pg` take PGPASSWORD or a password file.
+  it.each([
+    ["a user and no password", "postgresql://tester@127.0.0.1:5433/shop_test"],
+    ["a user and an empty password", "postgresql://tester:@127.0.0.1:5433/shop_test"],
+  ])("refuses %s", (_label, value) => {
+    expect(refusal(value)).toContain(NO_PASSWORD);
   });
 
   it.each([
@@ -461,22 +489,56 @@ describe("resolveTestDatabase refuses the server of DATABASE_URL, whatever the d
       "a Unix socket of this machine in the query",
       `${urlFor(OTHER_HOST, "marketplace_dev")}?host=/var/run/postgresql`,
     ],
-    ["an empty host", "postgresql:///marketplace_dev?port=5433"],
+    [
+      "an empty host with the port in the query, host from the query",
+      "postgresql:///x?host=localhost&port=5433",
+    ],
   ])("refuses when DATABASE_URL is on the same host and port, with %s", (_label, other) => {
     expect(refusal(TEST_URL, [other])).toContain(SAME_SERVER);
     // In whichever position the URL is in play.
     expect(refusal(TEST_URL, [undefined, DEV_URL, other])).toContain(SAME_SERVER);
   });
 
-  it("treats a missing port of DATABASE_URL as 5432", () => {
-    const testOnDefaultPort = urlFor("127.0.0.1", "marketplace_test", "5432");
-    const otherWithoutPort = `postgresql://${CREDENTIALS}@localhost/marketplace_dev`;
+  // CR-36: these used to be guessed (5432, localhost) or skipped; the driver would take the
+  // missing part from PGHOST or PGPORT, so they are refused.
+  it.each([
+    ["a value that is not a PostgreSQL URL", "file:./dev.db"],
+    ["a text that is not a URL", "not a url at all"],
+    ["another scheme", `mysql://${CREDENTIALS}@${OTHER_HOST}/${OTHER_NAME}`],
+    ["blanks only", "   "],
+    ["credentials and an empty host", `postgresql://${CREDENTIALS}@/marketplace_dev`],
+    ["an authority the parser rejects", `postgresql://${USER}:pw#word@127.0.0.1:5432/x`],
+  ])("refuses a DATABASE_URL that is %s", (_label, other) => {
+    const message = refusal(TEST_URL, [other]);
 
-    expect(refusal(testOnDefaultPort, [otherWithoutPort])).toContain(SAME_SERVER);
+    expect(message).toContain(OTHER_URL_INVALID);
+    expect(message).not.toContain(PASSWORD);
+    expect(message).not.toContain(OTHER_HOST);
+    expect(message).not.toContain(OTHER_NAME);
   });
 
   it.each([
+    ["no port", `postgresql://${CREDENTIALS}@localhost/marketplace_dev`],
+    ["an empty port", `postgresql://${CREDENTIALS}@localhost:/marketplace_dev`],
+    ["no host and the port in the query", "postgresql:///marketplace_dev?port=5433"],
+    ["the host in the query and no port", `postgresql:///marketplace_dev?host=${OTHER_HOST}`],
+  ])(
+    "refuses a DATABASE_URL with %s: the driver would take it from the environment",
+    (_l, other) => {
+      const message = refusal(TEST_URL, [other]);
+
+      expect(message).toContain(OTHER_URL_NO_HOST_OR_PORT);
+      expect(message).not.toContain(OTHER_HOST);
+      expect(message).not.toContain(OTHER_NAME);
+    },
+  );
+
+  it.each([
     ["another port on this machine", urlFor("127.0.0.1", "marketplace_dev", "5432")],
+    [
+      "a Unix-socket host and another port in the query",
+      "postgresql:///marketplace_dev?host=/var/run/postgresql&port=5432",
+    ],
     ["the same port on another machine", urlFor(OTHER_HOST, "marketplace_dev")],
     [
       "this port in the authority and another in the query",
@@ -486,7 +548,6 @@ describe("resolveTestDatabase refuses the server of DATABASE_URL, whatever the d
       "this machine in the authority and another host in the query",
       `${urlFor("127.0.0.1", "marketplace_dev")}?host=${OTHER_HOST}`,
     ],
-    ["a value that is not a PostgreSQL URL", "file:./dev.db"],
   ])("does not refuse a DATABASE_URL with %s", (_label, other) => {
     expect(resolveTestDatabase({ testUrl: TEST_URL, otherUrls: [other] }).baseName).toBe(
       "marketplace_test",
@@ -528,6 +589,10 @@ describe("no refusal message carries the URL or a part of it", () => {
       [],
     ],
     ["no user", `postgresql://:${PASSWORD}@127.0.0.1:5433/shop_test`, [DEV_URL]],
+    ["no password", `postgresql://${USER}@127.0.0.1:5433/shop_test`, [DEV_URL]],
+    // CR-36: a DATABASE_URL that is refused names the same secrets as a test URL would.
+    ["a DATABASE_URL that is not a URL", PLAIN_URL, [`mysql://${CREDENTIALS}@${SECRET_HOST}/x`]],
+    ["a DATABASE_URL with no port", PLAIN_URL, [`postgresql://${CREDENTIALS}@${SECRET_HOST}/x`]],
     ["no port", `postgresql://${CREDENTIALS}@127.0.0.1/shop_test`, [DEV_URL]],
     ["an encoded socket host", urlFor("%2Fvar%2Frun%2Fmust-not-leak", "shop_test"), [DEV_URL]],
     ["two hosts", urlFor(`127.0.0.1,${SECRET_HOST}`, "shop_test"), [DEV_URL]],
@@ -676,6 +741,101 @@ describe("assertConnectedToTestDatabase", () => {
     );
     expect(message).not.toContain("user-must-not-leak");
     expect(message).not.toContain("tester");
+  });
+});
+
+describe("assertDriverReadsTestDatabase (CR-42)", () => {
+  const expected = { host: "127.0.0.1", port: 5433, baseName: "shop_test", user: "tester" };
+  const read = { host: "127.0.0.1", port: 5433, database: "shop_test", user: "tester" };
+
+  function driverRefusal(driver: Parameters<typeof assertDriverReadsTestDatabase>[1]): string {
+    let caught: unknown;
+    try {
+      assertDriverReadsTestDatabase(expected, driver);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(TestDatabaseRefusedError);
+    return (caught as TestDatabaseRefusedError).message;
+  }
+
+  it("accepts what the URL was validated to name", () => {
+    expect(() => assertDriverReadsTestDatabase(expected, read)).not.toThrow();
+  });
+
+  it("compares the host without brackets and without regard to letter case", () => {
+    expect(() =>
+      assertDriverReadsTestDatabase({ ...expected, host: "::1" }, { ...read, host: "[::1]" }),
+    ).not.toThrow();
+    expect(() =>
+      assertDriverReadsTestDatabase(
+        { ...expected, host: "localhost" },
+        { ...read, host: "LocalHost" },
+      ),
+    ).not.toThrow();
+  });
+
+  it.each([
+    ["host", { ...read, host: "host-must-not-leak.example.com" }],
+    ["port", { ...read, port: 5432 }],
+    ["database", { ...read, database: "name_must_not_leak" }],
+    ["user", { ...read, user: "user-must-not-leak" }],
+  ])("refuses a driver that reads another %s, and names no value", (field, driver) => {
+    const message = driverRefusal(driver);
+
+    expect(message).toContain(`another ${field} than the URL names`);
+    expect(message).not.toContain("must-not-leak");
+    expect(message).toContain("No database was touched.");
+  });
+
+  it("names every part that differs", () => {
+    expect(driverRefusal({ host: "other", port: 1, database: "other", user: "other" })).toContain(
+      "another host, port, database, user than the URL names",
+    );
+  });
+
+  it("agrees with resolveTestDatabase on the target it returns", () => {
+    const database = resolveTestDatabase({ testUrl: TEST_URL, otherUrls: [] });
+
+    expect(() =>
+      assertDriverReadsTestDatabase(database, {
+        host: "127.0.0.1",
+        port: 5433,
+        database: "marketplace_test",
+        user: USER,
+      }),
+    ).not.toThrow();
+  });
+});
+
+describe("inheritedDatabaseVariableNames (CR-41)", () => {
+  it("names the PG* variables and DATABASE_URL_TEST, in any letter case", () => {
+    expect(
+      inheritedDatabaseVariableNames({
+        PGPASSWORD: "x",
+        PGHOST: "x",
+        pgservice: "x",
+        PGPASSFILE: "x",
+        DATABASE_URL_TEST: "x",
+        database_url_test: "x",
+        PATH: "x",
+        DATABASE_URL: "x",
+        NODE_ENV: "test",
+      }).sort(),
+    ).toEqual(
+      [
+        "PGPASSWORD",
+        "PGHOST",
+        "pgservice",
+        "PGPASSFILE",
+        "DATABASE_URL_TEST",
+        "database_url_test",
+      ].sort(),
+    );
+  });
+
+  it("names nothing in an environment without them", () => {
+    expect(inheritedDatabaseVariableNames({ PATH: "x", HOME: "y", DATABASE_URL: "z" })).toEqual([]);
   });
 });
 

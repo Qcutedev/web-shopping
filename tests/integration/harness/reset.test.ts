@@ -6,6 +6,7 @@
 import { describe, expect, inject, it, vi } from "vitest";
 
 import { db, Prisma } from "@/server/db";
+import { TEST_ONLY_DB_GLOBAL_KEY } from "@/server/db/testing";
 
 import {
   createAuditLog,
@@ -201,7 +202,8 @@ describe("resetDatabase refuses a database that is not a worker database", () =>
     // A second client, bound to the template database: the database layer keeps one client per
     // process on `globalThis`, so that one is set aside and the modules are loaded again.
     const globals = globalThis as Record<string, unknown>;
-    const CLIENT_KEY = "__marketplaceDb";
+    // The key comes from the database layer (CR-38), not from a copy of its string here.
+    const CLIENT_KEY = TEST_ONLY_DB_GLOBAL_KEY;
     const workerClient = globals[CLIENT_KEY];
     const workerUrl = process.env["DATABASE_URL"];
     expect(workerClient).toBe(db);
