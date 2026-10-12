@@ -241,6 +241,25 @@ describe("register: an invalid environment ends the process", () => {
     }
   });
 
+  it("ends the process when the configuration module cannot be loaded", async () => {
+    stubEnvironment();
+    vi.doMock("./server/env", () => {
+      throw new Error("module failed to load");
+    });
+    try {
+      const { exit, pending } = record("never");
+      const thrown = await run();
+      expect(thrown).toBeInstanceOf(Error);
+      expect(process.exitCode).toBe(1);
+      expect(pending).toHaveLength(1);
+      expect(exit).not.toHaveBeenCalled();
+      pending[0]?.();
+      expect(exit.mock.calls).toEqual([[1]]);
+    } finally {
+      vi.doUnmock("./server/env");
+    }
+  });
+
   it("ends the process for a refusal that applies in production only", async () => {
     stubEnvironment({
       NODE_ENV: "production",

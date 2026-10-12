@@ -26,7 +26,12 @@
 import { z } from "zod";
 
 import { type ClientAddressConfig, MAX_TRUSTED_PROXY_HOPS } from "./client-address";
-import { type Logger, type LogLevel, logger as defaultLogger, setLogLevel } from "./logger";
+import {
+  type LogLevel,
+  logger as defaultLogger,
+  setLogLevel,
+  type StructuredLogger,
+} from "./logger";
 
 export type NodeEnv = "development" | "test" | "production";
 
@@ -370,22 +375,17 @@ function trustsNoProxy(config: ClientAddressConfig): boolean {
  * configuration, or logs one error line that names the variables and rules (never a value) and
  * throws, so that a misconfigured server stops at start instead of failing at a later request.
  *
- * In production it also writes the one warning SR-01 requires when no proxy is trusted.
+ * In production it also writes the one warning SR-01 requires when no proxy is trusted. That
+ * line goes through `security("warn", ...)`, the logger path that `LOG_LEVEL` never filters
+ * (SR-04; SEC-031), so no level can silence it.
  *
  * Last, it hands the validated `LOG_LEVEL` to the process-wide logger (`setLogLevel`), whichever
- * logger this call itself was given. The order is deliberate: the two lines above are written
- * at the logger's level of that moment, `info` in a process that has just started, and the
- * configured level applies to everything after them. `LOG_LEVEL=error` therefore cannot silence
- * the SR-01 warning, which SR-01 requires at every start, and a failed validation leaves the
- * level alone.
- *
- * Known limit, measured with Next.js 16.4.0 on 2026-10-12 in production and in development
- * mode: the framework compiles the start-up hook and the route handlers separately, and each
- * gets its own copy of src/server/logger.ts. This call sets the level of the hook's copy only;
- * the handlers' copy stays at its default. The remedy is in the logger (one level per process,
- * kept on `globalThis`), not here; see docs/DEPLOYMENT.md, "What `LOG_LEVEL` reaches".
+ * logger this call itself was given. The level is kept once per process (on `globalThis`, in
+ * src/server/logger.ts), so the hook, the proxy file, and the route handlers all read it. The
+ * error line is written at the level of that moment, `info` in a process that has just started,
+ * and a failed validation leaves the level alone.
  */
-export function loadEnvAtStartup(options: { logger?: Logger } = {}): Env {
+export function loadEnvAtStartup(options: { logger?: StructuredLogger } = {}): Env {
   const log = options.logger ?? defaultLogger;
   let env: Env;
   try {
@@ -400,7 +400,8 @@ export function loadEnvAtStartup(options: { logger?: Logger } = {}): Env {
     throw error;
   }
   if (env.nodeEnv === "production" && trustsNoProxy(env.trustedProxy)) {
-    log.warn(
+    log.security(
+      "warn",
       "No trusted proxy is configured: the client address is unknown, so every per-address rate limit is shared by all clients.",
       { component: "env" },
     );

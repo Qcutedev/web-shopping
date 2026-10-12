@@ -22,6 +22,9 @@
  * as failed by whatever supervises it, so an invalid configuration ends the process here, with
  * exit code 1, after the log line that names the variables has been written.
  *
+ * The same applies when the configuration module cannot be loaded (the import is inside the
+ * `try`): the error is thrown again after the exit is requested, so the framework prints it.
+ *
  * The exit waits for that line, but not for ever. It is requested from the callback of an empty
  * write that is queued behind the line. If standard output never reports that write (a pipe
  * nobody reads, a stream that was destroyed), a timer ends the process after
@@ -36,8 +39,10 @@ export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     if (process.env.NEXT_PHASE === "phase-production-build") return;
 
-    const { loadEnvAtStartup } = await import("./server/env");
     try {
+      // The import is inside the `try` on purpose: a module that fails to load must end the
+      // process like an invalid configuration does, not leave `next start` up answering 500.
+      const { loadEnvAtStartup } = await import("./server/env");
       // Logs one line that names the variables at fault, then throws `EnvValidationError`.
       loadEnvAtStartup();
     } catch (error) {

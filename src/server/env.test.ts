@@ -899,6 +899,33 @@ describe("loadEnvAtStartup", () => {
     expect(String(lines[0]?.message)).toContain("every per-address rate limit is shared");
   });
 
+  // The warning is written through `security("warn", ...)`: a logger configured at `error` still
+  // writes it, with the same level, component, and text as `warn` did.
+  it("writes the SR-01 warning through security(), which a logger at level error does not filter", async () => {
+    stubValid({ NODE_ENV: "production", TRUSTED_PROXY_HOPS: "0" });
+    const { loadEnvAtStartup: load } = await import("./env");
+    const lines: Record<string, unknown>[] = [];
+    const quiet = createLogger({
+      level: "error",
+      write: (line) => lines.push(JSON.parse(line) as Record<string, unknown>),
+    });
+    quiet.warn("an ordinary warn line is filtered at this level");
+    expect(lines).toEqual([]);
+    const security = vi.spyOn(quiet, "security");
+    load({ logger: quiet });
+    expect(security).toHaveBeenCalledTimes(1);
+    expect(security.mock.calls[0]?.[0]).toBe("warn");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({
+      level: "warn",
+      component: "env",
+      message:
+        "No trusted proxy is configured: the client address is unknown, so every per-address rate limit is shared by all clients.",
+    });
+    expect(JSON.stringify(lines)).not.toContain("example.test");
+    expect(JSON.stringify(lines)).not.toContain("canary");
+  });
+
   it.each([
     ["hops", { TRUSTED_PROXY_HOPS: "1" }],
     ["the single header", { TRUSTED_PROXY_HOPS: "0", TRUSTED_CLIENT_IP_HEADER: "X-Client-Addr" }],
@@ -1008,8 +1035,8 @@ describe("loadEnvAtStartup", () => {
       });
     });
 
-    // SR-01 requires the warning at start. It is written before LOG_LEVEL takes effect, so that
-    // LOG_LEVEL=error cannot silence it; every later `warn` line is then dropped as configured.
+    // SR-01 requires the warning at start. It goes through `security("warn", ...)`, which no
+    // level filters; every later `warn` line is dropped as configured.
     it("writes the SR-01 warning even with LOG_LEVEL=error, and only then applies the level", async () => {
       stubValid({ NODE_ENV: "production", TRUSTED_PROXY_HOPS: "0", LOG_LEVEL: "error" });
       const { loadEnvAtStartup: load } = await import("./env");
