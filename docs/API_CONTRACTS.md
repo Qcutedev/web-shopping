@@ -1,6 +1,6 @@
 # API Contracts
 
-Owner: backend-api agent. This is the **planned** contract, corrected on 2026-10-11 after the T-004 planning review ([reviews/T-004-findings.md](reviews/T-004-findings.md)) the owner answers in [DECISIONS.md](DECISIONS.md) D-025, D-026, and D-028, and the technical rulings in D-029, and corrected again the same day after the cross-document check, for the technical rulings in D-031, and on 2026-10-12 for D-032 (the store status is judged before the body is read; SECURITY.md SR-05 item 5). **No endpoint is implemented yet.** Once an endpoint is built, the Zod schemas in `src/modules/<domain>/schema.ts` are authoritative for it and this document must match them.
+Owner: backend-api agent. This is the **planned** contract, corrected on 2026-10-11 after the T-004 planning review ([reviews/T-004-findings.md](reviews/T-004-findings.md)) the owner answers in [DECISIONS.md](DECISIONS.md) D-025, D-026, and D-028, and the technical rulings in D-029, and corrected again the same day after the cross-document check, for the technical rulings in D-031, and on 2026-10-12 for D-032 (the store status is judged before the body is read; SECURITY.md SR-05 item 5). **Implemented so far: the six catalog endpoints of [section 5.2](#52-catalog) (T-020, 2026-10-13) and `GET /api/health` ([section 5.10](#510-platform)); every other endpoint is planned.** Once an endpoint is built, the Zod schemas in `src/modules/<domain>/schema.ts` are authoritative for it and this document must match them.
 
 What this document must agree with, and which one wins when a name or value is in question:
 
@@ -507,8 +507,45 @@ Shapes. The block below is a catalogue of the five shapes keyed by name, not one
 - `images` is ordered; the first one is the primary picture.
 - `soldOut` is `stock == 0` (BR-24). The product detail carries `stock` so that a quantity selector can be capped (BR-30).
 - `reviewSummary` is `null` when the product has no review (REQ-C-08). `averageRating` is not money.
-- `comment` is plain text. It is returned exactly as stored and must be rendered escaped (REQ-C-14).
+- `comment` is plain text, or `null` when the reviewer wrote none. It is returned exactly as stored and must be rendered escaped (REQ-C-14).
 - Public responses never contain a SKU, a moderation field, a store's contact phone, or an owner id.
+
+#### 5.2.1 As built (T-020, 2026-10-13)
+
+Implemented in `src/modules/catalog` (service, repository, the visibility rule in `visibility.ts`) and the handlers under `src/app/api/v1/categories`, `products`, and `stores`. The schemas in `src/modules/catalog/schema.ts` are authoritative; this subsection states what they decide beyond the table above.
+
+**Access and order of checks.** All six are `public` `GET`s: steps 1 to 6 of [section 1.8](#18-access-levels-and-404-against-403) do not apply, nothing is rate-limited, and a session cookie, a role, or a `storeId`, `userId`, or `role` in the query changes nothing. The path parameter is validated first, then the query (`400`), then the service answers (`404`, or `200`). Every response is `Cache-Control: no-store`. No catalog request writes anything (D-029 point 1); the integration tests compare a snapshot of every table and sequence before and after.
+
+**Query parameters.**
+
+| Rule | Detail |
+| --- | --- |
+| Numbers | `page`, `pageSize`, `minPriceSatang`, `maxPriceSatang` are decimal digits only. A sign, a blank, a fraction (`10.5`, `2.0`), an exponent (`1e3`), hexadecimal, or full-width digits are `400` |
+| `page` | At least 1, at most 15 digits. A page beyond the last one is `200` with an empty `data` and the true `total` |
+| `pageSize` | 1 to 50, default 20. `51` and above are `400` (field code `too_big`), never clamped |
+| `minPriceSatang`, `maxPriceSatang` | 0 to 100,000,000; both inclusive. `maxPriceSatang` below `minPriceSatang` is `400` on the path `maxPriceSatang` (field code `custom`); equal bounds are allowed |
+| `q` | Surrounding white space is removed. Blank (or empty) is the same as no `q`. At most **100 characters** after trimming (item 8.2-7 for this field). Matched case-insensitively as a substring of the title; `%`, `_`, and `\` are ordinary characters, not wildcards. U+0000 or a lone surrogate is `400` |
+| `category` | A category slug, read like a path slug (below). Unknown or inactive: `404 NOT_FOUND` on both product lists |
+| `sort` | `newest`, `price_asc`, `price_desc`; anything else, the empty string included, is `400` |
+| A known parameter given twice | `400` (field code `invalid_type`); for example `page=1&page=2`. Unknown parameters are ignored, also when repeated |
+
+**Ordering**, every one ending with `id`: `newest` is `createdAt` descending, then `id` descending; `price_asc` is `priceSatang` ascending, then `id` ascending; `price_desc` is `priceSatang` descending, then `id` ascending. Categories: `sortOrder`, then `id`, both ascending. Reviews: `createdAt` descending, then `id` descending.
+
+**`{slug}` path parameter** ([section 1.4](#14-identifiers-slugs-and-order-numbers)). A value that contains `%` is percent-decoded once (a generated slug never contains `%`, so a slug the framework already decoded is not changed). It is then normalised to NFC and matched exactly. After decoding it must be 1 to **200 characters** and contain no U+0000 and no lone surrogate. A broken escape (for example `%E0%B8`) is `400`; a well-formed slug that matches nothing visible is `404`.
+
+**404.** Every refusal of a catalog read is `404 NOT_FOUND` with the default message and `details` `{}`: an unknown slug, a product hidden by any condition of [section 3.4](#34-visibility-and-can-be-bought), a suspended store, a store whose owner is deactivated, an unknown or inactive category. The answers are identical, so none says that a hidden row exists.
+
+**Shapes**, beyond the catalogue above:
+
+- `averageRating` is the mean of the integer ratings rounded to **one decimal place**, half away from zero (ratings 5, 4, 5 give `4.7`).
+- `image` of a list item is the picture with the lowest `sortOrder`, or `null`. `images` of the detail is every picture in `sortOrder` order, `[]` when there is none.
+- `url` is `/api/files/` followed by the key percent-encoded as one path segment. **The file endpoint does not exist yet** (T-041), so such a URL answers `404` until it does.
+- `store.description` is `null` when the seller wrote none; `logo` is `null` without a logo.
+- The review shape carries no reviewer name or id.
+
+**Consistency.** A list reads its `total` and its page as two statements, not in one transaction, so a write that commits between them can make `total` differ from the rows by that write. Reason: with Prisma 7.10 and `@prisma/adapter-pg`, the relation loads of one query run at the same time on a transaction's single connection, which `pg` 8.23 reports as deprecated and `pg` 9 removes (see `src/modules/catalog/repository.ts`).
+
+**Visibility as one definition.** `VISIBLE_PRODUCT_WHERE` and `PUBLIC_STORE_WHERE` in `src/modules/catalog/visibility.ts`, exported from `@/modules/catalog`, are the query form of [section 3.4](#34-visibility-and-can-be-bought); the cart flags and checkout (T-031, T-032) use them rather than restating the five conditions.
 
 ### 5.3 Account
 
