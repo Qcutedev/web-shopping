@@ -159,6 +159,16 @@ describe("deactivation (REQ-A-02, TM-26, SR-07 item 4)", () => {
     expect(await getActor(get("/x", { cookie: second }))).toBeNull();
   });
 
+  it("the library itself creates no session for a deactivated user, whatever route calls it", async () => {
+    const email = freshEmail("inactive");
+    await getAuth().api.signUpEmail({ body: { name: "Test", email, password: PASSWORD } });
+    const user = await db.user.update({ where: { email }, data: { isActive: false } });
+    await expect(
+      getAuth().api.signInEmail({ body: { email, password: PASSWORD } }),
+    ).rejects.toMatchObject({ statusCode: 401, body: { code: "INVALID_EMAIL_OR_PASSWORD" } });
+    expect(await db.session.count({ where: { userId: user.id } })).toBe(0);
+  });
+
   it("a session that survived a deactivation is refused all the same", async () => {
     const { cookie, userId } = await signedIn("SELLER");
     await db.user.update({ where: { id: userId }, data: { isActive: false } });
