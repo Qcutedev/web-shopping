@@ -14,17 +14,7 @@ A new session should read CLAUDE.md, this file, DECISIONS.md (D-017 to D-029), P
 
 Standing rules from the owner (D-019): never guess, park questions here and ask in batches; commit locally after each task passes its checks, never push without being told; stop for owner review at the five milestones. Run at most two or three agents at a time (owner, third session). Milestone 1 (foundation plus browsable storefront) is in progress.
 
-**LOOP_BLOCKED (2026-10-12, รอบอัตโนมัติจาก `run-agents.ps1`)**
-
-เหตุผล: ฐานข้อมูลในเครื่องไม่ทำงาน (พอร์ต 5432 และ 5433 ปฏิเสธการเชื่อมต่อ น่าจะเพราะ Docker Desktop ยังไม่เปิด) และรอบอัตโนมัติไม่มีสิทธิ์รันคำสั่ง `docker` จึงรัน `pnpm test:integration` ไม่ได้ งานของรอบนี้ (CR-23, SEC-029, CR-38, CR-42 ฝั่ง database) ทำเสร็จและ commit แล้ว โดย `pnpm verify` ผ่าน แต่การตรวจข้อสุดท้ายที่ STATUS กำหนดไว้ คือรัน integration harness ซ้ำหลังเปลี่ยนที่มาของ `DATABASE_URL` ยังไม่ได้รัน งานนี้จึงเป็น IMPLEMENTED ยังไม่ใช่ VERIFIED และงานถัดไปทุกงานก็ต้องใช้ฐานข้อมูลเช่นกัน จึงหยุดไว้ก่อน ไม่เดาผล
-
-สิ่งที่เจ้าของต้องทำ:
-
-1. เปิด Docker Desktop แล้วรัน `docker compose up -d --wait` ในโฟลเดอร์โปรเจกต์
-2. รัน `pnpm test:integration` ผลที่คาดคือ exit 0, 14 ไฟล์, 647 passed
-3. ถ้าผ่าน ให้ลบหัวข้อนี้ทั้งหมด (รวมคำที่ขึ้นต้นหัวข้อ) ออกจากไฟล์นี้ แล้วรัน `run-agents.ps1` ต่อได้ ถ้าไม่ผ่าน ให้เก็บผลลัพธ์ไว้ให้รอบถัดไปตรวจ อย่าลบงานที่ commit แล้ว
-
-หมายเหตุ: `run-agents.ps1` และบรรทัด `logs/` ใน `.gitignore` เป็นไฟล์ของเจ้าของที่ยังไม่ได้ commit รอบนี้ไม่ได้แตะและไม่ได้ commit ให้ เจ้าของตัดสินใจเองว่าจะ commit หรือไม่
+Integration harness re-run on 2026-10-12 after the DATABASE_URL change (CR-23, SEC-029, CR-38, CR-42): `pnpm test:integration` exit 0, 14 files, 647 passed.
 
 Before starting, check the machine: Docker Desktop running and `docker compose up -d --wait` (the test database is empty after every container start); `pnpm install --frozen-lockfile`; copy `.env.example` to `.env` if `.env` is missing; `pnpm verify` should exit 0 with 29 files, 1672 passed, 82 import-guard probes, and 2 expected failures (the SEC-030 and SEC-031 reproductions); `pnpm test:integration` should exit 0 with 14 files and 647 passed.
 

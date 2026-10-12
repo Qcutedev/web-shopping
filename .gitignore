@@ -54,3 +54,6 @@ desktop.ini
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# run-agents.ps1 output
+logs/
