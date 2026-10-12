@@ -15,11 +15,29 @@
  */
 import { existsSync } from "node:fs";
 
-import { runBootstrapAdmin } from "../src/modules/auth/bootstrap-admin";
+import { BOOTSTRAP_EXIT, runBootstrapAdmin } from "../src/modules/auth/bootstrap-admin";
 import { db } from "../src/server/db";
 
+/** The class name of a thrown value; never its message, which may quote a line of `.env`. */
+function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : typeof error;
+}
+
+/** Loads `.env` when present. False, with a message naming no value, when it cannot be read. */
+function loadLocalEnv(): boolean {
+  try {
+    if (existsSync(".env")) process.loadEnvFile(".env");
+    return true;
+  } catch (error) {
+    process.stderr.write(
+      `Admin bootstrap could not read .env (${errorName(error)}). Fix or remove the file, then run it again. Nothing changed.\n`,
+    );
+    return false;
+  }
+}
+
 async function main(): Promise<number> {
-  if (existsSync(".env")) process.loadEnvFile(".env");
+  if (!loadLocalEnv()) return BOOTSTRAP_EXIT.failed;
   const source = { ...process.env };
   // Not needed after this point; keep the password out of anything that reads the environment.
   delete process.env["ADMIN_BOOTSTRAP_PASSWORD"];
@@ -37,8 +55,10 @@ main().then(
   (status) => {
     process.exitCode = status;
   },
-  () => {
-    process.stderr.write("Admin bootstrap failed while closing the database connection.\n");
-    process.exitCode = 1;
+  (error: unknown) => {
+    // runBootstrapAdmin reports its own failures; what reaches here is outside it, for example
+    // closing the database connection.
+    process.stderr.write(`Admin bootstrap failed unexpectedly (${errorName(error)}).\n`);
+    process.exitCode = BOOTSTRAP_EXIT.failed;
   },
 );
