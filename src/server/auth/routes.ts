@@ -14,10 +14,17 @@
  *                      no body is read
  *   session  (public)  GET; the actor of the session, or null
  *
+ * A failed sign-in and every sign-up answer wait for the response floor of the runtime (SEC-035,
+ * config.ts `AUTH_RESPONSE_FLOOR`), measured from the start of the password step, so their
+ * timing does not tell a registered email from an unknown one. Refusals before that step (origin,
+ * content type, rate limit, body, schema) do not wait.
+ *
  * The two sign-in limits and the bound on the body are on the only two routes of the library that
  * check a password or create an account, because the library's own handler is not mounted
  * (auth.ts; docs/API_CONTRACTS.md item 8.2-9).
  */
+import { randomInt } from "node:crypto";
+
 import { APIError } from "better-auth/api";
 
 import {
@@ -43,6 +50,7 @@ import { RATE_LIMITS, type RateLimiter, rateLimiter, type RateLimitRule } from "
 import { resolveRequestId, trustsIncomingRequestId } from "../request-id";
 import type { Actor } from "./actor";
 import { type Auth, getAuth } from "./auth";
+import { AUTH_RESPONSE_FLOOR, type ResponseFloor } from "./config";
 import { recordSecurityEvent, type SecurityEventKind } from "./security-events";
 import { loadActor, readSession } from "./session";
 
@@ -52,6 +60,8 @@ export interface AuthRuntime {
   trustedProxy: ClientAddressConfig;
   limiter: RateLimiter;
   logger: StructuredLogger;
+  /** SEC-035: the minimum time of a failed sign-in and of any sign-up answer. */
+  responseFloor: ResponseFloor;
 }
 
 /** The runtime of a running server: the validated configuration and the process-wide limiter. */
@@ -63,7 +73,21 @@ export function getAuthRuntime(): AuthRuntime {
     trustedProxy: env.trustedProxy,
     limiter: rateLimiter,
     logger: defaultLogger,
+    responseFloor: AUTH_RESPONSE_FLOOR,
   };
+}
+
+/**
+ * Waits until `floor.minimumMs` plus a random 0 to `floor.jitterMs` milliseconds have passed
+ * since `startedAt` (a `performance.now()` value). Returns at once when that time has passed.
+ */
+async function waitForFloor(startedAt: number, floor: ResponseFloor): Promise<void> {
+  const jitter = floor.jitterMs > 0 ? randomInt(floor.jitterMs + 1) : 0;
+  const remaining = floor.minimumMs + jitter - (performance.now() - startedAt);
+  if (remaining <= 0) return;
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, remaining);
+  });
 }
 
 /** The one public message for every failed sign-in (REQ-C-02; TM-03). */
@@ -166,6 +190,8 @@ export async function handleSignUp(request: Request, runtime: AuthRuntime): Prom
     const body = await readJsonBody(request);
     const input = parseInput(signUpBodySchema, body);
 
+    // SEC-035: a new and a duplicate email answer after the same time, measured from here.
+    const startedAt = performance.now();
     let createdUserId: string | undefined;
     try {
       const result = await runtime.auth.api.signUpEmail({
@@ -189,6 +215,7 @@ export async function handleSignUp(request: Request, runtime: AuthRuntime): Prom
       if (existing === null) throw internalError(error);
     }
     event(scope, "sign-up", "accepted", createdUserId);
+    await waitForFloor(startedAt, runtime.responseFloor);
     return ok({ accepted: true }, { requestId: scope.requestId });
   } catch (error) {
     return errorResponse(mapLibraryError(error), { requestId: scope.requestId, logger: scope.log });
@@ -213,6 +240,8 @@ export async function handleSignIn(request: Request, runtime: AuthRuntime): Prom
     // After the per-address limit, after the body, before the password (SR-05 item 5).
     await consume(runtime, scope, emailRateLimitSubject(input.email), RATE_LIMITS.SIGN_IN_EMAIL);
 
+    // SEC-035: every failed sign-in answers after the same time, measured from here.
+    const startedAt = performance.now();
     const previous = await readSession(request, runtime.auth);
     let result: Awaited<ReturnType<typeof signInWithLibrary>>;
     try {
@@ -220,6 +249,7 @@ export async function handleSignIn(request: Request, runtime: AuthRuntime): Prom
     } catch (error) {
       if (error instanceof APIError && error.statusCode === 401) {
         event(scope, "sign-in", "failed");
+        await waitForFloor(startedAt, runtime.responseFloor);
         throw unauthenticated({ message: SIGN_IN_FAILED_MESSAGE });
       }
       throw error;
@@ -232,6 +262,7 @@ export async function handleSignIn(request: Request, runtime: AuthRuntime): Prom
       // Deactivated between the session hook and here: undo the session, answer as a failure.
       await db.session.deleteMany({ where: { token: result.response.token } });
       event(scope, "sign-in", "failed");
+      await waitForFloor(startedAt, runtime.responseFloor);
       throw unauthenticated({ message: SIGN_IN_FAILED_MESSAGE });
     }
     event(scope, "sign-in", "succeeded", actor.userId);

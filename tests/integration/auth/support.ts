@@ -11,6 +11,7 @@
 import { createLogger, type StructuredLogger } from "@/server/logger";
 import { createRateLimiter, type RateLimiter } from "@/server/rate-limit";
 import { type AuthSettings, createAuth } from "@/server/auth/auth";
+import type { ResponseFloor } from "@/server/auth/config";
 import type { AuthRuntime } from "@/server/auth/routes";
 
 export const APP_URL = "http://localhost:3000";
@@ -49,9 +50,16 @@ export function captureLog(): CapturedLog {
 export interface TestRuntimeOptions extends Partial<AuthSettings> {
   limiter?: RateLimiter;
   logger?: StructuredLogger;
+  responseFloor?: ResponseFloor;
 }
 
-/** A runtime with its own rate limiter (fresh counters) unless one is given. */
+/** No waiting: the SEC-035 floor is tested on its own (sign-up-sign-in.test.ts). */
+export const NO_RESPONSE_FLOOR: ResponseFloor = { minimumMs: 0, jitterMs: 0 };
+
+/**
+ * A runtime with its own rate limiter (fresh counters) unless one is given, and no response
+ * floor unless one is given. The real route modules use the production floor.
+ */
 export function makeRuntime(options: TestRuntimeOptions = {}): AuthRuntime {
   const logger = options.logger ?? createLogger({ level: "error", write: () => undefined });
   const appOrigin = options.appOrigin ?? APP_ORIGIN;
@@ -69,6 +77,7 @@ export function makeRuntime(options: TestRuntimeOptions = {}): AuthRuntime {
     trustedProxy,
     limiter: options.limiter ?? createRateLimiter(),
     logger,
+    responseFloor: options.responseFloor ?? NO_RESPONSE_FLOOR,
   };
 }
 

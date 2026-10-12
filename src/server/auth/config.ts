@@ -30,6 +30,23 @@ export const LOG_USER_AGENT_MAX_LENGTH = 200;
 /** How often expired sessions are removed: every hour (SR-07 item 5 requires at most 12 hours). */
 export const SESSION_PURGE_INTERVAL_MS = 60 * 60 * 1_000;
 
+/**
+ * SEC-035, TM-03: the shortest time a failed sign-in and any sign-up answer take, measured from
+ * the start of the password step (after the rate limits, the body, and the schema, so a refusal
+ * stays cheap), plus a random 0 to `jitterMs` milliseconds. The library's own work (scrypt hash or
+ * verify, user and account inserts) took about 60 to 70 ms on the development machine; the floor
+ * is well above that, so an unknown email, a wrong password, a new sign-up, and a duplicate one
+ * answer after the same time. When the work takes longer than the floor (an overloaded server)
+ * nothing is added and the difference shows again; the per-address and per-email limits bound
+ * how many samples an attacker gets.
+ */
+export interface ResponseFloor {
+  readonly minimumMs: number;
+  readonly jitterMs: number;
+}
+
+export const AUTH_RESPONSE_FLOOR: ResponseFloor = Object.freeze({ minimumMs: 250, jitterMs: 25 });
+
 /** The secret signs the session cookie. Better Auth itself asks for at least 32 characters. */
 export const AUTH_SECRET_MIN_LENGTH = 32;
 

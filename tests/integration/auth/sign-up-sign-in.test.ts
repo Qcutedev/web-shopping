@@ -17,9 +17,11 @@ import { POST as signUpRoute } from "@/app/api/v1/auth/sign-up/route";
 import { GET as sessionRoute } from "@/app/api/v1/auth/session/route";
 import { getActor, requireActor } from "@/server/auth/session";
 import { purgeExpiredSessions } from "@/server/auth/session-purge";
-import { SESSION_LIFETIME_SECONDS } from "@/server/auth/config";
+import { AUTH_RESPONSE_FLOOR, SESSION_LIFETIME_SECONDS } from "@/server/auth/config";
+import { handleSignIn, handleSignUp } from "@/server/auth/routes";
 import { db } from "@/server/db";
 import { AppError } from "@/server/errors";
+import { createRateLimiter } from "@/server/rate-limit";
 
 import {
   cookieAttributes,
@@ -27,6 +29,7 @@ import {
   freshEmail,
   get,
   json,
+  makeRuntime,
   PASSWORD,
   post,
   resetProcessRateLimiter,
@@ -308,5 +311,74 @@ describe("guards with real sessions", () => {
   it("requireActor is 401 for an anonymous request", async () => {
     await expect(requireActor(get("/x"))).rejects.toBeInstanceOf(AppError);
     await expect(requireActor(get("/x"))).rejects.toMatchObject({ status: 401 });
+  });
+});
+
+describe("response floor (SEC-035, TM-03)", () => {
+  // Timers may fire a fraction of a millisecond before the measured time; never more.
+  const TOLERANCE_MS = 2;
+
+  async function timed(run: () => Promise<Response>): Promise<{ status: number; ms: number }> {
+    const start = performance.now();
+    const response = await run();
+    return { status: response.status, ms: performance.now() - start };
+  }
+
+  it("an unknown email, a wrong password, and a deactivated account all take at least the floor", async () => {
+    const floor = { minimumMs: 200, jitterMs: 0 };
+    const runtime = makeRuntime({ responseFloor: floor });
+    const known = freshEmail("floor-known");
+    const inactive = freshEmail("floor-inactive");
+    await runtime.auth.api.signUpEmail({ body: { name: "T", email: known, password: PASSWORD } });
+    await runtime.auth.api.signUpEmail({
+      body: { name: "T", email: inactive, password: PASSWORD },
+    });
+    await db.user.update({ where: { email: inactive }, data: { isActive: false } });
+    for (const body of [
+      { email: freshEmail("floor-nobody"), password: PASSWORD },
+      { email: known, password: "wrong password" },
+      { email: inactive, password: PASSWORD },
+    ]) {
+      const result = await timed(() =>
+        handleSignIn(post("/api/v1/auth/sign-in", { body }), {
+          ...runtime,
+          limiter: createRateLimiter(),
+        }),
+      );
+      expect(result.status).toBe(401);
+      expect(result.ms).toBeGreaterThanOrEqual(floor.minimumMs - TOLERANCE_MS);
+    }
+  });
+
+  it("a new and a duplicate sign-up both take at least the floor", async () => {
+    const floor = { minimumMs: 200, jitterMs: 0 };
+    const email = freshEmail("floor-signup");
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const result = await timed(() =>
+        handleSignUp(
+          post("/api/v1/auth/sign-up", { body: { name: "T", email, password: PASSWORD } }),
+          makeRuntime({ responseFloor: floor }),
+        ),
+      );
+      expect(result.status).toBe(200);
+      expect(result.ms).toBeGreaterThanOrEqual(floor.minimumMs - TOLERANCE_MS);
+    }
+    expect(await db.user.count({ where: { email } })).toBe(1);
+  });
+
+  it("a refusal before the password step does not wait", async () => {
+    const runtime = makeRuntime({ responseFloor: { minimumMs: 5_000, jitterMs: 0 } });
+    const result = await timed(() =>
+      handleSignIn(post("/api/v1/auth/sign-in", { body: { email: "x", password: "y" } }), runtime),
+    );
+    expect(result.status).toBe(400);
+    expect(result.ms).toBeLessThan(1_000);
+  });
+
+  it("the real routes use the production floor", async () => {
+    expect(AUTH_RESPONSE_FLOOR.minimumMs).toBeGreaterThanOrEqual(250);
+    const result = await timed(() => signIn(freshEmail("floor-route"), PASSWORD));
+    expect(result.status).toBe(401);
+    expect(result.ms).toBeGreaterThanOrEqual(AUTH_RESPONSE_FLOOR.minimumMs - TOLERANCE_MS);
   });
 });
