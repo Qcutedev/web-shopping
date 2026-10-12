@@ -40,7 +40,9 @@ $claudeArgs = @(
         'Bash(node:*)', 'PowerShell(node:*)',
         'Bash(docker compose up:*)', 'Bash(docker compose ps:*)', 'Bash(docker compose logs:*)', 'Bash(docker ps:*)',
         'PowerShell(docker compose up:*)', 'PowerShell(docker compose ps:*)', 'PowerShell(docker compose logs:*)', 'PowerShell(docker ps:*)',
-        'PowerShell(Test-NetConnection:*)'
+        'PowerShell(Test-NetConnection:*)',
+        'Bash(curl http://127.0.0.1:*)', 'PowerShell(curl http://127.0.0.1:*)',
+        'PowerShell(Invoke-WebRequest -Uri http://127.0.0.1:*)'
 )
 
 $maxRounds = 30
