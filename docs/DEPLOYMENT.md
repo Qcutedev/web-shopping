@@ -242,6 +242,7 @@ Not read by `src/server/env.ts`. Each is added to it, and to `.env.example`, by 
 | `AUTH_SECRET` | Session signing secret, at least 32 random bytes | yes |
 | `UPLOAD_DIR` | Local storage directory | no |
 | `ADMIN_BOOTSTRAP_EMAIL`, `ADMIN_BOOTSTRAP_PASSWORD` | Read once by the bootstrap script (T-016); do not leave set | yes |
+| `ADMIN_BOOTSTRAP_NAME` | Optional display name of the admin the bootstrap script creates; default `Admin` | no |
 
 Secrets live in the host's secret manager or environment configuration. They are never committed, never printed, and never prefixed `NEXT_PUBLIC_`.
 
@@ -378,9 +379,30 @@ Checks for T-071 (**Planned**; none runnable today, because no Dockerfile exists
 - The migration image applies the committed migrations to an empty PostgreSQL database with network access switched off, and `prisma migrate status` then reports no pending migration.
 - The runtime image starts, and release procedure step 6 passes against it, with no `prisma` package and no development dependency inside it.
 
-## First administrator (Planned, T-016)
+## First administrator (T-016)
 
-`scripts/bootstrap-admin.ts` does not exist yet, so `pnpm admin:bootstrap` fails today. Decided so far: there is no default admin and no web endpoint that grants admin, and in the MVP admins are created only by this script (owner answer OQ-13, D-025). The intended use is to run `pnpm admin:bootstrap` once per environment with `ADMIN_BOOTSTRAP_EMAIL` and `ADMIN_BOOTSTRAP_PASSWORD` supplied for that single invocation, then remove them. The script is to refuse weak passwords. What it does when an admin already exists (review item S9) is defined by T-016, and this section is updated then.
+There is no default admin and no web endpoint that grants admin; in the MVP admins are created only by `pnpm admin:bootstrap` (`scripts/bootstrap-admin.ts`; owner answers OQ-13, OQ-37; BR-26). **Not runnable yet:** the script entry uses `tsx`, which is not installed (`'tsx' is not recognized`); devops adds and pins the runner. The logic (`src/modules/auth/bootstrap-admin.ts`) is tested against the test database.
+
+Input is read from the environment only, never from command-line arguments, so the password stays out of shell history and the process list. Supply the variables for one invocation and remove them afterwards (PowerShell 7; `-MaskInput` keeps the typed password off the screen and out of history):
+
+```powershell
+$env:ADMIN_BOOTSTRAP_EMAIL = "admin@example.com"
+$env:ADMIN_BOOTSTRAP_PASSWORD = Read-Host -MaskInput "Admin password"
+pnpm admin:bootstrap
+Remove-Item Env:ADMIN_BOOTSTRAP_EMAIL, Env:ADMIN_BOOTSTRAP_PASSWORD
+```
+
+`DATABASE_URL` must point at the target database (a local `.env` is loaded without overriding set variables; never put the bootstrap variables in it).
+
+| Input | Result | Exit |
+| --- | --- | --- |
+| Email with no account | Creates one active `ADMIN` (one `User`, one credential `Account`); it signs in at `POST /api/v1/auth/sign-in` | 0 |
+| Email of an existing admin (any letter case) | No change; the password given is not used | 0 |
+| Email of a customer or seller (any letter case) | Refused; nothing changes; the account is never promoted | 3 |
+| Missing variable, invalid email, password outside 8 to 128 characters | Nothing changes; the message names the variable and rule, never the value | 2 |
+| Other failure (database unreachable) | Error class and Prisma code only | 1 |
+
+Running it again with a new email creates a further admin. The output names the account by user id and never prints the password or the email.
 
 ## Scheduled work (Planned; owner decisions OQ-49, D-026; D-028; D-029)
 
