@@ -17,13 +17,44 @@ export const PASSWORD_MAX = 128;
 export const NAME_MAX = 100;
 export const EMAIL_MAX = 254;
 
-/** No C0 or C1 control character, and so no U+0000, which a PostgreSQL text column cannot hold. */
-const NO_CONTROL_CHARACTERS = /^[^\u0000-\u001F\u007F-\u009F]*$/u;
+/**
+ * Inclusive code point ranges a display name may not contain:
+ *
+ *   - C0 and C1 controls and DEL, and so U+0000, which a PostgreSQL text column cannot hold;
+ *   - the bidirectional formatting characters (SEC-033): U+061C Arabic letter mark, U+200E and
+ *     U+200F direction marks, U+202A to U+202E embeddings and overrides, U+2066 to U+2069
+ *     isolates. With them a name is displayed in another order than it is stored, which can
+ *     impersonate another name in admin and seller screens.
+ *
+ * U+200B (zero-width space) and U+200C (zero-width non-joiner) stay allowed: Thai text uses them.
+ * Every later free-text name field (store name, address name) uses the same rule.
+ *
+ * The pattern is built from numbers so that this source file never contains one of these
+ * characters itself (the same approach as src/server/logger.ts).
+ */
+export const NAME_FORBIDDEN_RANGES: readonly (readonly [number, number])[] = [
+  [0x00, 0x1f],
+  [0x7f, 0x9f],
+  [0x061c, 0x061c],
+  [0x200e, 0x200f],
+  [0x202a, 0x202e],
+  [0x2066, 0x2069],
+];
+
+function unicodeEscape(code: number): string {
+  return `${"\\"}u${code.toString(16).padStart(4, "0")}`;
+}
+
+/** Matches a whole name that contains no character of `NAME_FORBIDDEN_RANGES`. */
+export const NAME_ALLOWED_TEXT = new RegExp(
+  `^[^${NAME_FORBIDDEN_RANGES.map(([from, to]) => `${unicodeEscape(from)}-${unicodeEscape(to)}`).join("")}]*$`,
+  "u",
+);
 
 const email = z.string().trim().max(EMAIL_MAX).pipe(z.email());
 
 export const signUpBodySchema = z.strictObject({
-  name: z.string().trim().min(1).max(NAME_MAX).regex(NO_CONTROL_CHARACTERS),
+  name: z.string().trim().min(1).max(NAME_MAX).regex(NAME_ALLOWED_TEXT),
   email,
   password: z.string().min(PASSWORD_MIN).max(PASSWORD_MAX),
 });

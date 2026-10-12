@@ -931,12 +931,13 @@ Re-check evidence: none yet.
 
 ### SEC-033 Sign-up display name accepts bidirectional control characters
 Severity: Low
-Status: OPEN
+Status: FIXED by auth (schema part), awaiting security re-check; rendering part (frontend, `<bdi>`) open
 Owner: auth (schema), frontend (rendering)
 Location: src/modules/auth/schema.ts:21, 26
 Description: U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069 are accepted in names that sellers and admins will see; impersonation by reordered display.
 Reproduction: six `it.fails` cases "a name with U+... is 400 VALIDATION_ERROR and creates nothing".
 Remediation: refuse those characters in every name field; keep U+200B and U+200C (used in Thai); render names isolated (`<bdi>`).
+Fix (auth, 2026-10-13): `NAME_ALLOWED_TEXT` in `src/modules/auth/schema.ts` refuses C0, C1, and the bidirectional formatting characters listed above; U+200B and U+200C stay allowed. The sign-up name and the bootstrap admin name use it; later name fields are to reuse it. The six security cases are now `it` and pass; unit cases in `src/modules/auth/schema.test.ts` cover all twelve code points and the two Thai zero-width characters.
 Re-check evidence: none yet.
 
 ### SEC-034 The production session cookie uses the `__Secure-` prefix, not `__Host-`

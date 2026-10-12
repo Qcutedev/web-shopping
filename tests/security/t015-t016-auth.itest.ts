@@ -98,7 +98,7 @@ describe("SEC-033 sign-up display name accepts bidirectional control characters"
     ["U+200F right-to-left mark", "‏"],
     ["U+061C Arabic letter mark", "؜"],
   ] as const) {
-    it.fails(`a name with ${label} is 400 VALIDATION_ERROR and creates nothing`, async () => {
+    it(`a name with ${label} is 400 VALIDATION_ERROR and creates nothing`, async () => {
       const runtime = makeRuntime();
       const email = freshEmail("bidi");
       const response = await handleSignUp(

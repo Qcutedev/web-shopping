@@ -70,7 +70,7 @@ export const BOOTSTRAP_RULES = {
   required: "is required",
   email: "must be a valid email address of at most 254 characters",
   password: "must be 8 to 128 characters long (the sign-up password policy, REQ-C-01)",
-  name: "must be 1 to 100 characters with no control characters",
+  name: "must be 1 to 100 characters with no control or bidirectional formatting characters",
 } as const;
 
 export interface BootstrapIssue {
