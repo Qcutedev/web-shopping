@@ -5,8 +5,21 @@
  * Created on first use, not at import (D-033 point 1, review finding CR-15). Importing this
  * module reads no environment variable, creates no pool, and cannot throw, so unit tests and
  * `next build` need no `DATABASE_URL`. The first use of `db` (a model, a `$` method) reads
- * `DATABASE_URL` and creates the client; when the variable is absent or empty, that first use
- * throws an error that names the variable. There is no fallback to another variable or a default.
+ * `DATABASE_URL` and creates the client. There is no fallback to another variable or a default.
+ *
+ * Where the URL comes from (review finding CR-23, SECURITY.md SEC-029): `readDatabaseUrl()` of
+ * src/server/env.ts, called at that first use. It reads `DATABASE_URL` (and `NODE_ENV`, and
+ * `PGPASSWORD` in production) from `process.env` of that moment, keeps nothing between calls,
+ * and loads no `.env` file; neither does this file. So the variable may be set after this module
+ * was imported and before `db` is first used, which is what the integration harness does for
+ * every worker. The function refuses, with `EnvValidationError`, a variable that is absent,
+ * empty, or not a PostgreSQL URL, a `NODE_ENV` that is not one of its three values, and, when
+ * `NODE_ENV=production`, the published local passwords of `.env.example` (SEC-009, SEC-025).
+ * That last refusal therefore holds where the client is created, whether or not the server's
+ * start-up hook ran. The error names the variable and the rule and never holds a value. This
+ * file imports src/server/env.ts; that file does not import this folder.
+ *
+ * The pool is created with an explicit size and explicit timeouts: see pool-config.ts.
  *
  * Mechanism: `db` is a `Proxy` whose `get` trap creates the real client when it is first needed
  * and then forwards to it. A proxy was chosen over a `getDb()` function or a getter on an object
@@ -35,22 +48,26 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 
 import { PrismaClient } from "../../../prisma/generated/prisma/client";
+import { readDatabaseUrl } from "../env";
+import { poolConfigFor } from "./pool-config";
 
 export type Db = PrismaClient;
 
-const GLOBAL_KEY = "__marketplaceDb";
+/**
+ * The `globalThis` key the client of the process is kept under. Private to this folder: the
+ * public surface (index.ts) does not export it. Tests get it from testing.ts.
+ */
+export const DB_GLOBAL_KEY = "__marketplaceDb";
+
+const GLOBAL_KEY = DB_GLOBAL_KEY;
 
 type GlobalWithDb = typeof globalThis & { [GLOBAL_KEY]?: Db };
 
 function createClient(): Db {
-  // Read here until T-011 lands the validated configuration in src/server/env.ts.
-  const connectionString = process.env.DATABASE_URL;
-  if (connectionString === undefined || connectionString === "") {
-    // Names the variable and never prints a value.
-    throw new Error("DATABASE_URL is not set. The database client cannot be created.");
-  }
+  // Throws `EnvValidationError`, which names the variable and the rule and never holds a value.
+  const connectionString = readDatabaseUrl();
   return new PrismaClient({
-    adapter: new PrismaPg({ connectionString }),
+    adapter: new PrismaPg(poolConfigFor(connectionString)),
     errorFormat: "minimal",
   });
 }

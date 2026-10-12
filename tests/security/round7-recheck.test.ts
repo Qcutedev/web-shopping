@@ -1267,33 +1267,30 @@ describe("module state when a process holds two copies of a module", () => {
   // variable in a server's environment switches every start-up check off, and the database
   // client then takes DATABASE_URL as written. The client must judge the URL itself
   // (`readDatabaseUrl`, code-review finding CR-23).
-  it.fails(
-    "SEC-029 the database client refuses a placeholder password in production by itself",
-    async () => {
-      const GLOBAL_KEY = "__marketplaceDb";
-      const globalWithDb = globalThis as typeof globalThis & { [GLOBAL_KEY]?: unknown };
-      const kept = globalWithDb[GLOBAL_KEY];
-      delete globalWithDb[GLOBAL_KEY];
-      vi.resetModules();
-      vi.stubEnv("NODE_ENV", "production");
-      vi.stubEnv("DATABASE_URL", authority(DEV_PLACEHOLDER));
+  it("SEC-029 the database client refuses a placeholder password in production by itself", async () => {
+    const GLOBAL_KEY = "__marketplaceDb";
+    const globalWithDb = globalThis as typeof globalThis & { [GLOBAL_KEY]?: unknown };
+    const kept = globalWithDb[GLOBAL_KEY];
+    delete globalWithDb[GLOBAL_KEY];
+    vi.resetModules();
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("DATABASE_URL", authority(DEV_PLACEHOLDER));
+    try {
+      const { db } = await import("../../src/server/db");
+      let thrown: unknown;
       try {
-        const { db } = await import("../../src/server/db");
-        let thrown: unknown;
-        try {
-          // The first use creates the client. No query is sent and no connection is opened.
-          void db.$transaction;
-        } catch (error) {
-          thrown = error;
-        }
-        await db.$disconnect();
-        expect(thrown).toBeInstanceOf(Error);
-        expect(String((thrown as Error).message)).toContain("DATABASE_URL");
-        expect(String((thrown as Error).message)).not.toContain(DEV_PLACEHOLDER);
-      } finally {
-        if (kept === undefined) delete globalWithDb[GLOBAL_KEY];
-        else globalWithDb[GLOBAL_KEY] = kept;
+        // The first use creates the client. No query is sent and no connection is opened.
+        void db.$transaction;
+      } catch (error) {
+        thrown = error;
       }
-    },
-  );
+      await db.$disconnect();
+      expect(thrown).toBeInstanceOf(Error);
+      expect(String((thrown as Error).message)).toContain("DATABASE_URL");
+      expect(String((thrown as Error).message)).not.toContain(DEV_PLACEHOLDER);
+    } finally {
+      if (kept === undefined) delete globalWithDb[GLOBAL_KEY];
+      else globalWithDb[GLOBAL_KEY] = kept;
+    }
+  });
 });

@@ -9,8 +9,13 @@ const PLACEHOLDER_URL = "postgresql://user:placeholder@127.0.0.1:1/none";
 
 type GlobalWithDb = typeof globalThis & { [GLOBAL_KEY]?: unknown };
 
-// Counts how many driver adapters, and so how many pools, were created. The real class is kept.
-const created = vi.hoisted(() => ({ adapters: 0 }));
+// A published local password of `.env.example`: public, and refused in production (SEC-009).
+const LOCAL_PLACEHOLDER_PASSWORD = "local_dev_only_not_a_secret";
+const LOCAL_PLACEHOLDER_URL = `postgresql://user:${LOCAL_PLACEHOLDER_PASSWORD}@127.0.0.1:1/none`;
+
+// Counts how many driver adapters, and so how many pools, were created, and keeps what each was
+// given. The real class is kept.
+const created = vi.hoisted(() => ({ adapters: 0, configs: [] as unknown[] }));
 
 vi.mock("@prisma/adapter-pg", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@prisma/adapter-pg")>();
@@ -18,6 +23,7 @@ vi.mock("@prisma/adapter-pg", async (importOriginal) => {
     constructor(...args: ConstructorParameters<typeof actual.PrismaPg>) {
       super(...args);
       created.adapters += 1;
+      created.configs.push(args[0]);
     }
   }
   return { ...actual, PrismaPg: CountedPrismaPg };
@@ -41,6 +47,7 @@ describe("database client module", () => {
     vi.resetModules();
     clearGlobalClient();
     created.adapters = 0;
+    created.configs = [];
   });
 
   afterEach(() => {
@@ -93,9 +100,9 @@ describe("database client module", () => {
       vi.stubEnv("DATABASE_URL", value);
       const { db } = await import("./client");
 
-      expect(() => db.user).toThrow(/DATABASE_URL is not set/);
-      expect(() => db.$transaction).toThrow(/DATABASE_URL is not set/);
-      expect(() => "user" in db).toThrow(/DATABASE_URL is not set/);
+      expect(() => db.user).toThrow(/DATABASE_URL is required/);
+      expect(() => db.$transaction).toThrow(/DATABASE_URL is required/);
+      expect(() => "user" in db).toThrow(/DATABASE_URL is required/);
       expect(created.adapters).toBe(0);
     });
 
@@ -107,7 +114,7 @@ describe("database client module", () => {
 
       const message = messageOf(() => db.user);
 
-      expect(message).toBe("DATABASE_URL is not set. The database client cannot be created.");
+      expect(message).toContain("DATABASE_URL is required");
       expect(message).not.toMatch(/:\/\//);
       expect(message).not.toContain("placeholder");
     });
@@ -117,14 +124,14 @@ describe("database client module", () => {
       vi.stubEnv("DATABASE_URL_TEST", PLACEHOLDER_URL);
       const { db } = await import("./client");
 
-      expect(() => db.user).toThrow(/DATABASE_URL is not set/);
+      expect(() => db.user).toThrow(/DATABASE_URL is required/);
       expect(created.adapters).toBe(0);
     });
 
     it("reads the variable at first use, not at import, and does not remember the failure", async () => {
       vi.stubEnv("DATABASE_URL", undefined);
       const { db } = await import("./client");
-      expect(() => db.user).toThrow(/DATABASE_URL is not set/);
+      expect(() => db.user).toThrow(/DATABASE_URL is required/);
 
       vi.stubEnv("DATABASE_URL", PLACEHOLDER_URL);
 
@@ -133,7 +140,68 @@ describe("database client module", () => {
     });
   });
 
+  // CR-23 and SEC-029: the URL comes from `readDatabaseUrl()` of src/server/env.ts, so its
+  // refusals hold where the client is created, whether or not the start-up hook ran.
+  describe("first use with a DATABASE_URL the validated configuration refuses", () => {
+    it("refuses a value that is not a PostgreSQL URL and does not repeat it", async () => {
+      vi.stubEnv("DATABASE_URL", "mysql://user:placeholder@127.0.0.1:1/none");
+      const { db } = await import("./client");
+
+      const message = messageOf(() => db.user);
+
+      expect(message).toContain("DATABASE_URL must be a postgresql:// or postgres:// URL");
+      expect(message).not.toContain("mysql");
+      expect(message).not.toContain("placeholder");
+      expect(created.adapters).toBe(0);
+    });
+
+    it("refuses a published local password in production and does not repeat it", async () => {
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("DATABASE_URL", LOCAL_PLACEHOLDER_URL);
+      const { db } = await import("./client");
+
+      const message = messageOf(() => db.$transaction);
+
+      expect(message).toContain("DATABASE_URL");
+      expect(message).not.toContain(LOCAL_PLACEHOLDER_PASSWORD);
+      expect(message).not.toMatch(/:\/\//);
+      expect(created.adapters).toBe(0);
+    });
+
+    it("refuses a published local password in PGPASSWORD in production", async () => {
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("DATABASE_URL", PLACEHOLDER_URL);
+      vi.stubEnv("PGPASSWORD", LOCAL_PLACEHOLDER_PASSWORD);
+      const { db } = await import("./client");
+
+      const message = messageOf(() => db.user);
+
+      expect(message).toContain("PGPASSWORD");
+      expect(message).not.toContain(LOCAL_PLACEHOLDER_PASSWORD);
+      expect(created.adapters).toBe(0);
+    });
+
+    it("accepts the same local password outside production", async () => {
+      vi.stubEnv("NODE_ENV", "development");
+      vi.stubEnv("DATABASE_URL", LOCAL_PLACEHOLDER_URL);
+      const { db } = await import("./client");
+
+      expect(db.user).toBeDefined();
+      expect(created.adapters).toBe(1);
+    });
+  });
+
   describe("creation", () => {
+    it("hands the adapter the pool configuration of pool-config.ts", async () => {
+      vi.stubEnv("DATABASE_URL", PLACEHOLDER_URL);
+      const { db } = await import("./client");
+      const { poolConfigFor } = await import("./pool-config");
+
+      expect(db.user).toBeDefined();
+
+      expect(created.configs).toEqual([poolConfigFor(PLACEHOLDER_URL)]);
+    });
+
     it("happens once, however often and in whatever way the client is used", async () => {
       vi.stubEnv("DATABASE_URL", PLACEHOLDER_URL);
       const { db } = await import("./client");
@@ -195,6 +263,20 @@ describe("database client module", () => {
       const { db } = await import("./client");
 
       expect((globalThis as GlobalWithDb)[GLOBAL_KEY]).toBe(db);
+    });
+
+    it("gives tests that key through testing.ts and keeps it off the public surface", async () => {
+      vi.stubEnv("DATABASE_URL", undefined);
+
+      const { db } = await import("./client");
+      const { TEST_ONLY_DB_GLOBAL_KEY } = await import("./testing");
+      const surface = await import("./index");
+
+      expect(TEST_ONLY_DB_GLOBAL_KEY).toBe(GLOBAL_KEY);
+      expect((globalThis as Record<string, unknown>)[TEST_ONLY_DB_GLOBAL_KEY]).toBe(db);
+      expect(Object.keys(surface)).not.toContain("DB_GLOBAL_KEY");
+      expect(Object.keys(surface)).not.toContain("TEST_ONLY_DB_GLOBAL_KEY");
+      expect(Object.values(surface)).not.toContain(GLOBAL_KEY);
     });
   });
 
