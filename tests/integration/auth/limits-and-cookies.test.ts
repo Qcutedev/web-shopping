@@ -180,7 +180,7 @@ describe("checks before the body (section 1.8 steps 1, 2, 6)", () => {
 });
 
 describe("cookie attributes in a production-mode response (TM-02)", () => {
-  it("are Secure, HttpOnly, SameSite=Lax, Path=/, with the __Secure- prefix and a bounded Max-Age", async () => {
+  it("are Secure, HttpOnly, SameSite=Lax, Path=/, with the __Host- prefix and a bounded Max-Age", async () => {
     const runtime = makeRuntime({
       secureCookies: true,
       baseUrl: "https://shop.example.test",
@@ -199,7 +199,7 @@ describe("cookie attributes in a production-mode response (TM-02)", () => {
     expect(response.status).toBe(200);
     const lines = response.headers.getSetCookie();
     expect(lines).toHaveLength(1);
-    const attributes = cookieAttributes(response, "__Secure-better-auth.session_token");
+    const attributes = cookieAttributes(response, "__Host-better-auth.session_token");
     expect(attributes).toBeDefined();
     expect(attributes?.has("secure")).toBe(true);
     expect(attributes?.has("httponly")).toBe(true);
@@ -208,7 +208,7 @@ describe("cookie attributes in a production-mode response (TM-02)", () => {
     expect(attributes?.get("max-age")).toBe(String(SESSION_LIFETIME_SECONDS));
     expect(attributes?.has("domain")).toBe(false);
     // Nothing else is set: no cookie cache, no "don't remember" cookie.
-    expect(lines[0]?.startsWith("__Secure-better-auth.session_token=")).toBe(true);
+    expect(lines[0]?.startsWith("__Host-better-auth.session_token=")).toBe(true);
 
     // Signing out clears the same cookie with the same attributes.
     const out = await handleSignOut(
@@ -220,10 +220,22 @@ describe("cookie attributes in a production-mode response (TM-02)", () => {
       runtime,
     );
     expect(out.status).toBe(200);
-    const cleared = cookieAttributes(out, "__Secure-better-auth.session_token");
+    const cleared = cookieAttributes(out, "__Host-better-auth.session_token");
     expect(cleared?.get("max-age")).toBe("0");
     expect(cleared?.has("secure")).toBe(true);
     expect(cleared?.has("httponly")).toBe(true);
+    // Every cookie the library writes or expires at sign-out (it also expires its cookie-cache
+    // and "don't remember" cookies) is __Host- prefixed, Secure, Path=/, and has no Domain.
+    const outLines = out.headers.getSetCookie();
+    expect(outLines.length).toBeGreaterThan(0);
+    for (const line of outLines) {
+      const [pair, ...rest] = line.split(";");
+      expect(pair?.startsWith("__Host-")).toBe(true);
+      const flags = rest.map((part) => part.trim().toLowerCase());
+      expect(flags).toContain("secure");
+      expect(flags).toContain("path=/");
+      expect(flags.some((flag) => flag.startsWith("domain="))).toBe(false);
+    }
   });
 });
 

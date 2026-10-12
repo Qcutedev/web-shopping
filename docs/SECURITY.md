@@ -390,10 +390,10 @@ Written by the auth agent on 2026-10-13 (T-015) from the configuration as built:
 
 | Setting | Value |
 | --- | --- |
-| Name | `better-auth.session_token`; `__Secure-better-auth.session_token` in production |
+| Name | `better-auth.session_token`; `__Host-better-auth.session_token` in production (SEC-034, changed 2026-10-13 from `__Secure-`: in better-auth 1.7.7 `advanced.useSecureCookies` is `false`, `advanced.cookiePrefix` is `__Host-better-auth`, and `advanced.defaultCookieAttributes` is `{ secure: true, path: "/" }`, so every cookie the library writes or expires carries the `__Host-` name, `Secure`, `Path=/`, and no `Domain`) |
 | Value | session token, `.`, HMAC signature (a token without a valid signature is refused [integration: forged cookies]) |
 | `HttpOnly` | always |
-| `Secure` | when `NODE_ENV=production` (`advanced.useSecureCookies`, set explicitly from the validated `NODE_ENV`, not inferred by the library); not in development and tests, which run on `http://localhost` |
+| `Secure` | when `NODE_ENV=production` (`advanced.defaultCookieAttributes.secure`, set explicitly from the validated `NODE_ENV`, not inferred by the library); not in development and tests, which run on `http://localhost` |
 | `SameSite` | `Lax` |
 | `Path` | `/` |
 | `Domain` | not set (host-only cookie) |
@@ -942,12 +942,13 @@ Re-check evidence: none yet.
 
 ### SEC-034 The production session cookie uses the `__Secure-` prefix, not `__Host-`
 Severity: Low
-Status: OPEN
+Status: FIXED by auth, awaiting security re-check
 Owner: auth
 Location: src/server/auth/auth.ts:127-130; src/server/auth/cookies.ts:13-19
 Description: a host under the same registrable domain can set the session cookie for the shop (login CSRF into an attacker's account). Deployment-dependent.
 Reproduction: `it.fails` "the production session cookie carries the __Host- prefix".
 Remediation: `__Host-` name in production (needs `useSecureCookies: false` with an explicit name and `secure: true` attribute in better-auth 1.7.7); or record in DEPLOYMENT.md that no other host under the domain is operated by anyone else.
+Fix (auth, 2026-10-13): in production `advanced.useSecureCookies: false`, `advanced.cookiePrefix: "__Host-better-auth"`, `advanced.defaultCookieAttributes: { secure: true, path: "/" }` (a prefix rather than a per-cookie name, so the cookie-cache and "don't remember" cookies the library expires at sign-out are `__Host-` and `Secure` too). `SESSION_COOKIE_NAMES` in `cookies.ts` lists `__Host-better-auth.session_token` and the development name; `__Secure-better-auth.session_token` no longer counts for the proxy's presence check. The security case is now `it` and passes; the production-mode cookie test in `tests/integration/auth/limits-and-cookies.test.ts` asserts the `__Host-` name and checks every `Set-Cookie` line of the sign-out answer for `__Host-`, `Secure`, `Path=/`, and no `Domain`. No deployment existed, so no live session was invalidated by the rename.
 Re-check evidence: none yet.
 
 ### SEC-035 Response time tells a registered email from an unknown one

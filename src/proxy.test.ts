@@ -44,7 +44,7 @@ describe("proxy", () => {
   it("lets a request with a session cookie through, without judging it", () => {
     for (const cookie of [
       "better-auth.session_token=abc.def",
-      "__Secure-better-auth.session_token=abc.def",
+      "__Host-better-auth.session_token=abc.def",
       "theme=dark; better-auth.session_token=forged",
     ]) {
       const response = proxy(request("/seller/products", cookie));
@@ -68,6 +68,8 @@ describe("proxy", () => {
       "better-auth.session_tokenx=abc",
       "xbetter-auth.session_token=abc",
       "session_token=abc",
+      // The production name before SEC-034; the library no longer writes or reads it.
+      "__Secure-better-auth.session_token=abc",
     ]) {
       expect(proxy(request("/account", cookie)).status).toBe(307);
     }

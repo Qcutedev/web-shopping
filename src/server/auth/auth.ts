@@ -51,6 +51,7 @@ import {
   SESSION_LIFETIME_SECONDS,
   SESSION_USER_AGENT_MAX_LENGTH,
 } from "./config";
+import { HOST_COOKIE_PREFIX_NAME } from "./cookies";
 
 export interface AuthSettings {
   /** `AUTH_SECRET`: signs the session cookie. */
@@ -59,7 +60,7 @@ export interface AuthSettings {
   baseUrl: string;
   /** The origin of `APP_URL`. */
   appOrigin: string;
-  /** True in production: `Secure` cookies with the `__Secure-` name prefix. */
+  /** True in production: `Secure` cookies with the `__Host-` name prefix (SEC-034). */
   secureCookies: boolean;
   /** The validated SR-01 configuration. */
   trustedProxy: ClientAddressConfig;
@@ -125,7 +126,20 @@ export function createAuth(settings: AuthSettings) {
       cookieCache: { enabled: false },
     },
     advanced: {
-      useSecureCookies: settings.secureCookies,
+      // Production cookies are host-only by name (SEC-034): `__Host-` forbids a `Domain`
+      // attribute and requires `Secure` and `Path=/`, so a page on another host under the same
+      // registrable domain cannot set the session cookie for the shop. Better Auth 1.7.7 puts
+      // `__Secure-` in front of every name when `useSecureCookies` is true
+      // (`dist/cookies/index.mjs`, `createCookieGetter`), so that switch stays off, the
+      // `__Host-` prefix is part of the cookie prefix, and `Secure` is a default attribute of
+      // every cookie the library writes (including the ones it only expires at sign-out).
+      useSecureCookies: false,
+      ...(settings.secureCookies
+        ? {
+            cookiePrefix: HOST_COOKIE_PREFIX_NAME,
+            defaultCookieAttributes: { secure: true, path: "/" },
+          }
+        : {}),
       ipAddress: { disableIpTracking: true },
     },
     databaseHooks: {

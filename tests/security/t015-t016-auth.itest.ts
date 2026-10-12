@@ -127,7 +127,7 @@ describe("SEC-033 sign-up display name accepts bidirectional control characters"
 });
 
 describe("SEC-034 production session cookie is not host-only by prefix", () => {
-  it.fails("the production session cookie carries the __Host- prefix", async () => {
+  it("the production session cookie carries the __Host- prefix", async () => {
     const runtime = makeRuntime({
       secureCookies: true,
       baseUrl: "https://shop.example.test",

@@ -6,22 +6,27 @@
  * (session.ts). Code outside the auth layer may test whether the cookie is present, which is all
  * src/proxy.ts does, and never treats presence as a session.
  *
- * Better Auth names the cookie `<prefix>.session_token` with the default prefix `better-auth`,
- * and puts `__Secure-` in front when cookies are secure (production; auth.ts sets it
- * explicitly). Both names are listed so that the presence check needs no environment.
+ * Better Auth names the cookie `<prefix>.session_token`. The prefix is `better-auth` in
+ * development and tests, and `__Host-better-auth` in production, where cookies are secure
+ * (SEC-034; auth.ts sets it explicitly). `__Host-` makes the browser refuse the cookie unless it
+ * is `Secure`, has `Path=/`, and has no `Domain`. Both names are listed so that the presence
+ * check needs no environment.
  */
-export const SESSION_COOKIE_BASE_NAME = "better-auth.session_token";
-export const SECURE_COOKIE_NAME_PREFIX = "__Secure-";
+export const COOKIE_PREFIX_NAME = "better-auth";
+export const HOST_COOKIE_NAME_PREFIX = "__Host-";
+/** The library's cookie prefix in production. */
+export const HOST_COOKIE_PREFIX_NAME = `${HOST_COOKIE_NAME_PREFIX}${COOKIE_PREFIX_NAME}`;
+export const SESSION_COOKIE_BASE_NAME = `${COOKIE_PREFIX_NAME}.session_token`;
 
 export const SESSION_COOKIE_NAMES = [
-  `${SECURE_COOKIE_NAME_PREFIX}${SESSION_COOKIE_BASE_NAME}`,
+  `${HOST_COOKIE_NAME_PREFIX}${SESSION_COOKIE_BASE_NAME}`,
   SESSION_COOKIE_BASE_NAME,
 ] as const;
 
 /** The session cookie name for one setting of secure cookies. */
 export function sessionCookieName(secure: boolean): string {
   return secure
-    ? `${SECURE_COOKIE_NAME_PREFIX}${SESSION_COOKIE_BASE_NAME}`
+    ? `${HOST_COOKIE_NAME_PREFIX}${SESSION_COOKIE_BASE_NAME}`
     : SESSION_COOKIE_BASE_NAME;
 }
 
