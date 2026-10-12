@@ -265,8 +265,15 @@ export async function handleSignOut(request: Request, runtime: AuthRuntime): Pro
     checkOrigin(request, runtime, scope);
     assertContentType(request, JSON_CONTENT_TYPE);
     const session = await readSession(request, runtime.auth);
-    const actor = session === null ? null : await loadActor(session.userId);
-    if (session === null || actor === null) throw unauthenticated();
+    if (session === null) throw unauthenticated();
+    const actor = await loadActor(session.userId);
+    if (actor === null) {
+      // A session that outlived its user's deactivation (CR-60): no one is signed in, so the
+      // answer is 401 all the same, but the row and its address and browser details go now
+      // instead of at the next purge.
+      await db.session.deleteMany({ where: { token: session.token } });
+      throw unauthenticated();
+    }
     await db.session.deleteMany({ where: { token: session.token } });
     const cleared = await runtime.auth.api.signOut({
       headers: request.headers,

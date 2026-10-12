@@ -10,6 +10,7 @@ import path from "node:path";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { POST as signInRoute } from "@/app/api/v1/auth/sign-in/route";
+import { POST as signOutRoute } from "@/app/api/v1/auth/sign-out/route";
 import { POST as signUpRoute } from "@/app/api/v1/auth/sign-up/route";
 import {
   type Actor,
@@ -174,6 +175,17 @@ describe("deactivation (REQ-A-02, TM-26, SR-07 item 4)", () => {
     await db.user.update({ where: { id: userId }, data: { isActive: false } });
     expect(await getActor(get("/x", { cookie }))).toBeNull();
     await expect(requireActor(get("/x", { cookie }))).rejects.toMatchObject({ status: 401 });
+  });
+
+  it("sign-out with a session that survived a deactivation is 401 and deletes the row (CR-60)", async () => {
+    const { cookie, userId } = await signedIn("CUSTOMER");
+    await db.user.update({ where: { id: userId }, data: { isActive: false } });
+    expect(await db.session.count({ where: { userId } })).toBe(1);
+    const response = await signOutRoute(post("/api/v1/auth/sign-out", { cookie }));
+    expect(response.status).toBe(401);
+    const error = (await json(response))["error"] as Record<string, unknown>;
+    expect(error["code"]).toBe("UNAUTHENTICATED");
+    expect(await db.session.count({ where: { userId } })).toBe(0);
   });
 });
 
