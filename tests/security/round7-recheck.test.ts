@@ -661,7 +661,9 @@ describe("SEC-027 re-check: a label is written only in the form of a class name 
       } else expect(label).not.toMatch(CODE_FORM);
     }
     expect(written).toBeGreaterThan(1_000);
-  });
+    // 20,000 rounds take about 1 s alone and passed 5 s under the parallel `pnpm verify` run
+    // (2026-10-13); the bound is for load, not for the property checked.
+  }, 60_000);
 
   it("prose, an address, a phone number with blanks, and pieces of a body never reach the line", () => {
     const hostile = [
