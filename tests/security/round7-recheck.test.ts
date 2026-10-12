@@ -4,7 +4,8 @@
  * backend-api). Owner: security agent.
  *
  *   it(...)        behaviour that was checked on 2026-10-12 and holds. A failure is a regression.
- *   it.fails(...)  an OPEN finding (SEC-029, SEC-030, SEC-031). The body asserts the secure
+ *   it.fails(...)  an OPEN finding (SEC-029; SEC-030 and SEC-031 were fixed in commit f66ab8c,
+ *                  re-checked 2026-10-12, and their cases are plain `it`). The body asserts the secure
  *                  behaviour, so the test is reported as an expected failure while the flaw
  *                  exists and turns red when the code is fixed. The owner of the code may then
  *                  change `it.fails` to `it` and nothing else; the security agent re-checks
@@ -1186,11 +1187,12 @@ describe("the process-wide log level: what can set it and what it hides", () => 
     expect(JSON.parse(lines[0] ?? "{}")).toMatchObject({ level: "error", component: "health" });
   });
 
-  // SEC-031 (OPEN, Low). SR-02 item 4 requires the saturation warning so that operators can
-  // alert on it, and SR-04 lists the security events. All of them are written at `warn` or
-  // below, so `LOG_LEVEL=error`, a value the configuration accepts in production, removes them.
-  // The rule added to SR-04 on 2026-10-12: a line that a security rule requires is written at
-  // every configured level.
+  // SEC-031 (FIXED in commit f66ab8c, re-checked 2026-10-12; was Low). SR-02 item 4 requires the
+  // saturation warning so that operators can alert on it, and SR-04 lists the security events.
+  // All of them are written at `warn` or below, so `LOG_LEVEL=error`, a value the configuration
+  // accepts in production, removed them. The rule added to SR-04 on 2026-10-12: a line that a
+  // security rule requires is written at every configured level, through `logger.security()`.
+  // Further cases: tests/security/sec030-031-recheck.test.ts.
   it("SEC-031 the saturation warning of SR-02 is written at every configured level", async () => {
     setLogLevel("error");
     const limiter = createRateLimiter({ store: new MemoryRateLimitStore({ maxKeys: 1 }) });
@@ -1213,11 +1215,14 @@ describe("module state when a process holds two copies of a module", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
+    // The shared table of the process-wide limiter outlives a module copy; leave none behind.
+    Reflect.deleteProperty(globalThis, Symbol.for("marketplace.rateLimit.processState"));
   });
 
-  // SEC-030 (OPEN, Medium before T-015; nothing consumes a limit today). The limiter keeps its
-  // counters in a store that belongs to the module copy, so each copy counts for itself and a
-  // limit is multiplied by the number of copies that consume it.
+  // SEC-030 (FIXED in commit f66ab8c, re-checked 2026-10-12; was Medium). The limiter kept its
+  // counters in a store that belonged to the module copy, so each copy counted for itself and a
+  // limit was multiplied by the number of copies that consume it. Now one data-only table per
+  // process on `globalThis`. Further cases: tests/security/sec030-031-recheck.test.ts.
   it("SEC-030 a limit used up through one copy of the limiter is used up for every copy", async () => {
     vi.resetModules();
     const first = await import("../../src/server/rate-limit");
