@@ -45,6 +45,10 @@
  *
  * The logger never throws: circular references, throwing getters, BigInt, and
  * very deep or very large values are all rendered as placeholders.
+ *
+ * Levels: debug, info, warn, and error lines below the configured level are
+ * dropped. `security(level, ...)` is the one path the level does not filter, for
+ * the lines a security rule requires (SR-04; SEC-031).
  */
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -58,6 +62,29 @@ export interface Logger {
   error(message: string, fields?: LogFields): void;
   /** A logger that adds `bindings` (and optionally a request id) to every line. */
   child(bindings: LogFields & { requestId?: string }): Logger;
+}
+
+/** The levels a line that a security rule requires may be written at. */
+export type SecurityLogLevel = Exclude<LogLevel, "debug">;
+
+/**
+ * The logger this module builds: a Logger plus the one path that the configured level does not
+ * filter. `Logger` stays the narrow interface that consumers accept and tests stub.
+ */
+export interface StructuredLogger extends Logger {
+  /**
+   * Writes a line that a security rule requires, at `level`, whatever level the logger is
+   * configured with (SR-04, "Lines that a security rule requires are not subject to
+   * `LOG_LEVEL`"; SEC-031). For exactly these lines: the start-up warning of SR-01, the
+   * saturation warning of SR-02 item 4, and the security events SR-04 lists (a rate-limit
+   * refusal, a failed or successful sign-in, a sign-up, an `Origin` check failure, an admin
+   * action). Everything else uses debug, info, warn, or error, which the level filters.
+   *
+   * The line is redacted and escaped exactly like every other line. A `level` that is not one
+   * of info, warn, error (possible only from untyped code) is written as `warn`. Never throws.
+   */
+  security(level: SecurityLogLevel, message: string, fields?: LogFields): void;
+  child(bindings: LogFields & { requestId?: string }): StructuredLogger;
 }
 
 export interface LoggerOptions {
@@ -819,18 +846,26 @@ interface LevelCell {
   readonly current: LogLevel;
 }
 
-export function createLogger(options: LoggerOptions = {}): Logger {
+export function createLogger(options: LoggerOptions = {}): StructuredLogger {
   return buildLogger(options, { current: options.level ?? DEFAULT_LOG_LEVEL });
 }
 
-function buildLogger(options: Omit<LoggerOptions, "level">, levelCell: LevelCell): Logger {
+function isSecurityLogLevel(value: unknown): value is SecurityLogLevel {
+  return value === "info" || value === "warn" || value === "error";
+}
+
+function buildLogger(
+  options: Omit<LoggerOptions, "level">,
+  levelCell: LevelCell,
+): StructuredLogger {
   const write = options.write ?? writeToStdout;
   const now = options.now ?? (() => new Date());
   const bindings = options.bindings ?? {};
   const requestId = options.requestId;
 
-  function emit(level: LogLevel, message: string, fields?: LogFields): void {
-    if (LEVEL_ORDER[level] < LEVEL_ORDER[levelCell.current]) return;
+  /** `filtered` is false only for the lines of `security`, which every level writes (SEC-031). */
+  function emit(level: LogLevel, message: string, fields?: LogFields, filtered = true): void {
+    if (filtered && LEVEL_ORDER[level] < LEVEL_ORDER[levelCell.current]) return;
     let line: string;
     try {
       const safeFields = redact({ ...bindings, ...fields });
@@ -862,6 +897,8 @@ function buildLogger(options: Omit<LoggerOptions, "level">, levelCell: LevelCell
     info: (message, fields) => emit("info", message, fields),
     warn: (message, fields) => emit("warn", message, fields),
     error: (message, fields) => emit("error", message, fields),
+    security: (level, message, fields) =>
+      emit(isSecurityLogLevel(level) ? level : "warn", message, fields, false),
     child(childBindings) {
       const { requestId: childRequestId, ...rest } = childBindings;
       // The child shares the parent's level cell: a level set later reaches it as well.
@@ -927,7 +964,7 @@ const processLevel: LevelCell = {
  * later: src/server/env.ts is the one place that does, and it imports this module, so the
  * validated `LOG_LEVEL` is handed over by a call, not fetched from here.
  */
-export const logger: Logger = buildLogger({}, processLevel);
+export const logger: StructuredLogger = buildLogger({}, processLevel);
 
 /**
  * Sets the level of the process-wide logger and of every child made from it, before or after

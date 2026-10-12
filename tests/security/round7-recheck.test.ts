@@ -1191,19 +1191,16 @@ describe("the process-wide log level: what can set it and what it hides", () => 
   // below, so `LOG_LEVEL=error`, a value the configuration accepts in production, removes them.
   // The rule added to SR-04 on 2026-10-12: a line that a security rule requires is written at
   // every configured level.
-  it.fails(
-    "SEC-031 the saturation warning of SR-02 is written at every configured level",
-    async () => {
-      setLogLevel("error");
-      const limiter = createRateLimiter({ store: new MemoryRateLimitStore({ maxKeys: 1 }) });
-      const lines = await captureStdout(async () => {
-        await limiter.consume("203.0.113.1", RATE_LIMITS.SIGN_IN_ADDRESS);
-        const refused = await limiter.consume("203.0.113.2", RATE_LIMITS.SIGN_IN_ADDRESS);
-        expect(refused.saturated).toBe(true);
-      });
-      expect(lines.join("\n")).toContain("Rate limit store saturated");
-    },
-  );
+  it("SEC-031 the saturation warning of SR-02 is written at every configured level", async () => {
+    setLogLevel("error");
+    const limiter = createRateLimiter({ store: new MemoryRateLimitStore({ maxKeys: 1 }) });
+    const lines = await captureStdout(async () => {
+      await limiter.consume("203.0.113.1", RATE_LIMITS.SIGN_IN_ADDRESS);
+      const refused = await limiter.consume("203.0.113.2", RATE_LIMITS.SIGN_IN_ADDRESS);
+      expect(refused.saturated).toBe(true);
+    });
+    expect(lines.join("\n")).toContain("Rate limit store saturated");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1221,28 +1218,22 @@ describe("module state when a process holds two copies of a module", () => {
   // SEC-030 (OPEN, Medium before T-015; nothing consumes a limit today). The limiter keeps its
   // counters in a store that belongs to the module copy, so each copy counts for itself and a
   // limit is multiplied by the number of copies that consume it.
-  it.fails(
-    "SEC-030 a limit used up through one copy of the limiter is used up for every copy",
-    async () => {
-      vi.resetModules();
-      const first = await import("../../src/server/rate-limit");
-      vi.resetModules();
-      const second = await import("../../src/server/rate-limit");
-      expect(first.rateLimiter).not.toBe(second.rateLimiter);
-      const subject = "203.0.113.30";
-      const rule = first.RATE_LIMITS.SIGN_IN_ADDRESS;
-      for (let attempt = 0; attempt < rule.limit; attempt += 1) {
-        expect((await first.rateLimiter.consume(subject, rule)).allowed).toBe(true);
-      }
-      expect((await first.rateLimiter.consume(subject, rule)).allowed).toBe(false);
-      // The sixth and later attempts are refused whichever copy is asked.
-      const elsewhere = await second.rateLimiter.consume(
-        subject,
-        second.RATE_LIMITS.SIGN_IN_ADDRESS,
-      );
-      expect(elsewhere.allowed).toBe(false);
-    },
-  );
+  it("SEC-030 a limit used up through one copy of the limiter is used up for every copy", async () => {
+    vi.resetModules();
+    const first = await import("../../src/server/rate-limit");
+    vi.resetModules();
+    const second = await import("../../src/server/rate-limit");
+    expect(first.rateLimiter).not.toBe(second.rateLimiter);
+    const subject = "203.0.113.30";
+    const rule = first.RATE_LIMITS.SIGN_IN_ADDRESS;
+    for (let attempt = 0; attempt < rule.limit; attempt += 1) {
+      expect((await first.rateLimiter.consume(subject, rule)).allowed).toBe(true);
+    }
+    expect((await first.rateLimiter.consume(subject, rule)).allowed).toBe(false);
+    // The sixth and later attempts are refused whichever copy is asked.
+    const elsewhere = await second.rateLimiter.consume(subject, second.RATE_LIMITS.SIGN_IN_ADDRESS);
+    expect(elsewhere.allowed).toBe(false);
+  });
 
   it("an AppError made by another copy is never mapped to more than a generic 500", async () => {
     // `instanceof AppError` is false across copies, so the refusal of one copy is a server

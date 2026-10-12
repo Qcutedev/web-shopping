@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createLogger } from "./logger";
+import { createLogger, setLogLevel } from "./logger";
 import {
   assertRateLimitRules,
   createRateLimiter,
@@ -430,6 +430,56 @@ describe("isolated capacity per rule (SEC-004)", () => {
     expect(lines[0]).not.toContain("203.0.113");
   });
 
+  it.each(["debug", "info", "warn", "error"] as const)(
+    "the saturation line is written by a real logger configured at %s (SEC-031)",
+    async (level) => {
+      const lines: string[] = [];
+      const tiny: RateLimitRule = { name: "tiny", limit: 5, windowMs: 3_600_000, maxKeys: 1 };
+      const log = createLogger({ level, write: (line) => lines.push(line) });
+      const limiter = createRateLimiter({
+        rules: [tiny],
+        now: () => START,
+        logger: log.child({ component: "rate-limit" }),
+      });
+      await limiter.consume("203.0.113.1", tiny);
+      expect((await limiter.consume("203.0.113.2", tiny)).saturated).toBe(true);
+      expect(lines).toHaveLength(1);
+      expect(JSON.parse(lines[0] ?? "{}")).toMatchObject({
+        level: "warn",
+        message: "Rate limit store saturated",
+        component: "rate-limit",
+        rule: "tiny",
+      });
+      // The level still filters an ordinary warn line of the same logger.
+      log.warn("ordinary warning");
+      expect(lines).toHaveLength(level === "error" ? 1 : 2);
+    },
+  );
+
+  it("the default logger writes the saturation line with the process level at error (SEC-031)", async () => {
+    const written: string[] = [];
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      written.push(String(chunk));
+      return true;
+    });
+    setLogLevel("error");
+    try {
+      const day: RateLimitRule = { name: "day", limit: 3, windowMs: 86_400_000, maxKeys: 1 };
+      const limiter = createRateLimiter({ rules: [day], now: () => START });
+      await limiter.consume("user:a", day);
+      expect((await limiter.consume("user:b", day)).saturated).toBe(true);
+    } finally {
+      setLogLevel("info");
+      spy.mockRestore();
+    }
+    expect(written).toHaveLength(1);
+    expect(JSON.parse(written[0] ?? "{}")).toMatchObject({
+      level: "warn",
+      message: "Rate limit store saturated",
+      rule: "day",
+    });
+  });
+
   it("bounds the total: the built-in capacities add up to at most 200,000 windows", () => {
     expect(MAX_TOTAL_WINDOWS).toBe(200_000);
     const total = Object.values(RATE_LIMITS).reduce((sum, rule) => sum + rule.maxKeys, 0);
@@ -622,5 +672,215 @@ describe("contract", () => {
       SELLER_APPLICATION: { limit: 3, windowMs: 24 * 60 * 60 * 1000 },
       REVIEW_CREATE: { limit: 10, windowMs: 60 * 60 * 1000 },
     });
+  });
+});
+
+/**
+ * One process can hold more than one copy of this module (measured with Next.js 16.4.0: the
+ * start-up hook and the route handlers are compiled separately). `vi.resetModules()` followed by
+ * a dynamic import gives a second evaluation of the file in the same process, with the same
+ * `globalThis`. SEC-030: the process-wide limiter must count once per process, not per copy.
+ */
+describe("the process-wide limiter is one per process, shared by every copy (SEC-030)", () => {
+  type RateLimitModule = typeof import("./rate-limit");
+
+  const STATE_KEY = Symbol.for("marketplace.rateLimit.processState");
+  const globalRecord = globalThis as unknown as Record<symbol, unknown>;
+
+  async function freshCopy(): Promise<RateLimitModule> {
+    vi.resetModules();
+    return import("./rate-limit");
+  }
+
+  function clearProcessState(): void {
+    Reflect.deleteProperty(globalThis, STATE_KEY);
+  }
+
+  /** The JSON log lines written to stdout while `run` runs. */
+  async function stdoutLines(run: () => Promise<void>): Promise<Record<string, unknown>[]> {
+    const lines: Record<string, unknown>[] = [];
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      lines.push(JSON.parse(String(chunk)) as Record<string, unknown>);
+      return true;
+    });
+    try {
+      await run();
+    } finally {
+      spy.mockRestore();
+    }
+    return lines;
+  }
+
+  beforeEach(clearProcessState);
+
+  afterEach(() => {
+    clearProcessState();
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  it("two copies of the module share one counter", async () => {
+    const hook = await freshCopy();
+    const handlers = await freshCopy();
+    expect(handlers.rateLimiter).not.toBe(hook.rateLimiter);
+    const rule = hook.RATE_LIMITS.SIGN_IN_ADDRESS;
+    const subject = "203.0.113.40";
+
+    // Five attempts spread over two copies: one counter, five hits.
+    for (let attempt = 0; attempt < rule.limit; attempt += 1) {
+      const copy = attempt % 2 === 0 ? hook : handlers;
+      const result = await copy.rateLimiter.consume(subject, copy.RATE_LIMITS.SIGN_IN_ADDRESS);
+      expect(result).toMatchObject({ allowed: true, remaining: rule.limit - attempt - 1 });
+    }
+    // The sixth is refused by either copy, and by a third loaded later.
+    const late = await freshCopy();
+    for (const copy of [hook, handlers, late]) {
+      expect(
+        await copy.rateLimiter.consume(subject, copy.RATE_LIMITS.SIGN_IN_ADDRESS),
+      ).toMatchObject({ allowed: false, saturated: false });
+    }
+    // The copy this file imported at the top counts in the same table.
+    expect((await rateLimiter.consume(subject, RATE_LIMITS.SIGN_IN_ADDRESS)).allowed).toBe(false);
+    // Another subject is not affected.
+    expect(
+      (await handlers.rateLimiter.consume("203.0.113.41", handlers.RATE_LIMITS.SIGN_IN_ADDRESS))
+        .allowed,
+    ).toBe(true);
+  });
+
+  it("a limiter made with createRateLimiter keeps its own store and does not touch the process table", async () => {
+    const copy = await freshCopy();
+    const own = copy.createRateLimiter({ now: () => START });
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      await own.consume("203.0.113.42", copy.RATE_LIMITS.SIGN_IN_ADDRESS);
+    }
+    expect(STATE_KEY in globalThis).toBe(false);
+    expect(
+      (await copy.rateLimiter.consume("203.0.113.42", copy.RATE_LIMITS.SIGN_IN_ADDRESS)).allowed,
+    ).toBe(true);
+  });
+
+  it("importing a copy creates nothing and starts no timer; the first hit creates a data-only table", async () => {
+    const timeouts = vi.spyOn(globalThis, "setTimeout");
+    const intervals = vi.spyOn(globalThis, "setInterval");
+    const copy = await freshCopy();
+    expect(STATE_KEY in globalThis).toBe(false);
+
+    await copy.rateLimiter.consume("user-1", copy.RATE_LIMITS.CHECKOUT);
+    const second = await freshCopy();
+    await second.rateLimiter.consume("user-1", second.RATE_LIMITS.CHECKOUT);
+    expect(timeouts).not.toHaveBeenCalled();
+    expect(intervals).not.toHaveBeenCalled();
+
+    // Data only: built-in maps of plain objects and numbers, nothing callable, no class of a copy.
+    const state = globalRecord[STATE_KEY] as Record<string, unknown>;
+    expect(Object.keys(state).sort()).toEqual([
+      "lastSaturationLogAt",
+      "lastSweepAt",
+      "ruleSizes",
+      "version",
+      "windows",
+    ]);
+    expect(Object.getPrototypeOf(state)).toBe(Object.prototype);
+    expect(state.windows).toBeInstanceOf(Map);
+    expect(state.ruleSizes).toBeInstanceOf(Map);
+    expect(state.lastSaturationLogAt).toBeInstanceOf(Map);
+    expect(typeof state.lastSweepAt).toBe("number");
+    const windows = state.windows as Map<string, unknown>;
+    expect([...windows.values()]).toEqual([
+      { rule: "checkout", count: 2, resetAt: expect.any(Number) as unknown },
+    ]);
+    for (const window of windows.values()) {
+      expect(Object.getPrototypeOf(window)).toBe(Object.prototype);
+    }
+    expect((state.ruleSizes as Map<string, number>).get("checkout")).toBe(1);
+  });
+
+  it("the sweep is shared: expired windows removed through one copy are gone for every copy", async () => {
+    const hook = await freshCopy();
+    const handlers = await freshCopy();
+    await hook.rateLimiter.consume("user-1", hook.RATE_LIMITS.CHECKOUT);
+    const state = globalRecord[STATE_KEY] as { windows: Map<string, { resetAt: number }> };
+    // Let the window expire and the sweep fall due, without waiting for the clock.
+    for (const window of state.windows.values()) window.resetAt = 0;
+    (state as unknown as { lastSweepAt: number }).lastSweepAt = Number.NEGATIVE_INFINITY;
+
+    await handlers.rateLimiter.consume("user-2", handlers.RATE_LIMITS.CHECKOUT);
+    expect([...state.windows.keys()]).toEqual(["checkout:user-2"]);
+    const sweptAt = (state as unknown as { lastSweepAt: number }).lastSweepAt;
+    expect(Number.isFinite(sweptAt)).toBe(true);
+    // A hit through the other copy right after does not sweep again: one schedule per process.
+    await hook.rateLimiter.consume("user-3", hook.RATE_LIMITS.CHECKOUT);
+    expect((state as unknown as { lastSweepAt: number }).lastSweepAt).toBe(sweptAt);
+  });
+
+  it("the saturation line is throttled once per process, not once per copy, and written at every level", async () => {
+    const hook = await freshCopy();
+    const handlers = await freshCopy();
+    const rule = hook.RATE_LIMITS.SIGN_UP;
+    // A table in which sign-up is full, as 40,000 distinct networks would leave it.
+    globalRecord[STATE_KEY] = {
+      version: 1,
+      windows: new Map(),
+      ruleSizes: new Map([[rule.name, rule.maxKeys]]),
+      lastSweepAt: Number.MAX_SAFE_INTEGER,
+      lastSaturationLogAt: new Map(),
+    };
+    setLogLevel("error");
+    let lines: Record<string, unknown>[];
+    try {
+      lines = await stdoutLines(async () => {
+        for (const copy of [hook, handlers, hook]) {
+          const result = await copy.rateLimiter.consume("203.0.113.50", copy.RATE_LIMITS.SIGN_UP);
+          expect(result).toMatchObject({ allowed: false, saturated: true });
+        }
+      });
+    } finally {
+      setLogLevel("info");
+    }
+    expect(lines).toEqual([
+      expect.objectContaining({
+        level: "warn",
+        message: "Rate limit store saturated",
+        rule: "sign-up",
+        ruleSize: rule.maxKeys,
+      }),
+    ]);
+    expect(JSON.stringify(lines)).not.toContain("203.0.113");
+  });
+
+  it.each([
+    ["an unrelated value", "loud"],
+    ["null", null],
+    ["a table of another version", { version: 2, windows: new Map(), ruleSizes: new Map() }],
+    [
+      "a table with a missing map",
+      { version: 1, windows: new Map(), ruleSizes: new Map(), lastSweepAt: 0 },
+    ],
+  ])("a slot that holds %s is replaced by an empty table", async (_label, value) => {
+    globalRecord[STATE_KEY] = value;
+    const copy = await freshCopy();
+    expect(await copy.rateLimiter.consume("user-1", copy.RATE_LIMITS.CHECKOUT)).toMatchObject({
+      allowed: true,
+      remaining: copy.RATE_LIMITS.CHECKOUT.limit - 1,
+    });
+    const second = await freshCopy();
+    expect(await second.rateLimiter.consume("user-1", second.RATE_LIMITS.CHECKOUT)).toMatchObject({
+      allowed: true,
+      remaining: copy.RATE_LIMITS.CHECKOUT.limit - 2,
+    });
+  });
+
+  it("a slot that cannot be read fails closed: consume rejects, it never allows", async () => {
+    Object.defineProperty(globalThis, STATE_KEY, {
+      configurable: true,
+      get() {
+        throw new Error("hostile slot");
+      },
+    });
+    const copy = await freshCopy();
+    await expect(copy.rateLimiter.consume("user-1", copy.RATE_LIMITS.CHECKOUT)).rejects.toThrow(
+      "hostile slot",
+    );
   });
 });

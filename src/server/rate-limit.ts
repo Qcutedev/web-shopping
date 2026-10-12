@@ -25,7 +25,9 @@
  *
  * The default store is in-process, so limits hold for a single long-running instance only. A
  * shared store (for example Redis) can be plugged in by implementing RateLimitStore; the
- * interface is asynchronous for that reason.
+ * interface is asynchronous for that reason. Within one process, the counters of the exported
+ * `rateLimiter` are kept on `globalThis` and shared by every copy of this module the process
+ * holds (SEC-030; see PROCESS_STATE_KEY).
  *
  * Memory bound of the in-process store (SEC-004):
  *   - every rule has its own key capacity (`rule.maxKeys`), so filling one rule cannot refuse a
@@ -44,11 +46,12 @@
  * with new subjects cannot reset anyone's limit, and the limiter never fails open. Such a
  * refusal is marked `saturated: true` in the result, reports a retry time of at most 60
  * seconds (space may free long before the rule's window ends), and writes one warn-level log
- * line per rule per minute at most, holding the rule name and window counts only.
+ * line per rule per minute at most, holding the rule name and window counts only. That line is
+ * written whatever LOG_LEVEL is (logger `security`, SR-04; SEC-031).
  */
 import { createHash } from "node:crypto";
 
-import { logger as defaultLogger, type Logger } from "./logger";
+import { logger as defaultLogger, type Logger, type StructuredLogger } from "./logger";
 
 export interface RateLimitRule {
   /**
@@ -127,6 +130,8 @@ export const SATURATION_RETRY_MS = 60_000;
 /** Shortest time between two saturation log lines for one rule (SR-02). */
 export const SATURATION_LOG_INTERVAL_MS = 60_000;
 export const DEFAULT_SWEEP_INTERVAL_MS = 60_000;
+/** The message of the saturation line of SR-02 item 4. */
+const SATURATION_MESSAGE = "Rate limit store saturated";
 const FULL_STORE_SWEEP_INTERVAL_MS = 1_000;
 const MAX_KEY_LENGTH = 128;
 const RULE_NAME_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
@@ -171,12 +176,93 @@ interface Window {
   resetAt: number;
 }
 
+/**
+ * Everything an in-process store counts with. Data only (built-in maps of plain objects and a
+ * number), so that it can be shared between copies of this module through `globalThis` (SEC-030):
+ * no function, class instance, or error of one copy is ever used by another.
+ */
+interface WindowTable {
+  readonly windows: Map<string, Window>;
+  /** Windows held per rule name. */
+  readonly ruleSizes: Map<string, number>;
+  /** When expired windows were last removed. There is no timer: a hit runs the sweep when due. */
+  lastSweepAt: number;
+}
+
+function createWindowTable(): WindowTable {
+  return { windows: new Map(), ruleSizes: new Map(), lastSweepAt: Number.NEGATIVE_INFINITY };
+}
+
+function ruleSizeIn(table: WindowTable, rule: string): number {
+  return table.ruleSizes.get(rule) ?? 0;
+}
+
+function sweepTable(table: WindowTable, now: number): void {
+  table.lastSweepAt = now;
+  for (const [key, window] of table.windows) {
+    if (now < window.resetAt) continue;
+    table.windows.delete(key);
+    const remaining = ruleSizeIn(table, window.rule) - 1;
+    if (remaining > 0) table.ruleSizes.set(window.rule, remaining);
+    else table.ruleSizes.delete(window.rule);
+  }
+}
+
+/**
+ * One hit against `table`, which holds at most `totalKeys` windows and is swept at most once per
+ * `sweepIntervalMs` (once per FULL_STORE_SWEEP_INTERVAL_MS while a rule is full). Synchronous, so
+ * it is atomic per rule and subject in one process.
+ */
+function incrementIn(
+  table: WindowTable,
+  totalKeys: number,
+  sweepIntervalMs: number,
+  { rule, subject, windowMs, maxKeys, now }: RateLimitIncrement,
+): RateLimitHit {
+  const key = storedKey(rule, subject);
+  if (now - table.lastSweepAt >= sweepIntervalMs) sweepTable(table, now);
+
+  const existing = table.windows.get(key);
+  if (existing) {
+    if (now < existing.resetAt) {
+      existing.count += 1;
+    } else {
+      // The subject's own expired window is reused: no capacity is needed.
+      existing.count = 1;
+      existing.resetAt = now + windowMs;
+    }
+    return { count: existing.count, resetAt: existing.resetAt };
+  }
+
+  const isFull = (): boolean =>
+    ruleSizeIn(table, rule) >= maxKeys || table.windows.size >= totalKeys;
+  if (isFull()) {
+    if (now - table.lastSweepAt >= FULL_STORE_SWEEP_INTERVAL_MS) sweepTable(table, now);
+    if (isFull()) {
+      return {
+        count: 0,
+        resetAt: now + Math.min(windowMs, SATURATION_RETRY_MS),
+        saturated: true,
+        ruleSize: ruleSizeIn(table, rule),
+        storeSize: table.windows.size,
+      };
+    }
+  }
+
+  const fresh: Window = { rule, count: 1, resetAt: now + windowMs };
+  table.windows.set(key, fresh);
+  table.ruleSizes.set(rule, ruleSizeIn(table, rule) + 1);
+  return { count: fresh.count, resetAt: fresh.resetAt };
+}
+
+/**
+ * An in-process store with its own windows. The process-wide `rateLimiter` does not use an
+ * instance of this class; it counts in the one table of the process (see PROCESS_STATE_KEY).
+ */
 export class MemoryRateLimitStore implements RateLimitStore {
-  private readonly windows = new Map<string, Window>();
-  private readonly ruleSizes = new Map<string, number>();
+  private readonly table: WindowTable = createWindowTable();
   private readonly maxKeys: number;
   private readonly sweepIntervalMs: number;
-  private lastSweepAt = Number.NEGATIVE_INFINITY;
 
   constructor(options: MemoryRateLimitStoreOptions = {}) {
     this.maxKeys = options.maxKeys ?? MAX_TOTAL_WINDOWS;
@@ -190,72 +276,16 @@ export class MemoryRateLimitStore implements RateLimitStore {
 
   /** Number of windows currently held for all rules, including expired ones not yet swept. */
   get size(): number {
-    return this.windows.size;
+    return this.table.windows.size;
   }
 
   /** Number of windows currently held for one rule, including expired ones not yet swept. */
   sizeOf(rule: string): number {
-    return this.ruleSizes.get(rule) ?? 0;
+    return ruleSizeIn(this.table, rule);
   }
 
   increment(hit: RateLimitIncrement): Promise<RateLimitHit> {
-    return Promise.resolve(this.incrementSync(hit));
-  }
-
-  private incrementSync({
-    rule,
-    subject,
-    windowMs,
-    maxKeys,
-    now,
-  }: RateLimitIncrement): RateLimitHit {
-    const key = storedKey(rule, subject);
-    if (now - this.lastSweepAt >= this.sweepIntervalMs) this.sweep(now);
-
-    const existing = this.windows.get(key);
-    if (existing) {
-      if (now < existing.resetAt) {
-        existing.count += 1;
-      } else {
-        // The subject's own expired window is reused: no capacity is needed.
-        existing.count = 1;
-        existing.resetAt = now + windowMs;
-      }
-      return { count: existing.count, resetAt: existing.resetAt };
-    }
-
-    if (this.isFull(rule, maxKeys)) {
-      if (now - this.lastSweepAt >= FULL_STORE_SWEEP_INTERVAL_MS) this.sweep(now);
-      if (this.isFull(rule, maxKeys)) {
-        return {
-          count: 0,
-          resetAt: now + Math.min(windowMs, SATURATION_RETRY_MS),
-          saturated: true,
-          ruleSize: this.sizeOf(rule),
-          storeSize: this.windows.size,
-        };
-      }
-    }
-
-    const fresh: Window = { rule, count: 1, resetAt: now + windowMs };
-    this.windows.set(key, fresh);
-    this.ruleSizes.set(rule, this.sizeOf(rule) + 1);
-    return { count: fresh.count, resetAt: fresh.resetAt };
-  }
-
-  private isFull(rule: string, maxKeys: number): boolean {
-    return this.sizeOf(rule) >= maxKeys || this.windows.size >= this.maxKeys;
-  }
-
-  private sweep(now: number): void {
-    this.lastSweepAt = now;
-    for (const [key, window] of this.windows) {
-      if (now < window.resetAt) continue;
-      this.windows.delete(key);
-      const remaining = this.sizeOf(window.rule) - 1;
-      if (remaining > 0) this.ruleSizes.set(window.rule, remaining);
-      else this.ruleSizes.delete(window.rule);
-    }
+    return Promise.resolve(incrementIn(this.table, this.maxKeys, this.sweepIntervalMs, hit));
   }
 }
 
@@ -300,16 +330,36 @@ export interface RateLimiterOptions {
   store?: RateLimitStore;
   /** Clock in epoch milliseconds, injectable for tests. */
   now?: () => number;
-  /** Receives the saturation warning. Default: the process-wide logger. */
-  logger?: Pick<Logger, "warn">;
+  /**
+   * Receives the saturation warning. Default: the process-wide logger. A logger of this module
+   * (`createLogger`, `logger`, and their children) writes it through `security`, which no
+   * configured level filters (SEC-031); a logger with `warn` only, such as a test stub, gets
+   * `warn`.
+   */
+  logger?: Pick<Logger, "warn"> | Pick<StructuredLogger, "security">;
 }
 
 /**
  * Creates a limiter for a fixed rule set. Throws a TypeError when the set is not valid as a
  * whole (see `assertRateLimitRules`), so a rule that does not fit fails here, not at its first
  * use.
+ *
+ * Without `store`, the limiter gets a store of its own, and its saturation-log times are its
+ * own too. Only the exported `rateLimiter` counts in the table shared by the whole process.
  */
 export function createRateLimiter(options: RateLimiterOptions = {}): RateLimiter {
+  const lastSaturationLogAt = new Map<string, number>();
+  return buildRateLimiter(options, options.store ?? new MemoryRateLimitStore(), () => {
+    return lastSaturationLogAt;
+  });
+}
+
+function buildRateLimiter(
+  options: RateLimiterOptions,
+  store: RateLimitStore,
+  /** When the last saturation line was written, per rule name. Bounded by the rule count. */
+  saturationLog: () => Map<string, number>,
+): RateLimiter {
   const ruleSet = options.rules ?? Object.values(RATE_LIMITS);
   assertRateLimitRules(ruleSet);
   /** The rule set by name, copied so that a later change to a caller's object has no effect. */
@@ -318,11 +368,8 @@ export function createRateLimiter(options: RateLimiterOptions = {}): RateLimiter
     rules.set(name, { name, limit, windowMs, maxKeys });
   }
 
-  const store = options.store ?? new MemoryRateLimitStore();
   const now = options.now ?? Date.now;
   const log = options.logger ?? defaultLogger;
-  /** When the last saturation line was written, per rule name. Bounded by MAX_RULES. */
-  const lastSaturationLogAt = new Map<string, number>();
 
   /** The registered rule that `rule` names. The outcome never depends on earlier calls. */
   function registered(rule: RateLimitRule): RateLimitRule {
@@ -345,16 +392,19 @@ export function createRateLimiter(options: RateLimiterOptions = {}): RateLimiter
   }
 
   function reportSaturation(rule: string, hit: RateLimitHit, at: number): void {
+    const lastSaturationLogAt = saturationLog();
     const last = lastSaturationLogAt.get(rule);
     // `at < last` covers a clock that stepped backwards.
     if (last !== undefined && at >= last && at - last < SATURATION_LOG_INTERVAL_MS) return;
     lastSaturationLogAt.set(rule, at);
     // Rule name and sizes only: a key or a subject holds an email or an address (SR-04).
-    log.warn("Rate limit store saturated", {
-      rule,
-      ruleSize: hit.ruleSize,
-      storeSize: hit.storeSize,
-    });
+    const fields = { rule, ruleSize: hit.ruleSize, storeSize: hit.storeSize };
+    // SR-02 item 4 requires this line, so it is written whatever LOG_LEVEL is (SR-04, SEC-031).
+    if ("security" in log && typeof log.security === "function") {
+      log.security("warn", SATURATION_MESSAGE, fields);
+    } else if ("warn" in log) {
+      log.warn(SATURATION_MESSAGE, fields);
+    }
   }
 
   return {
@@ -399,10 +449,84 @@ export function createRateLimiter(options: RateLimiterOptions = {}): RateLimiter
 }
 
 /**
- * Process-wide limiter backed by the in-process store, with the built-in rule set. Created when
- * this module is loaded, which is also when an over-budget RATE_LIMITS would throw.
+ * Where the process-wide limiter keeps its counters: one property of `globalThis`, under a key
+ * from the global symbol registry (SEC-030).
+ *
+ * Not module state, because one process can hold more than one copy of this module. Measured
+ * with Next.js 16.4.0: the start-up hook and the route handlers are compiled separately and each
+ * gets its own copy of a module under src/server. With the store in a module variable, every
+ * copy counted for itself, so a limit was multiplied by the number of copies that consumed it
+ * and the bound of SR-02 held per copy. `globalThis` and the symbol registry are what all copies
+ * share, as src/server/db/client.ts and the logger's level rely on.
+ *
+ * The property holds data only (ProcessLimiterState): the windows, the per-rule sizes, the time
+ * of the last sweep, and the time of the last saturation line per rule. Each copy runs its own
+ * functions over that one table, so no function, class instance, or error crosses from one copy
+ * to another (an AppError of one copy is a generic 500 for another). There is no sweep timer:
+ * the sweep runs inside a hit when it is due, and since its time is in the shared table, it runs
+ * on one schedule for the whole process.
+ *
+ * Importing this file does not touch the property; the table is created on the first hit. A
+ * property that holds anything else is replaced by an empty table.
  */
-export const rateLimiter: RateLimiter = createRateLimiter();
+const PROCESS_STATE_KEY = Symbol.for("marketplace.rateLimit.processState");
+const PROCESS_STATE_VERSION = 1;
+
+interface ProcessLimiterState extends WindowTable {
+  readonly version: typeof PROCESS_STATE_VERSION;
+  /** When the last saturation line was written, per rule name (SR-02 item 4). */
+  readonly lastSaturationLogAt: Map<string, number>;
+}
+
+type GlobalWithLimiterState = typeof globalThis & { [PROCESS_STATE_KEY]?: unknown };
+
+function isProcessLimiterState(value: unknown): value is ProcessLimiterState {
+  if (typeof value !== "object" || value === null) return false;
+  const state = value as Partial<Record<keyof ProcessLimiterState, unknown>>;
+  return (
+    state.version === PROCESS_STATE_VERSION &&
+    state.windows instanceof Map &&
+    state.ruleSizes instanceof Map &&
+    state.lastSaturationLogAt instanceof Map &&
+    typeof state.lastSweepAt === "number"
+  );
+}
+
+/** The table of the process, created on first use. */
+function processState(): ProcessLimiterState {
+  const holder = globalThis as GlobalWithLimiterState;
+  const existing = holder[PROCESS_STATE_KEY];
+  if (isProcessLimiterState(existing)) return existing;
+  const created: ProcessLimiterState = {
+    version: PROCESS_STATE_VERSION,
+    ...createWindowTable(),
+    lastSaturationLogAt: new Map(),
+  };
+  holder[PROCESS_STATE_KEY] = created;
+  return created;
+}
+
+/** The store of the process-wide limiter: this copy's functions over the process's table. */
+const processStore: RateLimitStore = {
+  increment(hit) {
+    // Inside the promise, so that a failure to reach the table rejects (the caller fails closed).
+    return new Promise((resolve) => {
+      resolve(incrementIn(processState(), MAX_TOTAL_WINDOWS, DEFAULT_SWEEP_INTERVAL_MS, hit));
+    });
+  },
+};
+
+/**
+ * Process-wide limiter with the built-in rule set. Every copy of this module in the process
+ * counts in the same table (see PROCESS_STATE_KEY), so a limit used up through one copy is used
+ * up for all. Created when this module is loaded, which is also when an over-budget RATE_LIMITS
+ * would throw.
+ */
+export const rateLimiter: RateLimiter = buildRateLimiter(
+  {},
+  processStore,
+  () => processState().lastSaturationLogAt,
+);
 
 function retryAfter(resetAt: number, now: number): number {
   const seconds = Math.ceil((resetAt - now) / 1000);

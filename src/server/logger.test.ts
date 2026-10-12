@@ -1584,6 +1584,119 @@ describe("level of the process-wide logger (setLogLevel)", () => {
 });
 
 /**
+ * SR-04, "Lines that a security rule requires are not subject to `LOG_LEVEL`" (SEC-031): the
+ * `security` method writes at every configured level, and nothing else changes.
+ */
+describe("security lines are written whatever the level (SEC-031)", () => {
+  const LEVELS = ["debug", "info", "warn", "error"] as const;
+
+  it.each(LEVELS)("a logger configured at %s writes a security line at each level", (level) => {
+    const { log, entries } = capture({ level });
+    log.security("info", "Signed in", { userId: "user_1" });
+    log.security("warn", "Sign-in failed", { userId: "user_1" });
+    log.security("error", "Admin action refused", { userId: "user_1" });
+    expect(entries().map(({ level: written, message }) => [written, message])).toEqual([
+      ["info", "Signed in"],
+      ["warn", "Sign-in failed"],
+      ["error", "Admin action refused"],
+    ]);
+  });
+
+  it("the level still filters every other method", () => {
+    const { log, entries } = capture({ level: "error" });
+    log.debug("d");
+    log.info("i");
+    log.warn("w");
+    log.security("warn", "required");
+    log.error("e");
+    expect(entries().map((entry) => entry.message)).toEqual(["required", "e"]);
+  });
+
+  it("a child, and a child of a child, keep the path, with their bindings and request id", () => {
+    const { log, entry, lines } = capture({ level: "error" });
+    const child = log.child({ component: "auth" }).child({ requestId: "req_sec_031" });
+    child.info("filtered");
+    child.security("warn", "Sign-in failed", { userId: "user_2" });
+    expect(lines).toHaveLength(1);
+    expect(entry()).toEqual({
+      component: "auth",
+      userId: "user_2",
+      level: "warn",
+      timestamp: FIXED.toISOString(),
+      message: "Sign-in failed",
+      requestId: "req_sec_031",
+    });
+  });
+
+  it("a security line is redacted and escaped like any other line", () => {
+    const { log, entry, line } = capture({ level: "error" });
+    log.security("warn", "Sign-in failed for somchai@example.com ", {
+      email: "somchai@example.com",
+      password: "hunter2-secret",
+      clientIp: "203.0.113.7",
+      ip: "203.0.113.7",
+    });
+    const raw = line();
+    expect(raw).not.toContain("somchai");
+    expect(raw).not.toContain("hunter2");
+    expect(raw).not.toContain(" ");
+    expect(entry()).toMatchObject({
+      email: REDACTED,
+      password: REDACTED,
+      ip: REDACTED,
+      clientIp: "203.0.113.7",
+      level: "warn",
+    });
+  });
+
+  it("a level that is not info, warn, or error is written as warn, without throwing", () => {
+    const { log, entries } = capture({ level: "error" });
+    const untyped = log.security as (level: unknown, message: string) => void;
+    for (const value of ["debug", "loud", "", null, undefined, 3, "__proto__"]) {
+      expect(() => untyped(value, "required")).not.toThrow();
+    }
+    expect(entries().map((entry) => entry.level)).toEqual(Array(7).fill("warn"));
+  });
+
+  it("never throws, whatever the sink or the fields do", () => {
+    const log = createLogger({
+      level: "error",
+      write: () => {
+        throw new Error("sink down");
+      },
+    });
+    const hostile = {
+      get boom(): never {
+        throw new Error("getter");
+      },
+    };
+    expect(() => log.security("warn", "required", hostile)).not.toThrow();
+  });
+
+  it("the process-wide logger writes a security line with the process level at error", () => {
+    const written: string[] = [];
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      written.push(String(chunk));
+      return true;
+    });
+    setLogLevel("error");
+    try {
+      logger.warn("filtered");
+      logger.child({ component: "rate-limit" }).security("warn", "required");
+    } finally {
+      Reflect.deleteProperty(globalThis, Symbol.for("marketplace.logger.processLevel"));
+      spy.mockRestore();
+    }
+    expect(written).toHaveLength(1);
+    expect(JSON.parse(written[0] ?? "{}")).toMatchObject({
+      level: "warn",
+      message: "required",
+      component: "rate-limit",
+    });
+  });
+});
+
+/**
  * One process can hold more than one copy of this module: measured with Next.js 16.4.0, the
  * start-up hook and the route handlers each get their own. `vi.resetModules()` followed by a
  * second dynamic import gives the same situation here: two evaluations of the file, each with
@@ -1754,6 +1867,25 @@ describe("the level is one per process, shared by every copy of the module", () 
     const copy = await freshCopy();
     expect(copy.getLogLevel()).toBe("info");
     expect(levelsWrittenBy(copy.logger)).toEqual(["info", "warn", "error"]);
+  });
+
+  it("a level of error set through one copy does not hide a security line of another copy (SEC-031)", async () => {
+    const hook = await freshCopy();
+    const handlers = await freshCopy();
+    hook.setLogLevel("error");
+    const levels: unknown[] = [];
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      levels.push((JSON.parse(String(chunk)) as Record<string, unknown>).level);
+      return true;
+    });
+    try {
+      handlers.logger.child({ requestId: "req-copies-0031" }).warn("filtered");
+      handlers.logger.child({ requestId: "req-copies-0031" }).security("warn", "required");
+      handlers.logger.security("info", "required");
+    } finally {
+      spy.mockRestore();
+    }
+    expect(levels).toEqual(["warn", "info"]);
   });
 
   it("a refused value leaves the shared level as it was, for every copy", async () => {
