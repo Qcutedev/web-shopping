@@ -13,7 +13,7 @@ const ibmPlexSansThai = IBM_Plex_Sans_Thai({
 });
 
 export const metadata: Metadata = {
-  title: th.site.name,
+  title: { default: th.site.name, template: `%s | ${th.site.name}` },
   description: th.site.description,
 };
 

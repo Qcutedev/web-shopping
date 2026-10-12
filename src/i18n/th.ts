@@ -9,6 +9,42 @@ export const th = {
     heading: "กำลังพัฒนา",
     body: "เว็บไซต์นี้อยู่ระหว่างการพัฒนา",
   },
+  // App shell (T-018). Texts marked "approved" are listed as approved in docs/DESIGN_SYSTEM.md
+  // ("Copy guidelines"); the others are proposals written by the frontend agent and are not yet
+  // approved by the owner.
+  shell: {
+    // proposal
+    skipToContent: "ข้ามไปยังเนื้อหาหลัก",
+    header: {
+      // proposal: accessible names of landmarks
+      navLabel: "เมนูหลัก",
+      search: {
+        // proposal (label); the submit text is approved
+        label: "ค้นหาสินค้า",
+        submit: "ค้นหา",
+      },
+      // approved
+      openStore: "เปิดร้านค้า",
+      signIn: "เข้าสู่ระบบ",
+      cart: {
+        // proposal. {count} is the number of items in the cart.
+        label: "ตะกร้าสินค้า",
+        labelWithCount: "ตะกร้าสินค้า {count} รายการ",
+      },
+    },
+    footer: {
+      // proposal
+      navLabel: "ลิงก์ท้ายเว็บไซต์",
+      // {name} is th.site.name. No year: reading the current date would make the footer dynamic.
+      copyright: "© {name}",
+    },
+  },
+  // Approved texts of the notice pills (docs/DESIGN_SYSTEM.md, "Copy guidelines").
+  notice: {
+    sampleData: "ข้อมูลตัวอย่าง",
+    mockPayment: "การชำระเงินจำลอง",
+    simulatedShipping: "การจัดส่งจำลอง",
+  },
   // Texts below were approved by the owner word for word; do not reword them. A name in braces is
   // a placeholder that the caller replaces with a number.
   quantity: {
