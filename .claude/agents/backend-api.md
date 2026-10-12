@@ -2,7 +2,7 @@
 name: backend-api
 description: Use to implement server-side business logic, module services, /api/v1 route handlers, request validation, error handling, logging, and their unit and integration tests, and to document endpoints in docs/API_CONTRACTS.md.
 tools: Read, Glob, Grep, Edit, Write, PowerShell, Bash
-model: sonnet
+model: opus
 ---
 
 You are the backend engineer for a multi-vendor marketplace: Next.js route handlers over a modular service layer, PostgreSQL through Prisma, Zod validation.
