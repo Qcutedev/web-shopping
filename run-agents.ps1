@@ -23,6 +23,7 @@ $prompt = @"
 ถ้าไม่มีงานเหลือ ให้เขียนคำว่า ALL_DONE ใน docs/STATUS.md
 ถ้าเจองานค้างที่พังหรือไม่สมบูรณ์ หรือต้องให้เจ้าของตัดสินใจหรืออนุมัติตาม CLAUDE.md
 ห้ามเดา ห้ามลบงานค้าง ให้เขียนคำว่า LOOP_BLOCKED พร้อมเหตุผลเป็นภาษาไทยใน docs/STATUS.md แล้วหยุด
+รันคำสั่งทีละคำสั่ง แยกกัน ห้ามต่อด้วย ; หรือ && และอย่าใช้ cd ก่อนคำสั่ง (อยู่ที่โฟลเดอร์โปรเจกต์แล้ว)
 "@
 
 # Headless mode cannot ask for permission, so allow edits and a fixed command set.
@@ -35,10 +36,14 @@ $claudeArgs = @(
     '--allowedTools',
         'Bash(git status:*)', 'Bash(git diff:*)', 'Bash(git log:*)', 'Bash(git add:*)', 'Bash(git commit:*)',
         'PowerShell(git status:*)', 'PowerShell(git diff:*)', 'PowerShell(git log:*)', 'PowerShell(git add:*)', 'PowerShell(git commit:*)',
-        'Bash(pnpm:*)', 'PowerShell(pnpm:*)'
+        'Bash(pnpm:*)', 'PowerShell(pnpm:*)',
+        'Bash(node:*)', 'PowerShell(node:*)',
+        'Bash(docker compose up:*)', 'Bash(docker compose ps:*)', 'Bash(docker compose logs:*)', 'Bash(docker ps:*)',
+        'PowerShell(docker compose up:*)', 'PowerShell(docker compose ps:*)', 'PowerShell(docker compose logs:*)', 'PowerShell(docker ps:*)',
+        'PowerShell(Test-NetConnection:*)'
 )
 
-$maxRounds = 10
+$maxRounds = 30
 $maxFailures = 4
 $failures = 0
 $statusPath = Join-Path $PSScriptRoot 'docs/STATUS.md'
