@@ -149,6 +149,26 @@ The client never sends a price, total, shipping fee, store id, or user id. The l
 | Uploads | Validated, renamed, stored through `StorageProvider` |
 | Audit | Admin actions write `AuditLog` in the same transaction |
 
+## Module copies and process state (measured)
+
+Measured 2026-10-12 with Next.js 16.4.0 (Turbopack), Windows, Node.js runtime for everything. Method: a temporary probe module with a module-scope random id that also wrote a realm id and a log to `globalThis` under `Symbol.for` keys; imported by two route handlers (`/api/probe-a`, `/api/probe-b`), by `src/proxy.ts` (response headers), and by `register` in `src/instrumentation.ts`. Proxy and both routes also called `rateLimiter.consume("probe-subject", RATE_LIMITS.CHECKOUT)` (limit 10). Queried with `curl` to `127.0.0.1`. All probe files were removed afterwards.
+
+| Bundle | `next dev` | `next build` + `next start` |
+| --- | --- | --- |
+| Route handlers A and B | one module copy (same id) | one module copy (same id) |
+| `src/proxy.ts` | its own module copy | its own module copy |
+| `instrumentation.ts` hook | its own module copy | its own module copy |
+| Process (`pid`) | one for all three | one for all three |
+| `globalThis` realm id | one for all three | one for all three |
+
+Evidence (`next start`, NODE_ENV=production, non-placeholder `DATABASE_URL`, `DATABASE_URL_TEST` empty): hook module `9782d37d…`, proxy module `e3f7cb84…`, route A and B module `cebdcf94…`; realm `334ef284…` and pid 19088 in all three. Limiter `remaining` over A, B, A, B: proxy 9, route 8, proxy 7, route 6, proxy 5, route 4, proxy 3, route 2. `next dev` gave the same pattern (hook `ab2ea6d6…`, proxy `3c2afa72…`, routes `b93e7499…`, one realm `a9526686…`, limiter route 7, proxy 6, route 5, proxy 4, route 3).
+
+Consequences:
+
+- A module-scope variable is not shared between the proxy, the hook, and the route handlers: each holds its own copy. Anything that must be one per process lives on `globalThis` under a `Symbol.for` key.
+- The rate limiter's slot `globalThis[Symbol.for("marketplace.rateLimit.processState")]` (src/server/rate-limit.ts, SEC-030) is shared by the proxy and the route handlers in both modes: one counter table per process. This holds for the self-hosted Node.js server only; the proxy documentation warns that a platform may run the proxy elsewhere, where no state is shared.
+- Matcher pitfall: `matcher: "/api/probe-:path*"` did not match `/api/probe-a` in either mode. The compiled pattern (`.next/server/functions-config-manifest.json`) is `\/api\/probe-(?:\/(…))?`, so a `:path*` parameter needs a leading `/`. List exact paths or use `/api/:path*` style patterns, and test every matcher with a request.
+
 ## External integrations
 
 | Integration | MVP | Later |
