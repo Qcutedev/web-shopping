@@ -110,7 +110,9 @@ const STEP_BUTTON =
   "before:absolute before:inset-x-0 before:-inset-y-px before:content-['']" +
   " " +
   "hover:bg-surface-muted active:bg-border " +
-  "disabled:cursor-not-allowed disabled:bg-surface disabled:text-foreground-disabled";
+  "disabled:cursor-not-allowed disabled:bg-surface disabled:text-foreground-disabled " +
+  // A button at its limit while the control is enabled is aria-disabled, not disabled (CR-12).
+  "aria-disabled:cursor-not-allowed aria-disabled:bg-surface aria-disabled:text-foreground-disabled";
 
 /**
  * Minus button, numeric input, plus button.
@@ -166,6 +168,10 @@ export function QuantityStepper({
   const base = Number.isFinite(value) ? value : MIN_QUANTITY;
   const stepUpFrom = Math.floor(base);
   const stepDownFrom = Math.ceil(base);
+  // A step button at its limit stays focusable (aria-disabled) while the control is enabled, so a
+  // keyboard user who just pressed it does not lose focus (CR-12). It does nothing when pressed.
+  const atMin = base <= MIN_QUANTITY;
+  const atMax = base >= upper;
 
   // A disabled control shows the committed value: text typed before it was disabled is discarded,
   // so it cannot come back when the control is enabled again. (A browser does not fire blur on an
@@ -248,8 +254,11 @@ export function QuantityStepper({
       <button
         type="button"
         aria-label={decreaseLabel}
-        disabled={isDisabled || base <= MIN_QUANTITY}
-        onClick={() => commit(stepDownFrom - 1)}
+        disabled={isDisabled}
+        aria-disabled={!isDisabled && atMin ? true : undefined}
+        onClick={() => {
+          if (!atMin) commit(stepDownFrom - 1);
+        }}
         className={cn(STEP_BUTTON, "rounded-l-[9px]")}
       >
         <MinusIcon />
@@ -258,6 +267,12 @@ export function QuantityStepper({
         id={id}
         name={name}
         type="text"
+        // A text input with the spinbutton role announces its range; the arrow keys already step
+        // it (CR-12). Not set while no quantity is allowed.
+        role="spinbutton"
+        aria-valuemin={unavailable ? undefined : MIN_QUANTITY}
+        aria-valuemax={unavailable ? undefined : upper}
+        aria-valuenow={Number.isFinite(value) ? value : undefined}
         inputMode="numeric"
         pattern="[0-9]*"
         autoComplete="off"
@@ -277,8 +292,11 @@ export function QuantityStepper({
       <button
         type="button"
         aria-label={increaseLabel}
-        disabled={isDisabled || base >= upper}
-        onClick={() => commit(stepUpFrom + 1)}
+        disabled={isDisabled}
+        aria-disabled={!isDisabled && atMax ? true : undefined}
+        onClick={() => {
+          if (!atMax) commit(stepUpFrom + 1);
+        }}
         className={cn(STEP_BUTTON, "rounded-r-[9px]")}
       >
         <PlusIcon />

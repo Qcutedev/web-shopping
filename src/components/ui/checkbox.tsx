@@ -49,7 +49,8 @@ export function Checkbox({
               "focus-ring hover:border-control-border-hover transition-colors duration-150",
               "checked:border-primary checked:bg-primary checked:hover:border-primary-hover checked:hover:bg-primary-hover",
               "disabled:border-border disabled:bg-surface-muted disabled:checked:border-foreground-disabled disabled:checked:bg-foreground-disabled disabled:cursor-not-allowed",
-              "aria-invalid:border-danger",
+              // Enabled only: a disabled invalid checkbox keeps the disabled border (CR-07).
+              "aria-invalid:enabled:border-danger",
               "forced-colors:appearance-auto",
               className,
             )}

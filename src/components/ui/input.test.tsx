@@ -130,11 +130,15 @@ describe("hover border of form controls (D-026, OQ-45)", () => {
     }
   });
 
-  it("keeps the error border class on an invalid control", () => {
+  // The class name alone proves nothing about which rule wins; the order of the compiled rules is
+  // checked in style-order.test.ts (CR-01). This test only checks the control is marked invalid
+  // and carries the enabled-only error border class (CR-07).
+  it("marks an invalid control and carries the enabled-only error border class", () => {
     render(<InputField label="อีเมล" errorText="กรุณากรอกอีเมลให้ถูกต้อง" />);
-    expect(screen.getByLabelText("อีเมล").className.split(" ")).toContain(
-      "aria-invalid:border-danger",
-    );
+    const control = screen.getByLabelText("อีเมล");
+    expect(control.getAttribute("aria-invalid")).toBe("true");
+    expect(control.className.split(" ")).toContain("aria-invalid:enabled:border-danger");
+    expect(control.className.split(" ")).not.toContain("aria-invalid:border-danger");
   });
 });
 

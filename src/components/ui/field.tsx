@@ -5,14 +5,17 @@ import { ErrorIcon } from "./icons";
 /**
  * Class names shared by Input, Textarea, and Select.
  * Border colour comes from --control-border, and from --control-border-hover under the pointer
- * (see globals.css). The disabled and error borders are emitted later and win over the hover one.
+ * (see globals.css). The disabled and error borders are emitted later and win over the hover one;
+ * style-order.test.ts compiles the CSS and checks that order. The error border is limited to an
+ * enabled control (`aria-invalid:enabled`), so a control that is both disabled and invalid keeps
+ * the disabled border (CR-07).
  */
 export const controlClassName =
   "block w-full min-h-11 rounded-sm border border-control-border bg-surface px-3.5 type-body text-foreground " +
   "placeholder:text-foreground-muted transition-colors duration-150 focus-ring " +
   "hover:border-control-border-hover " +
   "disabled:cursor-not-allowed disabled:border-border disabled:bg-surface-muted disabled:text-foreground-disabled " +
-  "aria-invalid:border-danger";
+  "aria-invalid:enabled:border-danger";
 
 export interface LabelProps extends LabelHTMLAttributes<HTMLLabelElement> {
   /** Extra content after the label text, for example a "not required" note from th.ts. */

@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState, type FormEvent } from "react";
+import { StrictMode, useState, type FormEvent } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { clampQuantity, QuantityStepper } from "./quantity-stepper";
 
@@ -104,9 +104,15 @@ function submittedQuantity(container: HTMLElement): FormDataEntryValue | null {
   return new FormData(form).get("quantity");
 }
 
-const input = () => screen.getByRole<HTMLInputElement>("textbox", { name: "จำนวน" });
+const input = () => screen.getByRole<HTMLInputElement>("spinbutton", { name: "จำนวน" });
 const minus = () => screen.getByRole<HTMLButtonElement>("button", { name: "ลดจำนวน" });
 const plus = () => screen.getByRole<HTMLButtonElement>("button", { name: "เพิ่มจำนวน" });
+/**
+ * A step button at its limit is inert: natively disabled, or aria-disabled while the control is
+ * enabled so that it keeps keyboard focus (CR-12).
+ */
+const blocked = (button: HTMLButtonElement) =>
+  button.disabled || button.getAttribute("aria-disabled") === "true";
 
 describe("clampQuantity", () => {
   it("clamps to 1 and max", () => {
@@ -167,7 +173,7 @@ describe("QuantityStepper", () => {
     render(<Harness initial={2} max={5} onChange={onChange} />);
     await userEvent.click(minus());
     expect(input().value).toBe("1");
-    expect(minus().disabled).toBe(true);
+    expect(blocked(minus())).toBe(true);
     await userEvent.click(minus());
     expect(input().value).toBe("1");
     expect(onChange).toHaveBeenCalledTimes(1);
@@ -179,7 +185,7 @@ describe("QuantityStepper", () => {
     render(<Harness initial={4} max={5} onChange={onChange} />);
     await userEvent.click(plus());
     expect(input().value).toBe("5");
-    expect(plus().disabled).toBe(true);
+    expect(blocked(plus())).toBe(true);
     await userEvent.click(plus());
     expect(input().value).toBe("5");
     expect(onChange).toHaveBeenCalledTimes(1);
@@ -315,7 +321,7 @@ describe("QuantityStepper keyboard and disabled", () => {
 describe("QuantityStepper accessible names", () => {
   it("names the input from inputLabel and has no group when groupLabel is omitted", () => {
     render(<QuantityStepper {...labels} value={2} max={5} onChange={() => {}} />);
-    expect(screen.getAllByRole("textbox", { name: "จำนวน" })).toHaveLength(1);
+    expect(screen.getAllByRole("spinbutton", { name: "จำนวน" })).toHaveLength(1);
     expect(screen.queryByRole("group")).toBeNull();
     // Only the input carries the name: it is announced once.
     expect(screen.getAllByLabelText("จำนวน")).toHaveLength(1);
@@ -332,10 +338,10 @@ describe("QuantityStepper accessible names", () => {
       />,
     );
     const group = screen.getByRole("group", { name: "เสื้อยืดผ้าฝ้าย" });
-    const textbox = screen.getByRole("textbox", { name: "จำนวน" });
+    const textbox = screen.getByRole("spinbutton", { name: "จำนวน" });
     expect(group.contains(textbox)).toBe(true);
     expect(screen.queryByRole("group", { name: "จำนวน" })).toBeNull();
-    expect(screen.queryByRole("textbox", { name: "เสื้อยืดผ้าฝ้าย" })).toBeNull();
+    expect(screen.queryByRole("spinbutton", { name: "เสื้อยืดผ้าฝ้าย" })).toBeNull();
     expect(group.contains(minus())).toBe(true);
     expect(group.contains(plus())).toBe(true);
   });
@@ -354,7 +360,7 @@ describe("QuantityStepper accessible names", () => {
         />
       </>,
     );
-    const textbox = screen.getByRole<HTMLInputElement>("textbox", { name: "จำนวนที่ต้องการ" });
+    const textbox = screen.getByRole<HTMLInputElement>("spinbutton", { name: "จำนวนที่ต้องการ" });
     expect(textbox.id).toBe("line-quantity");
     expect(textbox.getAttribute("aria-label")).toBeNull();
     expect(screen.getByLabelText("จำนวนที่ต้องการ")).toBe(textbox);
@@ -378,7 +384,7 @@ describe("QuantityStepper accessible names", () => {
       </>,
     );
     expect(input().getAttribute("aria-invalid")).toBe("true");
-    expect(screen.getByRole("textbox", { description: "เหลือ 4 ชิ้น" })).toBe(input());
+    expect(screen.getByRole("spinbutton", { description: "เหลือ 4 ชิ้น" })).toBe(input());
   });
 
   it("is not marked invalid by default, also when the value is out of range", () => {
@@ -414,7 +420,7 @@ describe("QuantityStepper with a value above max (stock below the chosen quantit
     expect(input().value).toBe("4");
     expect(submittedQuantity(container)).toBe("4");
     expect(parentState()).toBe("4");
-    expect(plus().disabled).toBe(true);
+    expect(blocked(plus())).toBe(true);
     // The page's text is in its live region; the stepper itself renders no text.
     expect(notice()).toBe("ลดจาก 9 เหลือ 4");
     expect(input().getAttribute("aria-invalid")).toBeNull();
@@ -547,8 +553,8 @@ describe("QuantityStepper with a value above max (stock below the chosen quantit
     // The stepper never shows a number that differs from the parent's state.
     expect(input().value).toBe("9");
     expect(submittedQuantity(container)).toBe("9");
-    expect(plus().disabled).toBe(true);
-    expect(minus().disabled).toBe(false);
+    expect(blocked(plus())).toBe(true);
+    expect(blocked(minus())).toBe(false);
 
     // Re-rendering, also with new callback functions, does not repeat the same pair.
     const wrappedChange = vi.fn();
@@ -596,7 +602,7 @@ describe("QuantityStepper with a value above max (stock below the chosen quantit
     const onChange = vi.fn();
     render(<QuantityStepper {...labels} value={9} max={4} onChange={onChange} />);
     onChange.mockClear();
-    expect(plus().disabled).toBe(true);
+    expect(blocked(plus())).toBe(true);
     await userEvent.click(input());
     await userEvent.keyboard("{ArrowUp}{ArrowUp}");
     expect(onChange).not.toHaveBeenCalled();
@@ -652,8 +658,8 @@ describe("QuantityStepper with a value outside 1 to max", () => {
     // The stepper does not change this quantity by itself.
     expect(onChange).not.toHaveBeenCalled();
     expect(onLowered).not.toHaveBeenCalled();
-    expect(minus().disabled).toBe(true);
-    expect(plus().disabled).toBe(false);
+    expect(blocked(minus())).toBe(true);
+    expect(blocked(plus())).toBe(false);
 
     // Re-rendering, also with a new callback function, does not report the same value again.
     const wrapped = vi.fn((value: number, clamped: number) => onOutOfRange(value, clamped));
@@ -674,7 +680,7 @@ describe("QuantityStepper with a value outside 1 to max", () => {
     expect(input().value).toBe("1");
     expect(submittedQuantity(container)).toBe("1");
     expect(parentState()).toBe("1");
-    expect(minus().disabled).toBe(true);
+    expect(blocked(minus())).toBe(true);
   });
 
   it("lets the parent keep the value and show a message: shown, submitted, and parent state all agree", () => {
@@ -686,7 +692,7 @@ describe("QuantityStepper with a value outside 1 to max", () => {
     expect(input().value).toBe("0");
     expect(submittedQuantity(container)).toBe("0");
     expect(parentState()).toBe("0");
-    expect(screen.getByRole("textbox", { description: "เกิน 1" })).toBe(input());
+    expect(screen.getByRole("spinbutton", { description: "เกิน 1" })).toBe(input());
     expect(input().getAttribute("aria-invalid")).toBe("true");
   });
 
@@ -725,7 +731,7 @@ describe("QuantityStepper with a value outside 1 to max", () => {
   it("does nothing on arrow down while the value is below 1, like the disabled minus button", async () => {
     const onChange = vi.fn();
     render(<ParentHarness initial={0} max={4} policy="keep" onChange={onChange} />);
-    expect(minus().disabled).toBe(true);
+    expect(blocked(minus())).toBe(true);
     await userEvent.click(input());
     await userEvent.keyboard("{ArrowDown}{ArrowDown}");
     expect(onChange).not.toHaveBeenCalled();
@@ -766,7 +772,7 @@ describe("QuantityStepper with a value outside 1 to max", () => {
     expect(onOutOfRange).toHaveBeenCalledWith(0, 1);
     expect(input().value).toBe("0");
     expect(submittedQuantity(container)).toBe("0");
-    expect(minus().disabled).toBe(true);
+    expect(blocked(minus())).toBe(true);
     await userEvent.click(plus());
     expect(onChange).toHaveBeenLastCalledWith(1);
     expect(input().value).toBe("1");
@@ -854,7 +860,7 @@ describe("QuantityStepper with a value outside 1 to max", () => {
     const onChange = vi.fn();
     render(<QuantityStepper {...labels} value={0} max={4} onChange={onChange} />);
     expect(input().value).toBe("0");
-    expect(minus().disabled).toBe(true);
+    expect(blocked(minus())).toBe(true);
     expect(onChange).not.toHaveBeenCalled();
   });
 });
@@ -949,5 +955,98 @@ describe("QuantityStepper typed numbers and the disabled state", () => {
     expect(input().disabled).toBe(true);
     expect(input().value).toBe("4");
     expect(parentState()).toBe("4");
+  });
+});
+
+describe("QuantityStepper under StrictMode (CR-13)", () => {
+  // StrictMode runs every effect twice on mount. Each pair must still be reported once.
+  it("lowers a value above max once and reports it once", () => {
+    const onChange = vi.fn();
+    const onLowered = vi.fn();
+    render(
+      <StrictMode>
+        <ParentHarness
+          initial={9}
+          max={4}
+          policy="keep"
+          onChange={onChange}
+          onLowered={onLowered}
+        />
+      </StrictMode>,
+    );
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith(4);
+    expect(onLowered).toHaveBeenCalledTimes(1);
+    expect(onLowered).toHaveBeenCalledWith(9, 4);
+    expect(parentState()).toBe("4");
+  });
+
+  it("reports a value outside the range once", () => {
+    const onChange = vi.fn();
+    const onOutOfRange = vi.fn();
+    render(
+      <StrictMode>
+        <ParentHarness
+          initial={0}
+          max={4}
+          policy="keep"
+          onChange={onChange}
+          onOutOfRange={onOutOfRange}
+        />
+      </StrictMode>,
+    );
+    expect(onOutOfRange).toHaveBeenCalledTimes(1);
+    expect(onOutOfRange).toHaveBeenCalledWith(0, 1);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("QuantityStepper at a limit and its range announcement (CR-12)", () => {
+  it("keeps keyboard focus on the plus button when it reaches max", async () => {
+    render(<Harness initial={4} max={5} />);
+    plus().focus();
+    await userEvent.keyboard("{Enter}");
+    expect(input().value).toBe("5");
+    expect(document.activeElement).toBe(plus());
+    expect(plus().disabled).toBe(false);
+    expect(plus().getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("keeps keyboard focus on the minus button when it reaches 1", async () => {
+    render(<Harness initial={2} max={5} />);
+    minus().focus();
+    await userEvent.keyboard("{Enter}");
+    expect(input().value).toBe("1");
+    expect(document.activeElement).toBe(minus());
+    expect(minus().disabled).toBe(false);
+    expect(minus().getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("does nothing when a button at its limit is pressed", async () => {
+    const onChange = vi.fn();
+    render(<Harness initial={5} max={5} onChange={onChange} />);
+    await userEvent.click(plus());
+    await userEvent.keyboard("{Enter}");
+    expect(onChange).not.toHaveBeenCalled();
+    expect(input().value).toBe("5");
+  });
+
+  it("uses native disabled, not aria-disabled, when the whole control is disabled", () => {
+    render(<QuantityStepper {...labels} value={2} max={5} disabled onChange={() => {}} />);
+    expect(plus().disabled).toBe(true);
+    expect(plus().hasAttribute("aria-disabled")).toBe(false);
+  });
+
+  it("announces the allowed range on the input", () => {
+    render(<Harness initial={2} max={5} />);
+    expect(input().getAttribute("aria-valuemin")).toBe("1");
+    expect(input().getAttribute("aria-valuemax")).toBe("5");
+    expect(input().getAttribute("aria-valuenow")).toBe("2");
+  });
+
+  it("announces no range while no quantity is allowed", () => {
+    render(<QuantityStepper {...labels} value={1} max={0} onChange={() => {}} />);
+    expect(input().hasAttribute("aria-valuemin")).toBe(false);
+    expect(input().hasAttribute("aria-valuemax")).toBe(false);
   });
 });
