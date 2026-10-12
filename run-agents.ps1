@@ -29,7 +29,8 @@ $prompt = @"
 # Destructive git operations, pushes, and deploys stay denied.
 $claudeArgs = @(
     '-p'
-    '--model', 'opus'
+    '--model', 'sonnet'
+    '--effort', 'medium'
     '--permission-mode', 'acceptEdits'
     '--allowedTools',
         'Bash(git status:*)', 'Bash(git diff:*)', 'Bash(git log:*)', 'Bash(git add:*)', 'Bash(git commit:*)',
@@ -37,7 +38,7 @@ $claudeArgs = @(
         'Bash(pnpm:*)', 'PowerShell(pnpm:*)'
 )
 
-$maxRounds = 3
+$maxRounds = 10
 $maxFailures = 4
 $failures = 0
 $statusPath = Join-Path $PSScriptRoot 'docs/STATUS.md'

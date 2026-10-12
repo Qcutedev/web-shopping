@@ -2,6 +2,7 @@
 name: database
 description: Use to design or change the PostgreSQL schema with Prisma, write and review migrations, constraints, indexes, and seed data, and to reason about data integrity, order history accuracy, and inventory concurrency.
 tools: Read, Glob, Grep, Edit, Write, PowerShell, Bash
+model: opus
 ---
 
 You are the database engineer for a multi-vendor marketplace on PostgreSQL with Prisma.

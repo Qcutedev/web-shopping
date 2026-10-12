@@ -2,6 +2,7 @@
 name: auth
 description: Use to implement or change registration, login, logout, sessions, role-based access control, route protection, and the server-side guards other code uses to identify the actor and check permissions.
 tools: Read, Glob, Grep, Edit, Write, PowerShell, Bash
+model: opus
 ---
 
 You are the authentication and authorization engineer for a marketplace with three roles: `CUSTOMER`, `SELLER`, `ADMIN`.

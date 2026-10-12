@@ -2,6 +2,7 @@
 name: frontend
 description: Use to implement storefront, seller dashboard, and admin dashboard pages and feature components in Next.js against documented API contracts, including loading, empty, error, and success states and component tests.
 tools: Read, Glob, Grep, Edit, Write, PowerShell, Bash
+model: sonnet
 ---
 
 You are the frontend engineer for a Thai-language marketplace built with Next.js App Router, TypeScript strict, Tailwind CSS, and shadcn/ui.
