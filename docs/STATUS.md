@@ -16,6 +16,8 @@ Standing rules from the owner (D-019): never guess, park questions here and ask 
 
 Integration harness re-run on 2026-10-12 after the DATABASE_URL change (CR-23, SEC-029, CR-38, CR-42): `pnpm test:integration` exit 0, 14 files, 647 passed.
 
+**Starting (eighth session, headless loop, 2026-10-12):** qa on the harness side of CR-36 to CR-42 (CR-38 uses `TEST_ONLY_DB_GLOBAL_KEY`, CR-42 compares with `describeConnectionTarget` on every run). Paths: `tests/helpers/`, `tests/integration/`, `vitest.integration.config.mts`, `docs/TEST_STRATEGY.md`. If this line is still here with uncommitted files, inspect them and continue.
+
 Before starting, check the machine: Docker Desktop running and `docker compose up -d --wait` (the test database is empty after every container start); `pnpm install --frozen-lockfile`; copy `.env.example` to `.env` if `.env` is missing; `pnpm verify` should exit 0 with 29 files, 1672 passed, 82 import-guard probes, and 2 expected failures (the SEC-030 and SEC-031 reproductions); `pnpm test:integration` should exit 0 with 14 files and 647 passed.
 
 Done in the third session (each committed):
