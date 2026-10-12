@@ -3,9 +3,10 @@
  * T-011, review item V4). The framework calls `register` once when a server instance starts and
  * waits for it before the server handles a request.
  *
- * The one thing it does today: validate the environment (src/server/env.ts), so that a missing
- * or invalid variable is reported at start, by name and rule and never by value, instead of at
- * some later request. T-015 adds the scheduled jobs here, agreed with devops.
+ * First it validates the environment (src/server/env.ts), so that a missing or invalid variable
+ * is reported at start, by name and rule and never by value, instead of at some later request.
+ * Then, and only with a valid environment, it starts the scheduled removal of expired sessions
+ * (T-015, src/server/auth/session-purge.ts; not in a process with NODE_ENV=test).
  *
  * Where it does not run:
  *
@@ -44,7 +45,15 @@ export async function register(): Promise<void> {
       // process like an invalid configuration does, not leave `next start` up answering 500.
       const { loadEnvAtStartup } = await import("./server/env");
       // Logs one line that names the variables at fault, then throws `EnvValidationError`.
-      loadEnvAtStartup();
+      // Nothing below runs, and no timer is started, unless the environment is valid.
+      const env = loadEnvAtStartup();
+      // T-015 (SECURITY.md SR-07 item 5): removes expired sessions once now and every hour.
+      // Not in a test process: tests call the purge directly, and the unit tests of this hook
+      // must not reach a database.
+      if (env.nodeEnv !== "test") {
+        const { startSessionPurgeSchedule } = await import("./server/auth/session-purge");
+        startSessionPurgeSchedule();
+      }
     } catch (error) {
       process.exitCode = 1;
       const fallback = setTimeout(() => process.exit(1), EXIT_FALLBACK_MS);
