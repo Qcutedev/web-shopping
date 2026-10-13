@@ -10,7 +10,8 @@
  * `@prisma/adapter-pg` sends the relation loads of one query (pictures, store, category) at the
  * same time on the transaction's single `pg` client, which `pg` 8.23 reports as deprecated
  * ("Calling client.query() when the client is already executing a query") and `pg` 9 removes.
- * Outside a transaction those loads go to the pool.
+ * Outside a transaction those loads go to the pool. The rule for code that must run in a
+ * transaction is docs/API_CONTRACTS.md item 8.2-14.
  *
  * Ordering always ends with `id` (section 1.7; DATA_MODEL.md section 15). No query orders by a
  * Thai text column.
