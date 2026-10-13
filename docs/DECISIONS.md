@@ -311,6 +311,11 @@ SEC-041 limit of 3 is built as `NAME_MAX_MARK_RUN = 3` (a run of 4 or more combi
 
 SEC-032 (D-036 item 5) is proposed, not built: see the SEC-032 entry in `docs/SECURITY.md`. Building it needs `src/server/rate-limit.ts` (backend-api) and a security ruling on the SR-02 capacity split.
 
+### D-038 Owner ruling on SEC-050: give `sign-in-account` a larger capacity share
+Owner, 2026-10-14, option (a) of the four in `docs/SECURITY.md` SEC-050.
+
+`sign-in-account` gets a larger share of the limiter's total window budget, taken from the signed-in rules; the total (`MAX_TOTAL_WINDOWS`) does not change. The new share must make filling the rule cost clearly more than 33 new emails per second, and the signed-in rules must still hold their own limits. Built by backend-api; security re-checks.
+
 ## Pending decisions for the user
 
 Undecided, none blocking the MVP: marketplace name and logo, real product photos, hosting provider for staging and production, production object storage, email provider, payment gateway.
