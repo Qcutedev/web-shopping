@@ -11,5 +11,5 @@ import { getAuthRuntime, handleGetSession } from "@/server/auth/routes";
 
 export async function GET(request: Request): Promise<Response> {
   await connection();
-  return handleGetSession(request, getAuthRuntime());
+  return handleGetSession(request, getAuthRuntime);
 }

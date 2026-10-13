@@ -1,7 +1,8 @@
 /**
  * The work behind the four auth routes of `src/app/api/v1/auth/`. Each route file is one line
- * that calls a function here with `getAuthRuntime()`; tests call the same functions with a
- * runtime of their own (for example production cookie settings).
+ * that calls a function here with `getAuthRuntime` itself, not its result, so that the runtime is
+ * built inside the handler's `try` (CR-83); tests call the same functions with a runtime of their
+ * own (for example production cookie settings).
  *
  * Every function follows the order of refusals of docs/API_CONTRACTS.md section 1.8 and
  * SECURITY.md SR-05 item 5, and the handler pattern of src/server/http.ts:
@@ -66,6 +67,14 @@ export interface AuthRuntime {
   responseFloor: ResponseFloor;
 }
 
+/**
+ * What a handler is given: the runtime itself (tests), or the function that builds it (the route
+ * files pass `getAuthRuntime`). A function is called inside the handler's `try`, so a failure to
+ * build the runtime (invalid configuration, the library refusing its options) is the standard
+ * 500 envelope with the class name in the log, not an error thrown out of the route.
+ */
+export type AuthRuntimeSource = AuthRuntime | (() => AuthRuntime);
+
 /** The runtime of a running server: the validated configuration and the process-wide limiter. */
 export function getAuthRuntime(): AuthRuntime {
   const env = getEnv();
@@ -116,6 +125,31 @@ function openScope(request: Request, runtime: AuthRuntime, route: string): Reque
     clientIp: "",
     userAgent: request.headers.get("user-agent"),
   };
+}
+
+/**
+ * Builds the runtime from `source` and opens the request's scope. Each handler calls it first,
+ * inside its `try`, and records the scope for its `catch` (see `failure`).
+ */
+function open(
+  request: Request,
+  source: AuthRuntimeSource,
+  route: string,
+): { runtime: AuthRuntime; scope: RequestScope } {
+  const runtime = typeof source === "function" ? source() : source;
+  return { runtime, scope: openScope(request, runtime, route) };
+}
+
+/**
+ * The outer `catch` of every handler. `scope` is undefined when the runtime could not be built:
+ * the answer then has a new request id (an incoming one is trusted only under the validated proxy
+ * configuration, which is missing) and the line goes to the process-wide logger. The error is
+ * reduced to its class name either way (SEC-048).
+ */
+function failure(request: Request, scope: RequestScope | undefined, error: unknown): Response {
+  const requestId = scope?.requestId ?? resolveRequestId(request, { trustIncoming: false });
+  const log = scope?.log ?? defaultLogger.child({ requestId });
+  return errorResponse(mapLibraryError(error), { requestId, logger: log });
 }
 
 /** Step 1, with the security event of SR-04 for a refusal (throttled). */
@@ -182,9 +216,11 @@ function event(
  * another) and does not sign in. An email that already has an account gets exactly the same
  * answer and nothing is created or changed (TM-03): 200 `{ "data": { "accepted": true } }`.
  */
-export async function handleSignUp(request: Request, runtime: AuthRuntime): Promise<Response> {
-  const scope = openScope(request, runtime, "sign-up");
+export async function handleSignUp(request: Request, source: AuthRuntimeSource): Promise<Response> {
+  let opened: RequestScope | undefined;
   try {
+    const { runtime, scope } = open(request, source, "sign-up");
+    opened = scope;
     checkOrigin(request, runtime, scope);
     assertContentType(request, JSON_CONTENT_TYPE);
     scope.clientIp = getClientAddress(request, runtime.trustedProxy);
@@ -221,7 +257,7 @@ export async function handleSignUp(request: Request, runtime: AuthRuntime): Prom
     await waitForFloor(startedAt, runtime.responseFloor);
     return ok({ accepted: true }, { requestId: scope.requestId });
   } catch (error) {
-    return errorResponse(mapLibraryError(error), { requestId: scope.requestId, logger: scope.log });
+    return failure(request, opened, error);
   }
 }
 
@@ -231,9 +267,11 @@ export async function handleSignUp(request: Request, runtime: AuthRuntime): Prom
  * fresh session in this browser (rotation on login). Every failure, an unknown email, a wrong
  * password, and a deactivated account alike, is 401 UNAUTHENTICATED with one message.
  */
-export async function handleSignIn(request: Request, runtime: AuthRuntime): Promise<Response> {
-  const scope = openScope(request, runtime, "sign-in");
+export async function handleSignIn(request: Request, source: AuthRuntimeSource): Promise<Response> {
+  let opened: RequestScope | undefined;
   try {
+    const { runtime, scope } = open(request, source, "sign-in");
+    opened = scope;
     checkOrigin(request, runtime, scope);
     assertContentType(request, JSON_CONTENT_TYPE);
     scope.clientIp = getClientAddress(request, runtime.trustedProxy);
@@ -274,7 +312,7 @@ export async function handleSignIn(request: Request, runtime: AuthRuntime): Prom
       { requestId: scope.requestId, headers: cookieHeaders(result.headers) },
     );
   } catch (error) {
-    return errorResponse(mapLibraryError(error), { requestId: scope.requestId, logger: scope.log });
+    return failure(request, opened, error);
   }
 }
 
@@ -293,9 +331,14 @@ function signInWithLibrary(auth: Auth, email: string, password: string, headers:
  * `api/routes/sign-out.mjs`), which would leave the old cookie valid (REQ-C-02). The library then
  * writes the cookie-clearing headers.
  */
-export async function handleSignOut(request: Request, runtime: AuthRuntime): Promise<Response> {
-  const scope = openScope(request, runtime, "sign-out");
+export async function handleSignOut(
+  request: Request,
+  source: AuthRuntimeSource,
+): Promise<Response> {
+  let opened: RequestScope | undefined;
   try {
+    const { runtime, scope } = open(request, source, "sign-out");
+    opened = scope;
     checkOrigin(request, runtime, scope);
     assertContentType(request, JSON_CONTENT_TYPE);
     const session = await readSession(request, runtime.auth);
@@ -318,7 +361,7 @@ export async function handleSignOut(request: Request, runtime: AuthRuntime): Pro
       { requestId: scope.requestId, headers: cookieHeaders(cleared.headers) },
     );
   } catch (error) {
-    return errorResponse(mapLibraryError(error), { requestId: scope.requestId, logger: scope.log });
+    return failure(request, opened, error);
   }
 }
 
@@ -326,14 +369,19 @@ export async function handleSignOut(request: Request, runtime: AuthRuntime): Pro
  * `GET /api/v1/auth/session`, public. `{ "data": Actor }` for a valid session of an active user,
  * `{ "data": null }` otherwise. Reads; writes nothing.
  */
-export async function handleGetSession(request: Request, runtime: AuthRuntime): Promise<Response> {
-  const scope = openScope(request, runtime, "session");
+export async function handleGetSession(
+  request: Request,
+  source: AuthRuntimeSource,
+): Promise<Response> {
+  let opened: RequestScope | undefined;
   try {
+    const { runtime, scope } = open(request, source, "session");
+    opened = scope;
     const session = await readSession(request, runtime.auth);
     const actor: Actor | null = session === null ? null : await loadActor(session.userId);
     return ok(actor, { requestId: scope.requestId });
   } catch (error) {
-    return errorResponse(mapLibraryError(error), { requestId: scope.requestId, logger: scope.log });
+    return failure(request, opened, error);
   }
 }
 

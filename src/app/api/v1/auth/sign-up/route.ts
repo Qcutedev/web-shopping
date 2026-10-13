@@ -6,5 +6,5 @@
 import { getAuthRuntime, handleSignUp } from "@/server/auth/routes";
 
 export async function POST(request: Request): Promise<Response> {
-  return handleSignUp(request, getAuthRuntime());
+  return handleSignUp(request, getAuthRuntime);
 }

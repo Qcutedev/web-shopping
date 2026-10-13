@@ -202,12 +202,13 @@ describe("SEC-048 re-check: errorResponse logs labels only, for every kind of un
   });
 });
 
-describe("SEC-048 re-check: what an auth route throws before its try (getAuthRuntime) carries no value", () => {
-  // The four route files call `getAuthRuntime()` as an argument, outside the handler's `try`, so
-  // a throw there bypasses errorResponse and is printed by Next.js with message and stack. What
-  // can throw there: getEnv (parseEnv) and getAuth (readAuthSecret, then createAuth, which builds
-  // the library lazily and the Prisma client lazily). Both readers throw EnvValidationError,
-  // whose message holds variable names and rule texts only.
+describe("SEC-048 re-check: a failure to build the auth runtime (getAuthRuntime) is the standard 500 and carries no value", () => {
+  // What can throw in `getAuthRuntime`: getEnv (parseEnv) and getAuth (readAuthSecret, then
+  // createAuth, which builds the library lazily and the Prisma client lazily). Both readers throw
+  // EnvValidationError, whose message holds variable names and rule texts only. Until CR-83 the
+  // four route files called `getAuthRuntime()` as an argument, outside the handler's `try`, so
+  // the throw bypassed errorResponse and Next.js printed it with message and stack. The route
+  // files now pass `getAuthRuntime` itself and the handler calls it inside its `try`.
   function stubEnv(overrides: Record<string, string>) {
     const base: Record<string, string> = {
       NODE_ENV: "production",
@@ -231,15 +232,26 @@ describe("SEC-048 re-check: what an auth route throws before its try (getAuthRun
     for (const [name, value] of Object.entries({ ...base, ...overrides })) vi.stubEnv(name, value);
   }
 
-  async function routeError(): Promise<unknown> {
+  /**
+   * Calls the sign-in route and returns its response and the lines it wrote to stdout (the
+   * process-wide logger's sink). A throw out of the route fails the test.
+   */
+  async function routeAnswer(): Promise<{ response: Response; lines: string[] }> {
     vi.resetModules();
     const route = await import("@/app/api/v1/auth/sign-in/route");
+    const lines: string[] = [];
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
+      lines.push(String(chunk));
+      return true;
+    });
     try {
-      await route.POST(new Request(`${APP_URL}/api/v1/auth/sign-in`, { method: "POST" }));
-    } catch (error) {
-      return error;
+      const response = await route.POST(
+        new Request(`${APP_URL}/api/v1/auth/sign-in`, { method: "POST" }),
+      );
+      return { response, lines };
+    } finally {
+      spy.mockRestore();
     }
-    return undefined;
   }
 
   it("with a valid configuration nothing throws before the try (the library and the database client are built lazily)", async () => {
@@ -256,13 +268,22 @@ describe("SEC-048 re-check: what an auth route throws before its try (getAuthRun
     ["an invalid APP_URL", { APP_URL: `ftp://${CANARY}.example.test` }],
     ["a database URL of another scheme", { DATABASE_URL: `mysql://shop:${CANARY}@db:3306/x` }],
   ] as const) {
-    it(`${label}: the route throws EnvValidationError and no part of the value is in its text`, async () => {
+    it(`${label}: the route answers 500 INTERNAL_ERROR, logs EnvValidationError by class name, and no part of the value is in either`, async () => {
       stubEnv(overrides);
-      const error = await routeError();
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).name).toBe("EnvValidationError");
-      const text = [String(error), (error as Error).stack ?? "", JSON.stringify(error)].join("\n");
-      expect(text).not.toContain(CANARY);
+      const { response, lines } = await routeAnswer();
+      expect(response.status).toBe(500);
+      const body = await response.text();
+      expect(body).not.toContain(CANARY);
+      const parsedBody = JSON.parse(body) as { error: { code: string; requestId: string } };
+      expect(parsedBody.error.code).toBe("INTERNAL_ERROR");
+      expect(response.headers.get("x-request-id")).toBe(parsedBody.error.requestId);
+      expect(lines).toHaveLength(1);
+      const line = lines[0] ?? "";
+      expect(line).not.toContain(CANARY);
+      const parsed = JSON.parse(line) as LogLine;
+      expect(parsed.level).toBe("error");
+      expect(parsed.requestId).toBe(parsedBody.error.requestId);
+      expect(parsed.err).toEqual({ errorClass: "EnvValidationError" });
     });
   }
 });
