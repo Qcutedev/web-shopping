@@ -33,7 +33,7 @@ import {
   signUpBodySchema,
 } from "../../modules/auth/schema";
 import { type ClientAddressConfig, getClientAddress } from "../client-address";
-import { type AppError, internalError, isAppError, rateLimited, unauthenticated } from "../errors";
+import { type AppError, isAppError, rateLimited, unauthenticated } from "../errors";
 import { db } from "../db";
 import { getEnv } from "../env";
 import {
@@ -52,6 +52,7 @@ import type { Actor } from "./actor";
 import { type Auth, getAuth } from "./auth";
 import { AUTH_RESPONSE_FLOOR, type ResponseFloor } from "./config";
 import { headersForAuthLibrary } from "./cookies";
+import { reduceLibraryError } from "./library-error";
 import { recordSecurityEvent, type SecurityEventKind } from "./security-events";
 import { loadActor, readSession } from "./session";
 
@@ -213,7 +214,8 @@ export async function handleSignUp(request: Request, runtime: AuthRuntime): Prom
         where: { email: input.email.toLowerCase() },
         select: { id: true },
       });
-      if (existing === null) throw internalError(error);
+      // Reduced here, because an AppError passes the outer mapper unchanged (SEC-048).
+      if (existing === null) throw reduceLibraryError(error);
     }
     event(scope, "sign-up", "accepted", createdUserId);
     await waitForFloor(startedAt, runtime.responseFloor);
@@ -336,16 +338,12 @@ export async function handleGetSession(request: Request, runtime: AuthRuntime): 
 }
 
 /**
- * An error of the library that reached a handler unexpected becomes a 500 that keeps it as the
- * cause for the log; nothing of it reaches the client. Application errors pass through.
+ * An error that reached a handler unexpected (a `BetterAuthError`, an `APIError`, or anything else
+ * the library or the database threw) becomes a 500 whose recorded cause is its class name only
+ * (and an `APIError`'s status and code), never its message or stack (SEC-048, library-error.ts);
+ * nothing of it reaches the client. Application errors pass through. Every handler's outer
+ * `catch` calls this before `errorResponse`.
  */
-function mapLibraryError(error: unknown): unknown {
-  if (isAppError(error)) return error;
-  if (error instanceof APIError) {
-    const failure: AppError = internalError(
-      new Error(`Auth library refused: ${String(error.statusCode)} ${String(error.body?.code)}`),
-    );
-    return failure;
-  }
-  return error;
+function mapLibraryError(error: unknown): AppError {
+  return reduceLibraryError(error);
 }

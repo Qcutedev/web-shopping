@@ -22,6 +22,7 @@ import { db, type DbTransaction } from "../db";
 import type { Actor } from "./actor";
 import { type Auth, getAuth } from "./auth";
 import { hasSessionCookie, headersForAuthLibrary } from "./cookies";
+import { reduceLibraryError } from "./library-error";
 
 export interface SessionRecord {
   /** The session token. Secret: never log it, never send it in a body. */
@@ -44,10 +45,17 @@ export async function readSession(
 ): Promise<SessionRecord | null> {
   const headers = headersFrom(source);
   if (!hasSessionCookie(headers.get("cookie"))) return null;
-  const result = await auth.api.getSession({
-    headers: headersForAuthLibrary(headers),
-    query: { disableCookieCache: true, disableRefresh: true },
-  });
+  let result: Awaited<ReturnType<Auth["api"]["getSession"]>>;
+  try {
+    result = await auth.api.getSession({
+      headers: headersForAuthLibrary(headers),
+      query: { disableCookieCache: true, disableRefresh: true },
+    });
+  } catch (error) {
+    // The guards are called by every route handler, whose `errorResponse` would log a library
+    // error with its message: only its class name goes on (SEC-048, library-error.ts).
+    throw reduceLibraryError(error);
+  }
   if (result === null) return null;
   return { token: result.session.token, userId: result.user.id };
 }
