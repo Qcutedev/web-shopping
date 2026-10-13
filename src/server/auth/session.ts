@@ -21,7 +21,7 @@ import { unauthenticated } from "../errors";
 import { db, type DbTransaction } from "../db";
 import type { Actor } from "./actor";
 import { type Auth, getAuth } from "./auth";
-import { hasSessionCookie } from "./cookies";
+import { hasSessionCookie, headersForAuthLibrary } from "./cookies";
 
 export interface SessionRecord {
   /** The session token. Secret: never log it, never send it in a body. */
@@ -45,7 +45,7 @@ export async function readSession(
   const headers = headersFrom(source);
   if (!hasSessionCookie(headers.get("cookie"))) return null;
   const result = await auth.api.getSession({
-    headers,
+    headers: headersForAuthLibrary(headers),
     query: { disableCookieCache: true, disableRefresh: true },
   });
   if (result === null) return null;

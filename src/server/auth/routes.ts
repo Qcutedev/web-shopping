@@ -51,6 +51,7 @@ import { resolveRequestId, trustsIncomingRequestId } from "../request-id";
 import type { Actor } from "./actor";
 import { type Auth, getAuth } from "./auth";
 import { AUTH_RESPONSE_FLOOR, type ResponseFloor } from "./config";
+import { headersForAuthLibrary } from "./cookies";
 import { recordSecurityEvent, type SecurityEventKind } from "./security-events";
 import { loadActor, readSession } from "./session";
 
@@ -196,7 +197,7 @@ export async function handleSignUp(request: Request, runtime: AuthRuntime): Prom
     try {
       const result = await runtime.auth.api.signUpEmail({
         body: { name: input.name, email: input.email, password: input.password },
-        headers: request.headers,
+        headers: headersForAuthLibrary(request.headers),
       });
       // The library answers a duplicate with a made-up user whose id matches no row.
       const created = await db.user.findUnique({
@@ -278,7 +279,7 @@ export async function handleSignIn(request: Request, runtime: AuthRuntime): Prom
 function signInWithLibrary(auth: Auth, email: string, password: string, headers: Headers) {
   return auth.api.signInEmail({
     body: { email, password, rememberMe: true },
-    headers,
+    headers: headersForAuthLibrary(headers),
     returnHeaders: true,
   });
 }
@@ -307,7 +308,7 @@ export async function handleSignOut(request: Request, runtime: AuthRuntime): Pro
     }
     await db.session.deleteMany({ where: { token: session.token } });
     const cleared = await runtime.auth.api.signOut({
-      headers: request.headers,
+      headers: headersForAuthLibrary(request.headers),
       returnHeaders: true,
     });
     return ok(

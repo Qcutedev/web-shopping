@@ -70,6 +70,10 @@ describe("proxy", () => {
       "session_token=abc",
       // The production name before SEC-034; the library no longer writes or reads it.
       "__Secure-better-auth.session_token=abc",
+      // SEC-038: a name padded with anything but SP or HTAB is another cookie.
+      "theme=dark;  better-auth.session_token=abc",
+      "theme=dark; \u000c__Host-better-auth.session_token=abc",
+      "theme=dark; __Host-better-auth.session_token\u000b=abc",
     ]) {
       expect(proxy(request("/account", cookie)).status).toBe(307);
     }

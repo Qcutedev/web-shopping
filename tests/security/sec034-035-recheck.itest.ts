@@ -7,8 +7,9 @@
  * floor, whichever account state the email has. A comparison of two timing distributions is not
  * kept in the suite (flaky under parallel files); it was measured once (review file).
  *
- * An `it.fails` case states the secure behaviour of an open finding (SEC-038): it is reported as
- * an expected failure while the flaw exists and turns red when the code is fixed.
+ * The SEC-038 cases were `it.fails` reproductions while the finding was open; they are plain `it`
+ * cases with unchanged bodies since the fix (auth, 2026-10-13: src/server/auth/cookies.ts
+ * `headersForAuthLibrary`), and three cases were added with it.
  */
 import { describe, expect, it } from "vitest";
 
@@ -166,7 +167,7 @@ describe("SEC-038 a whitespace-padded name is read as the __Host- session cookie
     ["U+000B vertical tab", "\u000b"],
     ["U+000C form feed", "\u000c"],
   ] as const) {
-    it.fails(`a name starting with ${label} is not a session`, async () => {
+    it(`a name starting with ${label} is not a session`, async () => {
       const runtime = productionRuntime();
       const { value } = await productionSession(runtime);
       expect(await sessionUserFor(runtime, `theme=dark; ${pad}${HOST_NAME}=${value}`)).toBeNull();
@@ -182,17 +183,51 @@ describe("SEC-038 a whitespace-padded name is read as the __Host- session cookie
     expect(await sessionUserFor(runtime, `theme=dark; Â ${HOST_NAME}=${value}`)).toBeNull();
   });
 
-  it.fails(
-    "a padded attacker cookie sent first does not win over the victim's real cookie",
-    async () => {
-      const runtime = productionRuntime();
-      const victim = await productionSession(runtime);
-      const attacker = await productionSession(runtime);
-      // A longer Path makes a browser send the attacker's cookie first (RFC 6265 section 5.4).
-      const cookie = `\u00a0${HOST_NAME}=${attacker.value}; ${HOST_NAME}=${victim.value}`;
-      expect(await sessionUserFor(runtime, cookie)).toBe(victim.userId);
-    },
-  );
+  it("a padded attacker cookie sent first does not win over the victim's real cookie", async () => {
+    const runtime = productionRuntime();
+    const victim = await productionSession(runtime);
+    const attacker = await productionSession(runtime);
+    // A longer Path makes a browser send the attacker's cookie first (RFC 6265 section 5.4).
+    const cookie = `\u00a0${HOST_NAME}=${attacker.value}; ${HOST_NAME}=${victim.value}`;
+    expect(await sessionUserFor(runtime, cookie)).toBe(victim.userId);
+  });
+
+  it("a name padded at the end is not a session either", async () => {
+    const runtime = productionRuntime();
+    const { value } = await productionSession(runtime);
+    for (const pad of ["\u00a0", "\u000b", "\u000c"]) {
+      expect(await sessionUserFor(runtime, `theme=dark; ${HOST_NAME}${pad}=${value}`)).toBeNull();
+    }
+  });
+
+  it("sign-out with a padded attacker cookie sent first ends the victim's session, not the attacker's", async () => {
+    const runtime = productionRuntime();
+    const victim = await productionSession(runtime);
+    const attacker = await productionSession(runtime);
+    const cookie = `\u00a0${HOST_NAME}=${attacker.value}; ${HOST_NAME}=${victim.value}`;
+    const response = await handleSignOut(prodPost("/api/v1/auth/sign-out", { cookie }), runtime);
+    expect(response.status).toBe(200);
+    expect(await sessionUserFor(runtime, `${HOST_NAME}=${victim.value}`)).toBeNull();
+    expect(await sessionUserFor(runtime, `${HOST_NAME}=${attacker.value}`)).toBe(attacker.userId);
+  });
+
+  it("sign-in with a padded attacker cookie keeps the attacker's session and rotates nothing else", async () => {
+    const runtime = productionRuntime();
+    const attacker = await productionSession(runtime);
+    const email = freshEmail("prod-padded-sign-in");
+    const userId = await register(runtime, email);
+    const response = await handleSignIn(
+      prodPost("/api/v1/auth/sign-in", {
+        body: { email, password: PASSWORD },
+        cookie: `\u00a0${HOST_NAME}=${attacker.value}`,
+      }),
+      runtime,
+    );
+    expect(response.status).toBe(200);
+    expect((await json(response))["data"]).toMatchObject({ userId });
+    // The padded cookie was never this browser's session, so it is not "the previous session".
+    expect(await sessionUserFor(runtime, `${HOST_NAME}=${attacker.value}`)).toBe(attacker.userId);
+  });
 });
 
 describe("SEC-035 re-check: every failure path waits for the production floor", () => {
