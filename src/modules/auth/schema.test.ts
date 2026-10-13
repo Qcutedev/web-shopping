@@ -11,6 +11,7 @@ import {
   EMAIL_MAX,
   emailRateLimitSubject,
   NAME_MAX,
+  NAME_MAX_MARK_RUN,
   PASSWORD_MAX,
   PASSWORD_MIN,
   signInBodySchema,
@@ -164,6 +165,82 @@ describe("signUpBodySchema", () => {
         true,
       );
     }
+  });
+});
+
+describe("runs of combining marks and kept invisible characters (SEC-041, SEC-042; D-036 item 7)", () => {
+  // Code points as numbers only, never as escapes or literals (SEC-040).
+  const cp = (...codes: number[]): string => String.fromCodePoint(...codes);
+  const accepted = (name: string): boolean =>
+    signUpBodySchema.safeParse({ ...valid, name }).success;
+
+  it("allows at most three in a row", () => {
+    expect(NAME_MAX_MARK_RUN).toBe(3);
+  });
+
+  it("keeps real Thai words, up to three marks on one consonant", () => {
+    for (const name of [
+      // vowel above + tone mark + vowel below on one consonant (the owner's test case)
+      cp(0x0e01, 0x0e34, 0x0e48, 0x0e38),
+      // the same with the vowel below first
+      cp(0x0e1b, 0x0e39, 0x0e48),
+      // ที่, น้ำ, กิ๊ฟ, สิ้น, ปู่
+      cp(0x0e17, 0x0e35, 0x0e48),
+      cp(0x0e19, 0x0e49, 0x0e33),
+      cp(0x0e01, 0x0e34, 0x0e4a, 0x0e1f),
+      cp(0x0e2a, 0x0e34, 0x0e49, 0x0e19),
+      cp(0x0e1b, 0x0e39, 0x0e48),
+      // ศักดิ์, จันทร์ (U+0E4C thanthakhat)
+      cp(0x0e28, 0x0e31, 0x0e01, 0x0e14, 0x0e34, 0x0e4c),
+      cp(0x0e08, 0x0e31, 0x0e19, 0x0e17, 0x0e23, 0x0e4c),
+      // vowel above + tone mark + U+0E4C
+      cp(0x0e01, 0x0e34, 0x0e48, 0x0e4c),
+      // ที่ followed by U+200B and another word: two marks and the space make three
+      cp(0x0e17, 0x0e35, 0x0e48, 0x200b, 0x0e19, 0x0e35, 0x0e49),
+      // ร้าน + U+200C + ค้า
+      cp(0x0e23, 0x0e49, 0x0e32, 0x0e19, 0x200c, 0x0e04, 0x0e49, 0x0e32),
+    ]) {
+      expect(accepted(name), JSON.stringify(name)).toBe(true);
+    }
+  });
+
+  it("keeps emoji sequences: keycaps, presentation selectors, ZWJ sequences", () => {
+    for (const name of [
+      cp(0x23, 0xfe0f, 0x20e3),
+      cp(0x2764, 0xfe0f),
+      cp(0x1f441, 0xfe0f, 0x200d, 0x1f5e8, 0xfe0f),
+      cp(0x1f469, 0x1f3fd, 0x200d, 0x1f4bb),
+      cp(0x1f468, 0x200d, 0x1f469, 0x200d, 0x1f467),
+    ]) {
+      expect(accepted(name), JSON.stringify(name)).toBe(true);
+    }
+  });
+
+  it("accepts three in a row and refuses four, whatever the mix", () => {
+    expect(accepted(`A${cp(0x0301, 0x0302, 0x0303)}`)).toBe(true);
+    expect(accepted(`A${cp(0x0301, 0x0302, 0x0303, 0x0304)}`)).toBe(false);
+    expect(accepted(`Admin${cp(0x200b, 0x200b, 0x200b)}`)).toBe(true);
+    expect(accepted(`Admin${cp(0x200b, 0x200b, 0x200b, 0x200b)}`)).toBe(false);
+    expect(accepted(`Ad${cp(0x200c, 0x200d, 0x200b, 0x200c)}min`)).toBe(false);
+    expect(accepted(`A${cp(0x0301, 0x0302, 0x200b, 0x200c)}B`)).toBe(false);
+    expect(accepted(`${cp(0x2764, 0xfe0f, 0x200d, 0x200b, 0x200c)}`)).toBe(false);
+  });
+
+  it("refuses four Thai marks on one consonant, and three marks followed by U+200B", () => {
+    expect(accepted(cp(0x0e01, 0x0e34, 0x0e48, 0x0e38, 0x0e4c))).toBe(false);
+    expect(accepted(cp(0x0e01, 0x0e34, 0x0e48, 0x0e38, 0x200b, 0x0e01))).toBe(false);
+  });
+
+  it("refuses long stacks and long invisible runs anywhere in the name", () => {
+    expect(accepted(`A${cp(0x0301).repeat(95)}`)).toBe(false);
+    expect(accepted(`Admin${cp(0x0336).repeat(90)}`)).toBe(false);
+    expect(accepted(`${cp(0x200b).repeat(10)}Admin`)).toBe(false);
+    expect(accepted(`Ad${cp(0x200b).repeat(4)}min`)).toBe(false);
+  });
+
+  it("counts runs, not totals: many short runs separated by visible characters pass", () => {
+    const name = Array.from({ length: 10 }, () => `A${cp(0x0301, 0x0302, 0x0303)}`).join("");
+    expect(accepted(name)).toBe(true);
   });
 });
 

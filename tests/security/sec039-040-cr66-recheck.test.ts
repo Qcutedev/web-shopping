@@ -221,7 +221,9 @@ describe("SEC-041 the kept invisible characters are accepted anywhere and in any
 });
 
 describe("SEC-042 combining marks stack on one base without limit", () => {
-  it.fails("more than four combining marks on one base character are refused", () => {
+  // Fix note (auth, SEC-042, D-036 item 7): flipped from `it.fails`; at most three combining marks
+  // or kept invisible characters in a row (`NAME_MAX_MARK_RUN`, src/modules/auth/schema.ts).
+  it("more than four combining marks on one base character are refused", () => {
     expect(accepted(`A${cp(0x0301).repeat(95)}`)).toBe(false);
     expect(accepted(`Admin${cp(0x0336).repeat(90)}`)).toBe(false);
     expect(accepted(`A${cp(0x0301, 0x0302, 0x0303, 0x0304, 0x0306)}`)).toBe(false);

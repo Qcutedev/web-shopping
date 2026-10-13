@@ -50,13 +50,27 @@ const NAME_FORBIDDEN_CHAR = String.raw`(?![\u200B-\u200D\uFE0E\uFE0F])[\p{Cc}\p{
 const NAME_VISIBLE_CHAR = String.raw`(?![\u115F\u1160\u3164\uFFA0\u2800\u{1D159}])[\p{L}\p{N}\p{P}\p{S}]`;
 
 /**
- * Matches a whole name that contains no forbidden character and at least one visible one. Every
+ * SEC-041, SEC-042 (owner, D-036 item 7): at most this many combining marks (`\p{M}`, which
+ * includes the variation selectors U+FE00 to U+FE0F and the keycap U+20E3) or kept invisible
+ * characters (U+200B to U+200D) may follow each other. Natural Thai needs up to three on one
+ * consonant (a vowel above or below, a tone mark, and rarely U+0E4C), so three is kept and a fourth
+ * is refused: that closes stacks drawn far above and below the line ("Zalgo") and long invisible
+ * runs that carry hidden data or make invisible duplicates of a name.
+ */
+export const NAME_MAX_MARK_RUN = 3;
+
+/** One character of such a run. Escapes only (SEC-040). */
+const NAME_MARK_OR_KEPT_INVISIBLE = String.raw`[\p{M}\u200B-\u200D]`;
+
+/**
+ * Matches a whole name that contains no forbidden character, at least one visible one, and no
+ * run of more than NAME_MAX_MARK_RUN combining marks or kept invisible characters. Every
  * later free-text name field (store name, address name) uses the same rule. The source is
  * written with escapes only, so this file never contains one of these characters itself
  * (SEC-040; tests/security/sec037-038-recheck.test.ts checks every non-test file under src).
  */
 export const NAME_ALLOWED_TEXT = new RegExp(
-  String.raw`^(?=[\s\S]*?${NAME_VISIBLE_CHAR})(?:(?!${NAME_FORBIDDEN_CHAR})[\s\S])*$`,
+  String.raw`^(?![\s\S]*?${NAME_MARK_OR_KEPT_INVISIBLE}{${NAME_MAX_MARK_RUN + 1}})(?=[\s\S]*?${NAME_VISIBLE_CHAR})(?:(?!${NAME_FORBIDDEN_CHAR})[\s\S])*$`,
   "u",
 );
 
