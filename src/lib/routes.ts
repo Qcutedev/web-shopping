@@ -11,7 +11,21 @@ export const ROUTES = {
   cart: "/cart",
   signIn: "/sign-in",
   openStore: "/seller/apply",
+  // Account area (T-030). `src/proxy.ts` already gates `/account/*`.
+  account: "/account",
+  accountAddresses: "/account/addresses",
 } as const;
+
+/** Name of the query parameter that carries the page to return to after signing in. */
+export const SIGN_IN_NEXT_PARAM = "next";
+
+/**
+ * Sign-in address with the page the person wanted. `next` is a fixed in-app path chosen by the
+ * caller, never request input; the sign-in page still validates it (TM-19).
+ */
+export function signInHref(next: string): string {
+  return `${ROUTES.signIn}?${SIGN_IN_NEXT_PARAM}=${encodeURIComponent(next)}`;
+}
 
 /** Name of the query parameter that the search page reads (`q` of GET /api/v1/products). */
 export const SEARCH_QUERY_PARAM = "q";
