@@ -5,8 +5,11 @@
  * judge a `next` value that came from the address bar, which anyone can write.
  */
 
-/** The sign-in page. The pages themselves are frontend's (T-018 onwards). */
-export const SIGN_IN_PATH = "/login";
+/**
+ * The sign-in page (D-036 item 4). The pages themselves are frontend's (T-018 onwards); this
+ * value equals `ROUTES.signIn` in src/lib/routes.ts, and redirect.test.ts fails if they differ.
+ */
+export const SIGN_IN_PATH = "/sign-in";
 
 /** Where a user goes when the requested target is refused or absent. */
 export const DEFAULT_REDIRECT_PATH = "/";

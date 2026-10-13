@@ -1,6 +1,29 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_REDIRECT_PATH, MAX_REDIRECT_PATH_LENGTH, safeRedirectPath } from "./redirect";
+import { ROUTES, SIGN_IN_NEXT_PARAM } from "@/lib/routes";
+
+import {
+  DEFAULT_REDIRECT_PATH,
+  MAX_REDIRECT_PATH_LENGTH,
+  safeRedirectPath,
+  SIGN_IN_PATH,
+} from "./redirect";
+
+describe("SIGN_IN_PATH (D-036 item 4)", () => {
+  it("is /sign-in, the path the shell links to", () => {
+    expect(SIGN_IN_PATH).toBe("/sign-in");
+    expect(SIGN_IN_PATH).toBe(ROUTES.signIn);
+  });
+
+  it("is a path safeRedirectPath accepts unchanged", () => {
+    expect(safeRedirectPath(SIGN_IN_PATH)).toBe(SIGN_IN_PATH);
+  });
+
+  it("uses the same query parameter name as the shell's sign-in links", () => {
+    // src/proxy.ts writes `next`; signInHref writes SIGN_IN_NEXT_PARAM.
+    expect(SIGN_IN_NEXT_PARAM).toBe("next");
+  });
+});
 
 describe("safeRedirectPath (TM-19)", () => {
   it.each([

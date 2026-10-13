@@ -26,6 +26,7 @@ describe("proxy matcher", () => {
 
   it.each([
     "/",
+    "/sign-in",
     "/login",
     "/products/abc",
     "/stores/abc",
@@ -58,7 +59,7 @@ describe("proxy", () => {
     expect(response.status).toBe(307);
     const location = new URL(response.headers.get("location") ?? "");
     expect(location.origin).toBe(ORIGIN);
-    expect(location.pathname).toBe("/login");
+    expect(location.pathname).toBe("/sign-in");
     expect(location.searchParams.get("next")).toBe("/admin/users?page=2");
   });
 
