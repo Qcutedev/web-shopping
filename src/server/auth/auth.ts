@@ -67,6 +67,14 @@ export interface AuthSettings {
   logger?: StructuredLogger;
 }
 
+/**
+ * The version number of the one entry of the library's `secrets` list (SEC-045). The version is
+ * written into values the library encrypts with a versioned key; this application uses none of
+ * the features that do (cookie cache, OAuth, plugins), so it has no effect today. A secret
+ * rotation would add an entry with a higher number in front of this one.
+ */
+export const AUTH_SECRET_VERSION = 1;
+
 /** The code and message the library uses for a wrong email or password. */
 export const INVALID_CREDENTIALS = {
   code: "INVALID_EMAIL_OR_PASSWORD",
@@ -87,6 +95,15 @@ export function createAuth(settings: AuthSettings) {
     appName: "marketplace",
     baseURL: settings.baseUrl,
     secret: settings.secret,
+    // SEC-045: `secrets` is passed explicitly with the validated secret as its only entry. Left
+    // out, the library reads `BETTER_AUTH_SECRETS` from the process environment by itself
+    // (better-auth 1.7.7 `dist/context/create-context.mjs`: `options.secrets ??
+    // parseSecretsEnv(env.BETTER_AUTH_SECRETS)`), signs with its first entry whatever its
+    // strength, and quotes a malformed entry whole in an error message. Given here, that variable
+    // is never read. The signing secret stays `settings.secret`; `secret` above stays the legacy
+    // fallback the library keeps beside a versioned list, with the same value. src/server/env.ts
+    // also refuses the variable at start-up (AUTH_LIBRARY_VARIABLES).
+    secrets: [{ version: AUTH_SECRET_VERSION, value: settings.secret }],
     trustedOrigins: [settings.appOrigin],
     database: prismaAdapter(db, { provider: "postgresql", transaction: true }),
     telemetry: { enabled: false },

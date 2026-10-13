@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { assertClientAddressConfig, MAX_TRUSTED_PROXY_HOPS } from "./client-address";
 import {
+  AUTH_LIBRARY_VARIABLES,
+  AUTH_SECRET_MIN_DISTINCT_CHARACTERS,
   AUTH_SECRET_MIN_LENGTH,
   DEFAULT_PAYMENT_TIMEOUT_MINUTES,
   ENV_RULES,
@@ -795,6 +797,125 @@ describe("parseEnv: AUTH_SECRET (CR-66)", () => {
   });
 });
 
+describe("AUTH_SECRET in production: values that are plainly not random (SEC-044)", () => {
+  const WEAK = [
+    ["one repeated character", "x".repeat(32)],
+    ["blanks only", " ".repeat(32)],
+    ["fewer than 8 distinct characters", "gfedcbaabcdefggfedcbaabcdefgabcd"],
+    ["a shorter unit repeated", "0123456789abcdef".repeat(2)],
+    ["a longer unit repeated", "Zq7canary-unit-".repeat(3)],
+    ["the library's built-in default", "better-auth-secret-12345678901234567890"],
+    ["the library's default with blanks around it", " better-auth-secret-12345678901234567890 "],
+    ["the integration-test secret", "integration-test-secret-0123456789-abcdefghij"],
+  ] as const;
+
+  it("refuses each, in parseEnv and readAuthSecret alike, naming the variable and the rule", () => {
+    expect(AUTH_SECRET_MIN_DISTINCT_CHARACTERS).toBe(8);
+    for (const [label, secret] of WEAK) {
+      expect(secret.length, label).toBeGreaterThanOrEqual(AUTH_SECRET_MIN_LENGTH);
+      const expected = [{ variable: "AUTH_SECRET", rule: ENV_RULES.authSecretWeak }];
+      expect(issuesOf(production({ AUTH_SECRET: secret })), label).toEqual(expected);
+      let thrown: unknown;
+      try {
+        readAuthSecret({ AUTH_SECRET: secret, NODE_ENV: "production" });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown, label).toBeInstanceOf(EnvValidationError);
+      expect((thrown as EnvValidationError).issues, label).toEqual(expected);
+      if (secret.trim() !== "") {
+        expect(
+          JSON.stringify([(thrown as Error).message, (thrown as Error).stack]),
+          label,
+        ).not.toContain(secret.trim());
+      }
+    }
+  });
+
+  it("accepts each outside production: development and test stubs keep working", () => {
+    for (const [label, secret] of WEAK) {
+      for (const nodeEnv of ["development", "test"]) {
+        expect(parseEnv(source({ NODE_ENV: nodeEnv, AUTH_SECRET: secret })).authSecret, label).toBe(
+          secret,
+        );
+        expect(readAuthSecret({ AUTH_SECRET: secret, NODE_ENV: nodeEnv }), label).toBe(secret);
+      }
+    }
+  });
+
+  it("accepts random values of the documented forms in production", async () => {
+    const { randomBytes } = await import("node:crypto");
+    for (let i = 0; i < 2_000; i += 1) {
+      for (const secret of [
+        randomBytes(32).toString("base64url"),
+        randomBytes(16).toString("hex"),
+        randomBytes(32).toString("hex"),
+        randomBytes(24).toString("base64"),
+      ]) {
+        expect(parseEnv(production({ AUTH_SECRET: secret })).authSecret).toBe(secret);
+      }
+    }
+    // The secret the other production cases of this file use stays accepted.
+    expect(parseEnv(production()).authSecret).toBe(AUTH_SECRET);
+  });
+
+  it("a placeholder is reported once, with the placeholder rule, even when it is also weak", () => {
+    expect(issuesOf(production({ AUTH_SECRET: "not_a_secret".repeat(3) }))).toEqual([
+      { variable: "AUTH_SECRET", rule: ENV_RULES.authSecretPlaceholder },
+    ]);
+  });
+});
+
+describe("the auth library's own variables are refused (SEC-045)", () => {
+  const CANARY_ENTRY = "Zq7canary-rotated-secret-without-version";
+
+  it("lists exactly the variables better-auth 1.7.7 reads for its secret, URL, and origins", () => {
+    expect([...AUTH_LIBRARY_VARIABLES]).toEqual([
+      "BETTER_AUTH_SECRET",
+      "BETTER_AUTH_SECRETS",
+      "BETTER_AUTH_URL",
+      "BETTER_AUTH_TRUSTED_ORIGINS",
+    ]);
+  });
+
+  it("refuses each when set, in every NODE_ENV, by parseEnv and readAuthSecret, naming no value", () => {
+    for (const variable of AUTH_LIBRARY_VARIABLES) {
+      for (const value of ["1:x", CANARY_ENTRY, " "]) {
+        const expected = [{ variable, rule: ENV_RULES.authLibraryVariable }];
+        for (const env of [
+          source({ [variable]: value }),
+          source({ NODE_ENV: "test", [variable]: value }),
+          production({ [variable]: value }),
+        ]) {
+          const error = failure(env);
+          expect(error.issues, `${variable} ${env.NODE_ENV ?? ""}`).toEqual(expected);
+          expect(JSON.stringify([error.message, error.issues, error.stack])).not.toContain(
+            "Zq7canary",
+          );
+          let thrown: unknown;
+          try {
+            readAuthSecret(env);
+          } catch (caught) {
+            thrown = caught;
+          }
+          expect(thrown).toBeInstanceOf(EnvValidationError);
+          expect((thrown as EnvValidationError).issues).toEqual(expected);
+          expect(
+            JSON.stringify([(thrown as Error).message, (thrown as Error).stack]),
+          ).not.toContain("Zq7canary");
+        }
+      }
+    }
+  });
+
+  it("an empty value counts as not set, as for every variable of this file", () => {
+    for (const variable of AUTH_LIBRARY_VARIABLES) {
+      expect(parseEnv(source({ [variable]: "" })).authSecret).toBe(AUTH_SECRET);
+      expect(readAuthSecret({ AUTH_SECRET, [variable]: "" })).toBe(AUTH_SECRET);
+    }
+  });
+});
+
 describe("readAuthSecret", () => {
   it("returns a valid secret and needs no other variable", () => {
     expect(readAuthSecret({ AUTH_SECRET })).toBe(AUTH_SECRET);
@@ -975,6 +1096,10 @@ describe("loadEnvAtStartup", () => {
       PAYMENT_TIMEOUT_MINUTES: undefined,
       LOG_LEVEL: undefined,
       PGPASSWORD: undefined,
+      BETTER_AUTH_SECRET: undefined,
+      BETTER_AUTH_SECRETS: undefined,
+      BETTER_AUTH_URL: undefined,
+      BETTER_AUTH_TRUSTED_ORIGINS: undefined,
       ...overrides,
     };
     for (const [name, value] of Object.entries(values)) vi.stubEnv(name, value);
@@ -1014,6 +1139,34 @@ describe("loadEnvAtStartup", () => {
       });
       expect(JSON.stringify(lines)).not.toContain("Zq7canary");
     }
+  });
+
+  it("stops the start when BETTER_AUTH_SECRETS is set, logging its name and no part of it (SEC-045)", async () => {
+    for (const value of ["1:Zq7canary-x", "Zq7canary-rotated-secret-without-version"]) {
+      stubValid({ BETTER_AUTH_SECRETS: value });
+      const { loadEnvAtStartup: load, EnvValidationError: FreshError } = await import("./env");
+      const { lines, logger } = capture();
+      expect(() => load({ logger })).toThrow(FreshError);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatchObject({
+        level: "error",
+        component: "env",
+        issues: [{ variable: "BETTER_AUTH_SECRETS", rule: ENV_RULES.authLibraryVariable }],
+      });
+      expect(JSON.stringify(lines)).not.toContain("Zq7canary");
+    }
+  });
+
+  it("stops the start in production when AUTH_SECRET is weak (SEC-044)", async () => {
+    stubValid({ NODE_ENV: "production", TRUSTED_PROXY_HOPS: "1", AUTH_SECRET: "x".repeat(32) });
+    const { loadEnvAtStartup: load, EnvValidationError: FreshError } = await import("./env");
+    const { lines, logger } = capture();
+    expect(() => load({ logger })).toThrow(FreshError);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({
+      issues: [{ variable: "AUTH_SECRET", rule: ENV_RULES.authSecretWeak }],
+    });
+    expect(JSON.stringify(lines)).not.toContain("x".repeat(32));
   });
 
   it("logs one error line with variables and rules, no value, and throws", async () => {

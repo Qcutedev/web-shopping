@@ -21,7 +21,9 @@
  * constant of this file (ENV_RULES); nothing a validator library writes about its input is
  * passed on.
  *
- * Variables this file does not know are ignored. An empty string counts as "not set".
+ * Variables this file does not know are ignored, except the auth library's own variables
+ * (AUTH_LIBRARY_VARIABLES, SEC-045), which are refused when set. An empty string counts as
+ * "not set".
  */
 import { z } from "zod";
 
@@ -80,6 +82,42 @@ export const AUTH_SECRET_MIN_LENGTH = 32;
  */
 const PLACEHOLDER_MARKER = "not_a_secret";
 
+/**
+ * SEC-044: the fewest distinct characters a production `AUTH_SECRET` may have. A random value of
+ * the length DEPLOYMENT.md asks for has far more: 32 hexadecimal digits from a random source have
+ * fewer than 8 distinct characters with a probability below one in a million (simulated), and
+ * the documented base64url value of 43 characters has about 30.
+ */
+export const AUTH_SECRET_MIN_DISTINCT_CHARACTERS = 8;
+
+/**
+ * SEC-044: secret values that are public, refused when NODE_ENV=production whatever their form.
+ * The library's built-in default (better-auth 1.7.7 `DEFAULT_SECRET`, used when no secret is
+ * given) and the secret of the integration tests (tests/integration/auth/support.ts). A list of
+ * published values can never be complete; it catches the values someone is most likely to copy.
+ */
+const PUBLISHED_AUTH_SECRETS: ReadonlySet<string> = new Set([
+  "better-auth-secret-12345678901234567890",
+  "integration-test-secret-0123456789-abcdefghij",
+]);
+
+/**
+ * SEC-045: variables the auth library reads by itself from the process environment
+ * (better-auth 1.7.7 `dist/context/create-context.mjs`, `dist/context/helpers.mjs`). This
+ * application configures the library only from `AUTH_SECRET` and `APP_URL` (src/server/auth/auth.ts
+ * passes every value explicitly), so one of these being set means a configuration the operator
+ * believes is in force while it is not, or, for `BETTER_AUTH_SECRETS` and
+ * `BETTER_AUTH_TRUSTED_ORIGINS`, one that would change the signing secret or the trusted origins
+ * behind the validation of this file. They are refused in every NODE_ENV. Only the name is
+ * reported: a value of one of them may be a secret.
+ */
+export const AUTH_LIBRARY_VARIABLES = [
+  "BETTER_AUTH_SECRET",
+  "BETTER_AUTH_SECRETS",
+  "BETTER_AUTH_URL",
+  "BETTER_AUTH_TRUSTED_ORIGINS",
+] as const;
+
 /** SR-01: the pattern of a header name, and the headers that may never be named. */
 const HEADER_NAME_PATTERN = /^[A-Za-z0-9-]{1,64}$/;
 const FORBIDDEN_CLIENT_IP_HEADERS: ReadonlySet<string> = new Set([
@@ -104,6 +142,9 @@ export const ENV_RULES = {
   databaseUrlTestInProduction: "must not be set when NODE_ENV=production",
   authSecretTooShort: `must be at least ${AUTH_SECRET_MIN_LENGTH} characters long`,
   authSecretPlaceholder: "must not be a placeholder from .env.example when NODE_ENV=production",
+  authSecretWeak:
+    "must be a randomly generated value when NODE_ENV=production: too few distinct characters, a repeated pattern, or a published value",
+  authLibraryVariable: "must not be set; this application reads AUTH_SECRET and APP_URL only",
   trustedProxyHops: `must be an integer from 0 to ${MAX_TRUSTED_PROXY_HOPS}`,
   trustedProxyHopsExplicit: "must be set explicitly when NODE_ENV=production",
   trustedClientIpHeader: "must match ^[A-Za-z0-9-]{1,64}$",
@@ -294,8 +335,46 @@ function checkDatabaseUrlForProduction(
  * `NODE_ENV=production`. Only a value that passed the other rules is looked at.
  */
 function checkAuthSecretForProduction(secret: string | undefined, issues: EnvIssue[]): void {
-  if (secret !== undefined && secret.includes(PLACEHOLDER_MARKER)) {
+  if (secret === undefined) return;
+  if (secret.includes(PLACEHOLDER_MARKER)) {
     issues.push({ variable: "AUTH_SECRET", rule: ENV_RULES.authSecretPlaceholder });
+  } else if (isWeakAuthSecret(secret)) {
+    issues.push({ variable: "AUTH_SECRET", rule: ENV_RULES.authSecretWeak });
+  }
+}
+
+/** True when `text` is a shorter unit written twice or more ("abcabc"). */
+function isRepetition(text: string): boolean {
+  // The classic test: a string is periodic exactly when it occurs inside itself doubled, at an
+  // offset other than 0 and its own length.
+  return text.length > 1 && (text + text).indexOf(text, 1) < text.length;
+}
+
+/**
+ * SEC-044: a production `AUTH_SECRET` that is long enough but plainly not random. Refused: fewer
+ * than AUTH_SECRET_MIN_DISTINCT_CHARACTERS distinct characters (one repeated character, blanks),
+ * a shorter unit repeated, or a published value (also with blanks around it). Distinct
+ * characters are counted by code point. This is a floor against mistakes, not an entropy
+ * measurement: a value that passes is not thereby random.
+ */
+function isWeakAuthSecret(secret: string): boolean {
+  return (
+    new Set(secret).size < AUTH_SECRET_MIN_DISTINCT_CHARACTERS ||
+    isRepetition(secret) ||
+    PUBLISHED_AUTH_SECRETS.has(secret) ||
+    PUBLISHED_AUTH_SECRETS.has(secret.trim())
+  );
+}
+
+/**
+ * SEC-045: refuses every variable of AUTH_LIBRARY_VARIABLES that is set (an empty value counts as
+ * not set, as everywhere in this file; the library ignores an empty value too). Names only.
+ */
+function checkAuthLibraryVariables(source: EnvSource, issues: EnvIssue[]): void {
+  for (const variable of AUTH_LIBRARY_VARIABLES) {
+    if (raw(source, variable) !== undefined) {
+      issues.push({ variable, rule: ENV_RULES.authLibraryVariable });
+    }
   }
 }
 
@@ -304,12 +383,15 @@ function checkAuthSecretForProduction(secret: string | undefined, issues: EnvIss
  * first use and must not depend on the other variables (src/server/auth/config.ts delegates here).
  * It applies the same rules as `parseEnv`, so a value that starts a server is a value this
  * accepts. Throws `EnvValidationError` naming the variable and a rule, never the value. The
- * production check looks at `NODE_ENV` as written: the variable is not judged here.
+ * production check looks at `NODE_ENV` as written: the variable is not judged here. The
+ * library's own variables (SEC-045) are refused here too, so an auth instance created on first
+ * use without the start-up hook having run obeys the same rule.
  */
 export function readAuthSecret(source: EnvSource = process.env): string {
   const issues: EnvIssue[] = [];
   const secret = read(source, "AUTH_SECRET", issues);
   if (raw(source, "NODE_ENV") === "production") checkAuthSecretForProduction(secret, issues);
+  checkAuthLibraryVariables(source, issues);
   if (issues.length > 0 || secret === undefined) throw new EnvValidationError(issues);
   return secret;
 }
@@ -329,6 +411,7 @@ export function parseEnv(source: EnvSource): Env {
   const trustedClientIpHeader = read(source, "TRUSTED_CLIENT_IP_HEADER", issues);
   const paymentTimeoutMinutes = read(source, "PAYMENT_TIMEOUT_MINUTES", issues);
   const logLevel = read(source, "LOG_LEVEL", issues);
+  checkAuthLibraryVariables(source, issues);
 
   // SR-01: the two ways of trusting a proxy cannot be combined.
   if (

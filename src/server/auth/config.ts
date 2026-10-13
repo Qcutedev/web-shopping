@@ -60,6 +60,8 @@ export const AUTH_SECRET_RULES = {
   required: ENV_RULES.required,
   tooShort: ENV_RULES.authSecretTooShort,
   placeholder: ENV_RULES.authSecretPlaceholder,
+  weak: ENV_RULES.authSecretWeak,
+  libraryVariable: ENV_RULES.authLibraryVariable,
 } as const;
 
 /**

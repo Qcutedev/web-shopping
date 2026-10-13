@@ -358,22 +358,19 @@ describe("CR-66 re-check: AUTH_SECRET is refused when missing, short, or the pub
 });
 
 describe("SEC-044 a low-entropy or published AUTH_SECRET of 32 characters starts a production server", () => {
-  it.fails(
-    "production refuses a secret of one repeated character, of blanks, or one published in this repository or the library",
-    () => {
-      for (const weak of [
-        "x".repeat(32),
-        " ".repeat(32),
-        "better-auth-secret-12345678901234567890", // the library's own default (DEFAULT_SECRET)
-        "integration-test-secret-0123456789-abcdefghij", // tests/integration/auth/support.ts
-      ]) {
-        expect(
-          issuesOf(() => parseEnv(production({ AUTH_SECRET: weak }))),
-          JSON.stringify(weak),
-        ).not.toEqual([]);
-      }
-    },
-  );
+  it("production refuses a secret of one repeated character, of blanks, or one published in this repository or the library", () => {
+    for (const weak of [
+      "x".repeat(32),
+      " ".repeat(32),
+      "better-auth-secret-12345678901234567890", // the library's own default (DEFAULT_SECRET)
+      "integration-test-secret-0123456789-abcdefghij", // tests/integration/auth/support.ts
+    ]) {
+      expect(
+        issuesOf(() => parseEnv(production({ AUTH_SECRET: weak }))),
+        JSON.stringify(weak),
+      ).not.toEqual([]);
+    }
+  });
 });
 
 describe("SEC-045 BETTER_AUTH_SECRETS in the environment replaces the validated AUTH_SECRET", () => {
@@ -400,32 +397,57 @@ describe("SEC-045 BETTER_AUTH_SECRETS in the environment replaces the validated 
     expect((await auth.$context).secret).toBe(GOOD_SECRET);
   });
 
-  it.fails(
-    "a one-character BETTER_AUTH_SECRETS entry does not become the signing secret",
-    async () => {
-      vi.stubEnv("BETTER_AUTH_SECRETS", "1:x");
-      const auth = await freshAuth();
-      expect((await auth.$context).secret).toBe(GOOD_SECRET);
-    },
-  );
+  it("a one-character BETTER_AUTH_SECRETS entry does not become the signing secret", async () => {
+    vi.stubEnv("BETTER_AUTH_SECRETS", "1:x");
+    const auth = await freshAuth();
+    expect((await auth.$context).secret).toBe(GOOD_SECRET);
+  });
 
-  it.fails("a malformed BETTER_AUTH_SECRETS entry does not reach the server log", async () => {
+  // Fix note (auth, SEC-045): this case was `it.fails` with a body that required the library to
+  // throw on the malformed entry and then checked that the 500's log line did not carry it. The
+  // fix makes the library never read the variable (createAuth passes `secrets` explicitly), so
+  // there is no error left to log; asserting that one is thrown would now fail for the secure
+  // reason. The body therefore states the stronger outcome: no error at all, the validated
+  // secret in use, and, if anything were ever thrown, the same log assertions as before. The
+  // start-up refusal of the variable is checked in the next case.
+  it("a malformed BETTER_AUTH_SECRETS entry does not reach the server log", async () => {
     vi.stubEnv("BETTER_AUTH_SECRETS", `${CANARY}-rotated-secret-without-version`);
     const auth = await freshAuth();
     let thrown: unknown;
+    let secret: string | undefined;
     try {
-      await auth.$context;
+      secret = (await auth.$context).secret;
     } catch (error) {
       thrown = error;
     }
-    expect(thrown).toBeDefined();
-    // What a route handler does with an unexpected library error (routes.ts mapLibraryError
-    // passes it through unchanged; errorResponse logs it as the cause of a 500).
-    const lines: string[] = [];
-    const logger = createLogger({ level: "debug", write: (line) => lines.push(line) });
-    const response = errorResponse(thrown, { requestId: "r-1", logger });
-    expect(response.status).toBe(500);
-    expect(await response.text()).not.toContain(CANARY);
-    expect(lines.join("\n")).not.toContain(CANARY);
+    if (thrown !== undefined) {
+      // What a route handler does with an unexpected library error (routes.ts mapLibraryError
+      // passes it through unchanged; errorResponse logs it as the cause of a 500).
+      const lines: string[] = [];
+      const logger = createLogger({ level: "debug", write: (line) => lines.push(line) });
+      const response = errorResponse(thrown, { requestId: "r-1", logger });
+      expect(response.status).toBe(500);
+      expect(await response.text()).not.toContain(CANARY);
+      expect(lines.join("\n")).not.toContain(CANARY);
+    }
+    expect(thrown).toBeUndefined();
+    expect(secret).toBe(GOOD_SECRET);
+  });
+
+  it("the variable is refused at start-up by name, with no part of its value (SEC-045 fix)", () => {
+    const env = production({ BETTER_AUTH_SECRETS: `${CANARY}-rotated-secret-without-version` });
+    for (const reader of [() => parseEnv(env), () => readAuthSecret(env)]) {
+      let thrown: unknown;
+      try {
+        reader();
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(EnvValidationError);
+      expect((thrown as EnvValidationError).issues).toEqual([
+        { variable: "BETTER_AUTH_SECRETS", rule: ENV_RULES.authLibraryVariable },
+      ]);
+      expect(everyRendering(thrown)).not.toContain(CANARY);
+    }
   });
 });
