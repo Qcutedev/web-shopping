@@ -75,17 +75,30 @@ const escapeOf = (code: number): string =>
   `${BACKSLASH}u${code.toString(16).toUpperCase().padStart(4, "0")}`;
 
 /**
- * A line of SEC-043 is pinned either by its 1-based number or by its exact statement (the line
- * with leading and trailing blanks removed). A statement pin survives edits that move the line;
- * it must match exactly one line of the file. Built with `escapeOf` so this file holds no escape.
+ * A line of SEC-043 is pinned by its exact statement (the line with leading and trailing blanks
+ * removed), not by its number, so the pin survives edits that move the line. It must match
+ * exactly one line of the file. Built with `escapeOf` and `BACKSLASH` so this file holds no escape.
  */
-type LinePin = number | { statement: string };
+type LinePin = { statement: string };
 
 /** The seven lines named in SEC-043 and the code point each one held as a literal. */
 const SEC043_LINES: [string, LinePin, number[]][] = [
-  ["src/proxy.test.ts", 74, [0xa0]],
-  ["src/server/http.test.ts", 1549, [0xd7ff, 0xe000]],
-  ["src/server/http.test.ts", 2034, [0x2028]],
+  // Was src/proxy.test.ts:74.
+  [
+    "src/proxy.test.ts",
+    { statement: `"theme=dark; ${escapeOf(0xa0)}better-auth.session_token=abc",` },
+    [0xa0],
+  ],
+  // Was src/server/http.test.ts:1549.
+  [
+    "src/server/http.test.ts",
+    {
+      statement: `['"${BACKSLASH}${BACKSLASH}ud7ff${BACKSLASH}${BACKSLASH}ue000"', "${escapeOf(0xd7ff)}${escapeOf(0xe000)}"],`,
+    },
+    [0xd7ff, 0xe000],
+  ],
+  // Was src/server/http.test.ts:2034.
+  ["src/server/http.test.ts", { statement: `"Error${escapeOf(0x2028)}",` }, [0x2028]],
   // Were lines 1633 and 1642; pinned by content since commit 19ca0ad edited this file.
   [
     "src/server/logger.test.ts",
@@ -99,16 +112,25 @@ const SEC043_LINES: [string, LinePin, number[]][] = [
     { statement: `expect(raw).not.toContain("${escapeOf(0x2028)}");` },
     [0x2028],
   ],
-  ["tests/integration/harness/test-database-url.test.ts", 348, [0xa0]],
+  // Was tests/integration/harness/test-database-url.test.ts:348.
+  [
+    "tests/integration/harness/test-database-url.test.ts",
+    {
+      statement: `["a no-break space in the name", urlFor("127.0.0.1", "shop${escapeOf(0xa0)}_test")],`,
+    },
+    [0xa0],
+  ],
 ];
 
-/** The pinned line's text and a label; a statement pin must match exactly one line. */
+/** The pinned line's text and a label; the statement must match exactly one line. */
 function pinnedLine(path: string, pin: LinePin): { text: string; label: string } {
   const lines = readFileSync(join(ROOT, path), "utf8").split("\n");
-  if (typeof pin === "number")
-    return { text: lines[pin - 1] ?? "", label: `${path}:${String(pin)}` };
   const hits = lines.flatMap((text, index) => (text.trim() === pin.statement ? [index + 1] : []));
-  expect(hits, `${path}: lines equal to ${pin.statement}`).toHaveLength(1);
+  expect(
+    hits,
+    `${path}: expected exactly one line equal to ${pin.statement}, found ${String(hits.length)}` +
+      (hits.length > 1 ? ` (lines ${hits.join(", ")})` : ""),
+  ).toHaveLength(1);
   return { text: lines[(hits[0] ?? 0) - 1] ?? "", label: `${path}:${String(hits[0])}` };
 }
 

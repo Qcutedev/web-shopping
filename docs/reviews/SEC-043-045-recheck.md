@@ -76,6 +76,8 @@ A passing test suite or a clean scanner run shows only that those tests and tool
 - 14 plain cases: SEC-043 (2), SEC-044 (6), SEC-045 (5), and a SEC-046 library-behaviour pin (1, child process and 127.0.0.1 listener).
 - 3 `it.fails` cases: SEC-046, SEC-047, SEC-048. A copy with `it.fails(` changed to `it(` failed all three on their flaw assertions.
 
+Note (2026-10-13, later): the line numbers cited in this file and in SEC-043 (`src/proxy.test.ts:74`, `src/server/http.test.ts:1549` and `:2034`, `src/server/logger.test.ts:1633` and `:1642`, `tests/integration/harness/test-database-url.test.ts:348`) are the positions at the time of the re-check. The test no longer uses them: each of the seven lines is located by its exact statement, which must match exactly one line of its file (commits `885db3e` for `logger.test.ts`, and the follow-up commit for the other four).
+
 ## Commands and results
 
 | Command | Result |
