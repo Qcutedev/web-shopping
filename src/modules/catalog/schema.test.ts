@@ -7,6 +7,7 @@ import {
   DEFAULT_PAGE_SIZE,
   listCategoriesQuerySchema,
   listProductsQuerySchema,
+  MAX_PAGE,
   MAX_PAGE_SIZE,
   MAX_SEARCH_TEXT_LENGTH,
   MAX_SLUG_LENGTH,
@@ -63,9 +64,16 @@ describe("pagination", () => {
     );
   });
 
-  it("accepts a very large page (an empty page, not an error) up to 15 digits", () => {
-    expect(products("page=999999999999999").page).toBe(999_999_999_999_999);
-    expect(fieldsOf(() => products("page=1000000000000000"))[0]?.path).toBe("page");
+  it("accepts a very large page (an empty page, not an error) up to 14 digits", () => {
+    expect(products("page=99999999999999").page).toBe(99_999_999_999_999);
+    expect(fieldsOf(() => products("page=100000000000000"))[0]?.path).toBe("page");
+    expect(fieldsOf(() => products("page=999999999999999"))[0]?.path).toBe("page");
+  });
+
+  it("keeps the offset of the largest page a safe integer (CR-84)", () => {
+    expect(MAX_PAGE).toBe(99_999_999_999_999);
+    const largestOffset = (MAX_PAGE - 1) * MAX_PAGE_SIZE;
+    expect(Number.isSafeInteger(largestOffset)).toBe(true);
   });
 
   it("refuses a known parameter given twice", () => {

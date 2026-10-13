@@ -157,9 +157,12 @@ describe("GET /products", () => {
     expect(beyond.status).toBe(200);
     expect(beyond.body.data).toEqual([]);
     expect(beyond.body.meta).toEqual({ page: 99, pageSize: 50, total: 60, totalPages: 2 });
-    const far = await callProducts<ListBody<Item>>(`q=${WORD}&page=999999999999999`);
+    const far = await callProducts<ListBody<Item>>(`q=${WORD}&page=99999999999999`);
     expect(far.status).toBe(200);
     expect(far.body.data).toEqual([]);
+    // 15 digits would make the offset an unsafe integer (CR-84): refused, not served.
+    const tooFar = await callProducts<ListBody<Item>>(`q=${WORD}&page=999999999999999`);
+    expect(tooFar.status).toBe(400);
   });
 
   it("pages are disjoint and together hold every row once", async () => {

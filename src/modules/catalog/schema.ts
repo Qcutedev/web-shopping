@@ -23,11 +23,12 @@ export const DEFAULT_PAGE_SIZE = 20;
 /** Largest page size a request may ask for (REQ-N-06). A larger value is 400, not clamped. */
 export const MAX_PAGE_SIZE = 50;
 /**
- * Most digits a `page` may have. Not a product rule: it keeps the offset a safe integer
- * (15 digits times MAX_PAGE_SIZE is below 2^53). A page beyond the last one is an empty page,
- * so this bound never hides a row.
+ * Most digits a `page` may have. Not a product rule: it keeps the offset a safe integer. The
+ * largest page, 14 nines, times MAX_PAGE_SIZE is about 5.0e15, below 2^53 (about 9.0e15); 15
+ * digits would reach about 5.0e16, above it (code-review finding CR-84). A page beyond the last
+ * one is an empty page, so this bound never hides a row.
  */
-export const MAX_PAGE_DIGITS = 15;
+export const MAX_PAGE_DIGITS = 14;
 
 /** Bounds of the price filter, in satang (section 5.2; BR-02 upper bound). */
 export const MIN_PRICE_FILTER_SATANG = 0;
@@ -76,7 +77,8 @@ function integerParam(options: { min: number; max: number; maxDigits: number }) 
     .pipe(z.number().int().min(options.min).max(options.max));
 }
 
-const MAX_PAGE = Number("9".repeat(MAX_PAGE_DIGITS));
+/** The largest `page` a request may ask for. */
+export const MAX_PAGE = Number("9".repeat(MAX_PAGE_DIGITS));
 
 /** `page` and `pageSize` (section 1.7). */
 export const paginationQuerySchema = z.object({

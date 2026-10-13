@@ -543,7 +543,7 @@ Implemented in `src/modules/catalog` (service, repository, the visibility rule i
 | Rule | Detail |
 | --- | --- |
 | Numbers | `page`, `pageSize`, `minPriceSatang`, `maxPriceSatang` are decimal digits only. A sign, a blank, a fraction (`10.5`, `2.0`), an exponent (`1e3`), hexadecimal, or full-width digits are `400` |
-| `page` | At least 1, at most 15 digits. A page beyond the last one is `200` with an empty `data` and the true `total` |
+| `page` | At least 1, at most 14 digits (so the offset stays a safe integer; code-review finding CR-84). A page beyond the last one is `200` with an empty `data` and the true `total` |
 | `pageSize` | 1 to 50, default 20. `51` and above are `400` (field code `too_big`), never clamped |
 | `minPriceSatang`, `maxPriceSatang` | 0 to 100,000,000; both inclusive. `maxPriceSatang` below `minPriceSatang` is `400` on the path `maxPriceSatang` (field code `custom`); equal bounds are allowed |
 | `q` | Surrounding white space is removed. Blank (or empty) is the same as no `q`. At most **100 characters** after trimming (item 8.2-7 for this field). Matched case-insensitively as a substring of the title; `%`, `_`, and `\` are ordinary characters, not wildcards. U+0000 or a lone surrogate is `400` |
