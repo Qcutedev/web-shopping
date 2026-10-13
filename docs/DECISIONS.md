@@ -295,7 +295,10 @@ Answered by the owner on 2026-10-13 (interactive session, thirty-seventh). Items
 8. **CR-70: the owner takes the orchestrator's recommendation, which is to show the "open store" link at every width** (it is `hidden sm:inline-flex` today). That matches DESIGN_SYSTEM.md and needs no new approval.
 9. **Years are shown in the Buddhist era** (2569). This is what `src/lib/format.ts` already does; no change.
 
-Still open for the owner: the proposal strings in `src/i18n/th.ts` (owner asked for a plain explanation first), the footer labels for mock payment and simulated shipping (same), and the address cap (STATUS.md lines disagree).
+10. **The proposal strings in `src/i18n/th.ts` are approved as written** (owner: "10 use as is"): app shell (`skipToContent`, `navLabel`, `search.label`, `cart.label`, `cart.labelWithCount`, footer `navLabel` and `copyright`), `notFound.*`, `errors.*`, `pagination.*`, and the `account.*` texts of the T-030 pages. The frontend agent changes the "proposal" comments to "approved" and DESIGN_SYSTEM.md "Copy guidelines" lists them.
+11. **The footer of every page shows the two approved notice pills** `th.notice.mockPayment` ("การชำระเงินจำลอง") and `th.notice.simulatedShipping` ("การจัดส่งจำลอง") (owner: "11 as recommended"). Site-wide, not only on cart, checkout, and order pages. Frontend builds it with the T-018 shell follow-up.
+
+Still open for the owner: the address cap (STATUS.md lines disagree).
 
 ## Pending decisions for the user
 
