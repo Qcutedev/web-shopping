@@ -11,6 +11,7 @@ import { ENV_RULES } from "./server/env";
 // Made-up values. Unmistakable, so a case can assert that none of it is written.
 const DATABASE_URL = "postgresql://shop_app:Zq7canaryPw@db.example.test:5432/shop";
 const APP_URL = "https://shop.example.test";
+const AUTH_SECRET = "Zq7canary-auth-secret-0123456789abcdef";
 
 /** A valid environment for the Node.js runtime of a running server; a case overrides parts. */
 function stubEnvironment(overrides: Record<string, string | undefined> = {}): void {
@@ -20,6 +21,7 @@ function stubEnvironment(overrides: Record<string, string | undefined> = {}): vo
     NODE_ENV: "test",
     APP_URL,
     DATABASE_URL,
+    AUTH_SECRET,
     DATABASE_URL_TEST: undefined,
     PGPASSWORD: undefined,
     TRUSTED_PROXY_HOPS: undefined,

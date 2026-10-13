@@ -4,7 +4,7 @@
  *
  * No database and no framework import.
  */
-import { EnvValidationError, type EnvSource } from "../env";
+import { AUTH_SECRET_MIN_LENGTH, ENV_RULES, readAuthSecret } from "../env";
 
 /**
  * How long a session lives: 7 days from sign-in, fixed. The session is not renewed while it is
@@ -47,50 +47,20 @@ export interface ResponseFloor {
 
 export const AUTH_RESPONSE_FLOOR: ResponseFloor = Object.freeze({ minimumMs: 250, jitterMs: 25 });
 
-/** The secret signs the session cookie. Better Auth itself asks for at least 32 characters. */
-export const AUTH_SECRET_MIN_LENGTH = 32;
-
 /**
- * The marker every throwaway value of `.env.example` carries (SEC-009). A secret that contains it
- * is refused when NODE_ENV=production.
+ * `AUTH_SECRET` is validated by src/server/env.ts: at server start with the rest of the
+ * configuration (CR-66), and here, on first use of the auth instance, with the same function. The
+ * rules, their texts, and the length are defined there and re-exported under their old names, so
+ * the two can never disagree. A fault is reported by variable name and rule, never by value.
  */
-const PLACEHOLDER_MARKER = "not_a_secret";
+export { AUTH_SECRET_MIN_LENGTH, readAuthSecret };
 
 /** Rule texts of `readAuthSecret`. None of them contains a value. */
 export const AUTH_SECRET_RULES = {
-  required: "is required",
-  tooShort: `must be at least ${AUTH_SECRET_MIN_LENGTH} characters long`,
-  placeholder: "must not be a placeholder from .env.example when NODE_ENV=production",
+  required: ENV_RULES.required,
+  tooShort: ENV_RULES.authSecretTooShort,
+  placeholder: ENV_RULES.authSecretPlaceholder,
 } as const;
-
-/**
- * Reads and validates `AUTH_SECRET`. Throws `EnvValidationError` (the variable name and a rule,
- * never the value) when it is absent or empty, shorter than AUTH_SECRET_MIN_LENGTH, or, when
- * NODE_ENV=production, a placeholder. There is no default in any environment: without the
- * variable no session can be created or read, and the auth routes answer 500.
- *
- * Not kept between calls. It is read when the auth instance is created (auth.ts), once per copy
- * of that module.
- *
- * Ownership note: src/server/env.ts is the one place that is meant to read the environment, and
- * this variable belongs in its validation at start-up (devops, handed on with T-015). Until it is
- * there, this reader keeps the same rules: a fault is reported by name and rule, never by value.
- */
-export function readAuthSecret(source: EnvSource = process.env): string {
-  const value = source["AUTH_SECRET"];
-  if (value === undefined || value === "") {
-    throw new EnvValidationError([{ variable: "AUTH_SECRET", rule: AUTH_SECRET_RULES.required }]);
-  }
-  if (value.length < AUTH_SECRET_MIN_LENGTH) {
-    throw new EnvValidationError([{ variable: "AUTH_SECRET", rule: AUTH_SECRET_RULES.tooShort }]);
-  }
-  if (source["NODE_ENV"] === "production" && value.includes(PLACEHOLDER_MARKER)) {
-    throw new EnvValidationError([
-      { variable: "AUTH_SECRET", rule: AUTH_SECRET_RULES.placeholder },
-    ]);
-  }
-  return value;
-}
 
 /**
  * Cuts client-written text to at most `max` UTF-16 code units; `null` for an absent or empty

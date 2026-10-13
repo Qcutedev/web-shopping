@@ -185,6 +185,7 @@ Built in T-011 and exercised on the developer machine on 2026-10-12. `src/server
 | `NODE_ENV` | `development`, `test`, or `production`. The framework sets it (`next dev`, `next build`, `next start`); it is not written in `.env` | `development` | no |
 | `APP_URL` | An absolute `http` or `https` URL. The public origin; its scheme, host, and port are the allowed origin of the `Origin` check | Refused: required | no |
 | `DATABASE_URL` | A `postgresql://` or `postgres://` URL | Refused: required | yes (the local value in `.env.example` is a throwaway, not a secret) |
+| `AUTH_SECRET` | A string of at least 32 characters; it signs the session cookie (CR-66). Generate at least 32 random bytes, for example `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`. No default in any environment | Refused: required | yes |
 | `DATABASE_URL_TEST` | Not read by the application. Used by the integration tests, locally and in CI. Its only rule is the production refusal below | Nothing happens | no (throwaway) |
 | `PGPASSWORD` | Not used by this project: the password belongs in `DATABASE_URL`. The database driver reads the variable by itself as the password when the URL carries none, so it has one rule, the production refusal below | Nothing happens | yes |
 | `TRUSTED_PROXY_HOPS` | One digit, `0` to `5`: the number of operator-controlled reverse proxies in front of the application (SR-01). `1.0`, `+1`, `true`, and a value with a blank are refused; there is no on/off switch for trusting a proxy | `0`, except in production (below) | no |
@@ -204,6 +205,7 @@ Refusals that apply only when `NODE_ENV=production`:
 | --- | --- | --- |
 | `DATABASE_URL` | It contains one of the two local placeholder passwords of `.env.example` and `docker-compose.yml`, as written or in a form the database driver turns into one (below) | SEC-009, SEC-025 |
 | `PGPASSWORD` | It contains one of the two placeholder passwords, as written | SEC-025 |
+| `AUTH_SECRET` | It contains `not_a_secret`, the marker of every throwaway value in `.env.example` | SEC-009 |
 | `DATABASE_URL_TEST` | It is set at all | SEC-009 |
 | `TRUSTED_PROXY_HOPS` | It is not set. `0` is accepted, but it must be written | SR-01: no silent default |
 
@@ -235,11 +237,10 @@ Validated but not used by any code yet:
 
 ### Variables not validated yet (Planned)
 
-Not read by `src/server/env.ts`. Each is added to it, and to `.env.example`, by the task that introduces its reader.
+Not read by `src/server/env.ts` (`AUTH_SECRET` is, since CR-66: see the table above). Each is added to it, and to `.env.example`, by the task that introduces its reader.
 
 | Variable | Purpose | Secret |
 | --- | --- | --- |
-| `AUTH_SECRET` | Session signing secret, at least 32 random bytes | yes |
 | `UPLOAD_DIR` | Local storage directory | no |
 | `ADMIN_BOOTSTRAP_EMAIL`, `ADMIN_BOOTSTRAP_PASSWORD` | Read once by the bootstrap script (T-016); do not leave set | yes |
 | `ADMIN_BOOTSTRAP_NAME` | Optional display name of the admin the bootstrap script creates; default `Admin` | no |

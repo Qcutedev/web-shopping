@@ -44,6 +44,8 @@ export interface Env {
   appOrigin: string;
   /** `DATABASE_URL`. A secret: never log it. */
   databaseUrl: string;
+  /** `AUTH_SECRET`: signs the session cookie. A secret: never log it. */
+  authSecret: string;
   /** `TRUSTED_PROXY_HOPS` and `TRUSTED_CLIENT_IP_HEADER`, as `getClientAddress` takes them (SR-01). */
   trustedProxy: ClientAddressConfig;
   /** `PAYMENT_TIMEOUT_MINUTES`: how long an order may await payment before it is failed (D-028). */
@@ -69,6 +71,15 @@ const LOCAL_PLACEHOLDER_PASSWORDS = [
   "local_test_only_not_a_secret",
 ] as const;
 
+/** `AUTH_SECRET`: Better Auth itself asks for at least 32 characters. */
+export const AUTH_SECRET_MIN_LENGTH = 32;
+
+/**
+ * The marker every throwaway value of `.env.example` carries (SEC-009). An `AUTH_SECRET` that
+ * contains it is refused when NODE_ENV=production.
+ */
+const PLACEHOLDER_MARKER = "not_a_secret";
+
 /** SR-01: the pattern of a header name, and the headers that may never be named. */
 const HEADER_NAME_PATTERN = /^[A-Za-z0-9-]{1,64}$/;
 const FORBIDDEN_CLIENT_IP_HEADERS: ReadonlySet<string> = new Set([
@@ -91,6 +102,8 @@ export const ENV_RULES = {
   pgPasswordPlaceholder:
     "must not hold a local placeholder password from .env.example when NODE_ENV=production",
   databaseUrlTestInProduction: "must not be set when NODE_ENV=production",
+  authSecretTooShort: `must be at least ${AUTH_SECRET_MIN_LENGTH} characters long`,
+  authSecretPlaceholder: "must not be a placeholder from .env.example when NODE_ENV=production",
   trustedProxyHops: `must be an integer from 0 to ${MAX_TRUSTED_PROXY_HOPS}`,
   trustedProxyHopsExplicit: "must be set explicitly when NODE_ENV=production",
   trustedClientIpHeader: "must match ^[A-Za-z0-9-]{1,64}$",
@@ -149,6 +162,11 @@ const SCHEMAS = {
     .refine((value) => hasProtocol(value, ["postgresql:", "postgres:"]), {
       error: ENV_RULES.databaseUrl,
     }),
+  // The length counts UTF-16 code units, as `String.prototype.length` does; the rule text is the
+  // constant, never anything the validator writes about the value.
+  AUTH_SECRET: z
+    .string({ error: ENV_RULES.required })
+    .min(AUTH_SECRET_MIN_LENGTH, { error: ENV_RULES.authSecretTooShort }),
   // A string of one digit, so that "1.0", " 1", "+1", "0x1", and "true" are all refused. SR-01
   // forbids a boolean "trust proxy" switch; no such variable exists and none is accepted here.
   // The pattern is one character class, "[0-MAX]", which is right only while
@@ -272,6 +290,31 @@ function checkDatabaseUrlForProduction(
 }
 
 /**
+ * SEC-009 for `AUTH_SECRET`: a throwaway value of `.env.example` is refused when
+ * `NODE_ENV=production`. Only a value that passed the other rules is looked at.
+ */
+function checkAuthSecretForProduction(secret: string | undefined, issues: EnvIssue[]): void {
+  if (secret !== undefined && secret.includes(PLACEHOLDER_MARKER)) {
+    issues.push({ variable: "AUTH_SECRET", rule: ENV_RULES.authSecretPlaceholder });
+  }
+}
+
+/**
+ * Validates `AUTH_SECRET` alone and returns it, for the auth layer, which creates its instance on
+ * first use and must not depend on the other variables (src/server/auth/config.ts delegates here).
+ * It applies the same rules as `parseEnv`, so a value that starts a server is a value this
+ * accepts. Throws `EnvValidationError` naming the variable and a rule, never the value. The
+ * production check looks at `NODE_ENV` as written: the variable is not judged here.
+ */
+export function readAuthSecret(source: EnvSource = process.env): string {
+  const issues: EnvIssue[] = [];
+  const secret = read(source, "AUTH_SECRET", issues);
+  if (raw(source, "NODE_ENV") === "production") checkAuthSecretForProduction(secret, issues);
+  if (issues.length > 0 || secret === undefined) throw new EnvValidationError(issues);
+  return secret;
+}
+
+/**
  * Validates `source` and returns the configuration, or throws `EnvValidationError` naming every
  * variable at fault. Pure: reads nothing but its argument and logs nothing.
  */
@@ -281,6 +324,7 @@ export function parseEnv(source: EnvSource): Env {
   const nodeEnv = read(source, "NODE_ENV", issues);
   const appUrl = read(source, "APP_URL", issues);
   const databaseUrl = read(source, "DATABASE_URL", issues);
+  const authSecret = read(source, "AUTH_SECRET", issues);
   const trustedProxyHops = read(source, "TRUSTED_PROXY_HOPS", issues);
   const trustedClientIpHeader = read(source, "TRUSTED_CLIENT_IP_HEADER", issues);
   const paymentTimeoutMinutes = read(source, "PAYMENT_TIMEOUT_MINUTES", issues);
@@ -301,6 +345,7 @@ export function parseEnv(source: EnvSource): Env {
   if (nodeEnv === "production") {
     // SEC-009: nothing of the local set-up may reach a deployed environment.
     checkDatabaseUrlForProduction(source, databaseUrl, issues);
+    checkAuthSecretForProduction(authSecret, issues);
     if (raw(source, "DATABASE_URL_TEST") !== undefined) {
       issues.push({ variable: "DATABASE_URL_TEST", rule: ENV_RULES.databaseUrlTestInProduction });
     }
@@ -315,6 +360,7 @@ export function parseEnv(source: EnvSource): Env {
     nodeEnv === undefined ||
     appUrl === undefined ||
     databaseUrl === undefined ||
+    authSecret === undefined ||
     paymentTimeoutMinutes === undefined ||
     logLevel === undefined
   ) {
@@ -326,6 +372,7 @@ export function parseEnv(source: EnvSource): Env {
     appUrl,
     appOrigin: new URL(appUrl).origin,
     databaseUrl,
+    authSecret,
     trustedProxy: Object.freeze({
       trustedProxyHops: trustedProxyHops ?? 0,
       ...(trustedClientIpHeader === undefined ? {} : { trustedClientIpHeader }),

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { assertClientAddressConfig, MAX_TRUSTED_PROXY_HOPS } from "./client-address";
 import {
+  AUTH_SECRET_MIN_LENGTH,
   DEFAULT_PAYMENT_TIMEOUT_MINUTES,
   ENV_RULES,
   type EnvIssue,
@@ -10,6 +11,7 @@ import {
   MAX_PAYMENT_TIMEOUT_MINUTES,
   parseEnv,
   PAYMENT_SWEEP_INTERVAL_MS,
+  readAuthSecret,
   readDatabaseUrl,
 } from "./env";
 import { assertSameOrigin } from "./http";
@@ -18,10 +20,11 @@ import { createLogger, DEFAULT_LOG_LEVEL, setLogLevel } from "./logger";
 // Made-up values. Each is unmistakable, so a test can assert that none of it reaches a message.
 const DATABASE_URL = "postgresql://shop_app:Zq7canaryPw@db.example.test:5432/shop";
 const APP_URL = "https://shop.example.test";
+const AUTH_SECRET = "Zq7canary-auth-secret-0123456789abcdef";
 
 /** A valid development environment; a case overrides or removes what it is about. */
 function source(overrides: Record<string, string | undefined> = {}): EnvSource {
-  return { NODE_ENV: "development", APP_URL, DATABASE_URL, ...overrides };
+  return { NODE_ENV: "development", APP_URL, DATABASE_URL, AUTH_SECRET, ...overrides };
 }
 
 /** A valid production environment. */
@@ -59,6 +62,7 @@ describe("parseEnv: a valid environment", () => {
       appUrl: APP_URL,
       appOrigin: APP_URL,
       databaseUrl: DATABASE_URL,
+      authSecret: AUTH_SECRET,
       trustedProxy: { trustedProxyHops: 0 },
       paymentTimeoutMinutes: 15,
       logLevel: "info",
@@ -92,6 +96,7 @@ describe("parseEnv: a valid environment", () => {
     expect(Object.keys(env).sort()).toEqual([
       "appOrigin",
       "appUrl",
+      "authSecret",
       "databaseUrl",
       "logLevel",
       "nodeEnv",
@@ -636,6 +641,7 @@ describe("parseEnv: the error", () => {
     const error = failure({
       NODE_ENV: "production",
       DATABASE_URL: "postgresql://marketplace:local_dev_only_not_a_secret@127.0.0.1:5432/dev",
+      AUTH_SECRET: "local_dev_only_not_a_secret_0123456789",
       DATABASE_URL_TEST: "postgresql://marketplace:x@127.0.0.1:5433/shop_test",
       TRUSTED_CLIENT_IP_HEADER: "bad name",
       PAYMENT_TIMEOUT_MINUTES: "soon",
@@ -647,6 +653,7 @@ describe("parseEnv: the error", () => {
       { variable: "PAYMENT_TIMEOUT_MINUTES", rule: ENV_RULES.paymentTimeoutMinutes },
       { variable: "LOG_LEVEL", rule: ENV_RULES.logLevel },
       { variable: "DATABASE_URL", rule: ENV_RULES.databaseUrlPlaceholder },
+      { variable: "AUTH_SECRET", rule: ENV_RULES.authSecretPlaceholder },
       { variable: "DATABASE_URL_TEST", rule: ENV_RULES.databaseUrlTestInProduction },
       { variable: "TRUSTED_PROXY_HOPS", rule: ENV_RULES.trustedProxyHopsExplicit },
     ]);
@@ -659,16 +666,18 @@ describe("parseEnv: the error", () => {
         "- PAYMENT_TIMEOUT_MINUTES must be an integer from 1 to 1440",
         "- LOG_LEVEL must be debug, info, warn, or error",
         "- DATABASE_URL must not contain a local placeholder password from .env.example when NODE_ENV=production",
+        "- AUTH_SECRET must not be a placeholder from .env.example when NODE_ENV=production",
         "- DATABASE_URL_TEST must not be set when NODE_ENV=production",
         "- TRUSTED_PROXY_HOPS must be set explicitly when NODE_ENV=production",
       ].join("\n"),
     );
   });
 
-  it("names an empty environment's two required variables", () => {
+  it("names an empty environment's three required variables", () => {
     expect(issuesOf({})).toEqual([
       { variable: "APP_URL", rule: ENV_RULES.required },
       { variable: "DATABASE_URL", rule: ENV_RULES.required },
+      { variable: "AUTH_SECRET", rule: ENV_RULES.required },
     ]);
   });
 
@@ -680,6 +689,7 @@ describe("parseEnv: the error", () => {
       NODE_ENV: `${canary}-node-env`,
       APP_URL: `${canary}-app-url`,
       DATABASE_URL: `mysql://user:${canary}-db-password@db.example.test/shop`,
+      AUTH_SECRET: `${canary}-short`,
       DATABASE_URL_TEST: `postgresql://user:${canary}-test-password@127.0.0.1:5433/shop_test`,
       TRUSTED_PROXY_HOPS: `${canary}-hops`,
       TRUSTED_CLIENT_IP_HEADER: `${canary} header`,
@@ -692,6 +702,7 @@ describe("parseEnv: the error", () => {
       production({
         DATABASE_URL: `postgresql://user:${canary}local_dev_only_not_a_secret@db.example.test/shop`,
         DATABASE_URL_TEST: `${canary}-test`,
+        AUTH_SECRET: `${canary}-not_a_secret-0123456789abcdef`,
         TRUSTED_PROXY_HOPS: "2",
         TRUSTED_CLIENT_IP_HEADER: `X-${canary}`,
       }),
@@ -710,11 +721,127 @@ describe("parseEnv: the error", () => {
       "NODE_ENV",
       "APP_URL",
       "DATABASE_URL",
+      "AUTH_SECRET",
       "TRUSTED_PROXY_HOPS",
       "TRUSTED_CLIENT_IP_HEADER",
       "PAYMENT_TIMEOUT_MINUTES",
       "LOG_LEVEL",
     ]);
+  });
+});
+
+describe("parseEnv: AUTH_SECRET (CR-66)", () => {
+  it("is required, and an empty value counts as not set", () => {
+    for (const value of [undefined, ""]) {
+      expect(issuesOf(source({ AUTH_SECRET: value }))).toEqual([
+        { variable: "AUTH_SECRET", rule: ENV_RULES.required },
+      ]);
+    }
+  });
+
+  it("is required in every NODE_ENV, with no default", () => {
+    for (const nodeEnv of ["development", "test"]) {
+      expect(issuesOf(source({ NODE_ENV: nodeEnv, AUTH_SECRET: undefined }))).toEqual([
+        { variable: "AUTH_SECRET", rule: ENV_RULES.required },
+      ]);
+    }
+    expect(issuesOf(production({ AUTH_SECRET: undefined }))).toEqual([
+      { variable: "AUTH_SECRET", rule: ENV_RULES.required },
+    ]);
+  });
+
+  it("refuses a value shorter than the minimum and accepts one of exactly the minimum", () => {
+    expect(AUTH_SECRET_MIN_LENGTH).toBe(32);
+    expect(issuesOf(source({ AUTH_SECRET: "x".repeat(AUTH_SECRET_MIN_LENGTH - 1) }))).toEqual([
+      { variable: "AUTH_SECRET", rule: ENV_RULES.authSecretTooShort },
+    ]);
+    const exact = "x".repeat(AUTH_SECRET_MIN_LENGTH);
+    expect(parseEnv(source({ AUTH_SECRET: exact })).authSecret).toBe(exact);
+  });
+
+  it("accepts the placeholder of .env.example outside production only", () => {
+    const placeholder = "local_dev_only_not_a_secret_0123456789";
+    for (const nodeEnv of ["development", "test"]) {
+      expect(parseEnv(source({ NODE_ENV: nodeEnv, AUTH_SECRET: placeholder })).authSecret).toBe(
+        placeholder,
+      );
+    }
+    expect(issuesOf(production({ AUTH_SECRET: placeholder }))).toEqual([
+      { variable: "AUTH_SECRET", rule: ENV_RULES.authSecretPlaceholder },
+    ]);
+  });
+
+  it("reports a short placeholder once, with the length rule", () => {
+    expect(issuesOf(production({ AUTH_SECRET: "not_a_secret" }))).toEqual([
+      { variable: "AUTH_SECRET", rule: ENV_RULES.authSecretTooShort },
+    ]);
+  });
+
+  it("never puts the value in the message, the issues, or the stack", () => {
+    const secrets = [
+      "Zq7canary-short",
+      `Zq7canary-not_a_secret-${"0".repeat(AUTH_SECRET_MIN_LENGTH)}`,
+    ];
+    for (const secret of secrets) {
+      for (const env of [source({ AUTH_SECRET: secret }), production({ AUTH_SECRET: secret })]) {
+        if (secret.length >= AUTH_SECRET_MIN_LENGTH && env.NODE_ENV !== "production") continue;
+        const error = failure(env);
+        expect(error.issues.length).toBeGreaterThan(0);
+        expect(JSON.stringify([error.message, error.issues, error.stack])).not.toContain(
+          "Zq7canary",
+        );
+      }
+    }
+  });
+});
+
+describe("readAuthSecret", () => {
+  it("returns a valid secret and needs no other variable", () => {
+    expect(readAuthSecret({ AUTH_SECRET })).toBe(AUTH_SECRET);
+  });
+
+  it("applies the same rules as parseEnv, with the same variable and rule texts", () => {
+    const cases: Array<[Record<string, string | undefined>, string]> = [
+      [{}, ENV_RULES.required],
+      [{ AUTH_SECRET: "" }, ENV_RULES.required],
+      [{ AUTH_SECRET: "x".repeat(AUTH_SECRET_MIN_LENGTH - 1) }, ENV_RULES.authSecretTooShort],
+      [
+        { AUTH_SECRET: "local_dev_only_not_a_secret_0123456789", NODE_ENV: "production" },
+        ENV_RULES.authSecretPlaceholder,
+      ],
+    ];
+    for (const [env, rule] of cases) {
+      let thrown: unknown;
+      try {
+        readAuthSecret(env);
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(EnvValidationError);
+      expect((thrown as EnvValidationError).issues).toEqual([{ variable: "AUTH_SECRET", rule }]);
+    }
+  });
+
+  it("accepts the placeholder outside production", () => {
+    const placeholder = "local_dev_only_not_a_secret_0123456789";
+    expect(readAuthSecret({ AUTH_SECRET: placeholder, NODE_ENV: "development" })).toBe(placeholder);
+    expect(readAuthSecret({ AUTH_SECRET: placeholder })).toBe(placeholder);
+  });
+
+  it("does not leak the value", () => {
+    for (const env of [
+      { AUTH_SECRET: "Zq7canary-short" },
+      { AUTH_SECRET: "Zq7canary-not_a_secret-0123456789abcdef", NODE_ENV: "production" },
+    ]) {
+      let thrown: unknown;
+      try {
+        readAuthSecret(env);
+      } catch (error) {
+        thrown = error;
+      }
+      const error = thrown as EnvValidationError;
+      expect(JSON.stringify([error.message, error.issues, error.stack])).not.toContain("Zq7canary");
+    }
   });
 });
 
@@ -766,6 +893,7 @@ describe("getEnv and import", () => {
     vi.stubEnv("NODE_ENV", "test");
     vi.stubEnv("APP_URL", APP_URL);
     vi.stubEnv("DATABASE_URL", DATABASE_URL);
+    vi.stubEnv("AUTH_SECRET", AUTH_SECRET);
     vi.stubEnv("DATABASE_URL_TEST", undefined);
     vi.stubEnv("TRUSTED_PROXY_HOPS", "2");
     vi.stubEnv("TRUSTED_CLIENT_IP_HEADER", undefined);
@@ -784,6 +912,7 @@ describe("getEnv and import", () => {
     vi.stubEnv("NODE_ENV", "test");
     vi.stubEnv("APP_URL", undefined);
     vi.stubEnv("DATABASE_URL", DATABASE_URL);
+    vi.stubEnv("AUTH_SECRET", AUTH_SECRET);
     vi.stubEnv("TRUSTED_PROXY_HOPS", undefined);
     vi.stubEnv("TRUSTED_CLIENT_IP_HEADER", undefined);
     vi.stubEnv("PAYMENT_TIMEOUT_MINUTES", undefined);
@@ -799,6 +928,7 @@ describe("getEnv and import", () => {
     vi.stubEnv("NODE_ENV", "test");
     vi.stubEnv("APP_URL", APP_URL);
     vi.stubEnv("DATABASE_URL", DATABASE_URL);
+    vi.stubEnv("AUTH_SECRET", AUTH_SECRET);
     vi.stubEnv("TRUSTED_PROXY_HOPS", undefined);
     vi.stubEnv("TRUSTED_CLIENT_IP_HEADER", undefined);
     vi.stubEnv("PAYMENT_TIMEOUT_MINUTES", undefined);
@@ -838,6 +968,7 @@ describe("loadEnvAtStartup", () => {
       NODE_ENV: "test",
       APP_URL,
       DATABASE_URL,
+      AUTH_SECRET,
       DATABASE_URL_TEST: undefined,
       TRUSTED_PROXY_HOPS: undefined,
       TRUSTED_CLIENT_IP_HEADER: undefined,
@@ -856,6 +987,33 @@ describe("loadEnvAtStartup", () => {
     const { lines, logger } = capture();
     expect(load({ logger }).appOrigin).toBe(APP_URL);
     expect(lines).toEqual([]);
+  });
+
+  it("stops the start when AUTH_SECRET is missing or weak, naming the variable and no value (CR-66)", async () => {
+    for (const [overrides, rule] of [
+      [{ AUTH_SECRET: undefined }, ENV_RULES.required],
+      [{ AUTH_SECRET: "Zq7canary-short" }, ENV_RULES.authSecretTooShort],
+      [
+        {
+          NODE_ENV: "production",
+          TRUSTED_PROXY_HOPS: "1",
+          AUTH_SECRET: "Zq7canary-not_a_secret-0123456789abcdef",
+        },
+        ENV_RULES.authSecretPlaceholder,
+      ],
+    ] as const) {
+      stubValid(overrides);
+      const { loadEnvAtStartup: load, EnvValidationError: FreshError } = await import("./env");
+      const { lines, logger } = capture();
+      expect(() => load({ logger })).toThrow(FreshError);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatchObject({
+        level: "error",
+        component: "env",
+        issues: [{ variable: "AUTH_SECRET", rule }],
+      });
+      expect(JSON.stringify(lines)).not.toContain("Zq7canary");
+    }
   });
 
   it("logs one error line with variables and rules, no value, and throws", async () => {
