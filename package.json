@@ -32,6 +32,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.0",
     "@tailwindcss/turbopack": "^4",
     "@testing-library/dom": "10.4.2",
     "@testing-library/react": "16.3.3",
@@ -46,6 +47,7 @@
     "prettier-plugin-tailwindcss": "^0.8.1",
     "prisma": "7.10.0",
     "tailwindcss": "^4",
+    "tsx": "4.23.15",
     "typescript": "^5",
     "vitest": "^5.0.3"
   },

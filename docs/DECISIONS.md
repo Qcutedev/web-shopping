@@ -282,6 +282,17 @@ Recorded by the database agent on 2026-10-13, from the code review of T-015 and 
 4. **Consequence.** The library's `databaseHooks.user.*` do not run for an admin created this way. None is configured today; only `databaseHooks.session.create.before` exists, and it runs when the admin signs in. A change that adds a user hook must make the script do the same work, or record why admins are exempt. The seed (T-014) needs sample sellers, which sign-up cannot create, so it will insert its users the same way.
 5. **Documents.** DATA_MODEL.md sections 4.1 and 6.1 say the rows are inserted directly, not "through the auth library".
 
+### D-036 Owner answers: tooling, sign-up, sign-in route, account lock
+Answered by the owner on 2026-10-13 (interactive session, thirty-seventh). Items 1 and 2 are done; 3 and 4 are recorded here and wait for an owner agent; 5 is unclear.
+
+1. **`tsx` added** (`tsx` 4.23.15, exact pin, devDependency). `pnpm admin:bootstrap` can now start (`pnpm exec tsx -e` ran; the script itself has not been run against a database). Its `esbuild` install script is refused with `allowBuilds: esbuild: false` in `pnpm-workspace.yaml`, like the other build scripts; without that line `pnpm install --frozen-lockfile` exits 1 with `ERR_PNPM_IGNORED_BUILDS`. T-014 seed may use `tsx` as its runner.
+2. **Playwright added** (`@playwright/test` 1.64.0, exact pin, devDependency) for T-060. The Chromium download (`playwright install chromium`) is not done yet. CR-49 (how e2e reaches a production build) is still to be ruled.
+3. **CR-57: sign-up signs the new user in.** After a successful sign-up the response carries the session cookie. Open technical conflict, to be settled by auth and security before it is built: a duplicate email must not be distinguishable from a new one (current behaviour, SEC-035 floor), and a session cookie on one and not the other would reveal it. The owner's wish stands; the likely shape is that a duplicate email also gets a response of the same form and the user signs in normally. Not decided here.
+4. **Sign-in route is `/sign-in`.** `src/server/auth/redirect.ts` and `src/proxy.ts` change from `/login` to `/sign-in`; `ROUTES.signIn` is unchanged.
+5. **SEC-032 and SEC-049: not settled.** The owner wrote "5 use it" ("5 ใช้เลย"). That fits the recommendation for SEC-049 (use the proposed rule) better than SEC-032 (fix or accept; recommended: fix), and the numbers in the question list do not line up. Asked again; nothing is built for either until answered.
+
+Still open for the owner: SEC-032, SEC-049, SEC-041 (Thai combining characters), CR-70, the T-018 questions (Buddhist year, proposal strings, footer labels), and the address cap (STATUS.md lines disagree).
+
 ## Pending decisions for the user
 
 Undecided, none blocking the MVP: marketplace name and logo, real product photos, hosting provider for staging and production, production object storage, email provider, payment gateway.
