@@ -1546,7 +1546,7 @@ describe("readJsonBody refuses a string that is not well-formed Unicode (SR-05 i
       [`"${HIGH}${LOW}"`, "\u{1f600}"],
       ['"\\uD83D\\uDE00"', "\u{1f600}"],
       [`"${HIGH}${LOW}${HIGH}${LOW}"`, "\u{1f600}\u{1f600}"],
-      ['"\\ud7ff\\ue000"', "퟿"],
+      ['"\\ud7ff\\ue000"', "\uD7FF\uE000"],
       ['"\\ufffd"', "�"],
       ['"\\u0000"', "\u0000"],
       // An escaped backslash followed by the letters: six ordinary characters, not an escape.
@@ -2031,7 +2031,7 @@ describe("a request body that stops arriving (SR-05 item 10, SEC-024)", () => {
       "Error\n",
       "\nError",
       "Error\r",
-      "Error ",
+      "Error\u2028",
       "Error\u0000",
       'a\n{"level":"error"}',
       "somchai@example.com",

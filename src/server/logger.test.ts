@@ -1630,7 +1630,7 @@ describe("security lines are written whatever the level (SEC-031)", () => {
 
   it("a security line is redacted and escaped like any other line", () => {
     const { log, entry, line } = capture({ level: "error" });
-    log.security("warn", "Sign-in failed for somchai@example.com ", {
+    log.security("warn", "Sign-in failed for somchai@example.com\u2028", {
       email: "somchai@example.com",
       password: "hunter2-secret",
       clientIp: "203.0.113.7",
@@ -1639,7 +1639,7 @@ describe("security lines are written whatever the level (SEC-031)", () => {
     const raw = line();
     expect(raw).not.toContain("somchai");
     expect(raw).not.toContain("hunter2");
-    expect(raw).not.toContain(" ");
+    expect(raw).not.toContain("\u2028");
     expect(entry()).toMatchObject({
       email: REDACTED,
       password: REDACTED,
