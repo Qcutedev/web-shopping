@@ -191,6 +191,7 @@ No route handler exists yet, so "implemented" below means that a tested helper e
 | Convention | Helper | State |
 | --- | --- | --- |
 | Request id | `resolveRequestId`, `trustsIncomingRequestId` (`request-id.ts`); every envelope helper writes the header (`http.ts`) | Implemented |
+| Handler frame | `handleRequest(request, run)` (`request-frame.ts`): `connection()` before the `try`, the request id, the request's logger, and `errorResponse` for anything `run` throws; the guards are the first lines of `run`, in the order of section 1.8. The trust setting of the request id is read in one place, `requestIdTrust()` (`getEnv().trustedProxy`). `handlePublicGet` (`public-get.ts`) is a thin wrapper used by the six catalog handlers (code-review finding CR-83) | Implemented (2026-10-13). The four auth routes still open their own scope in `src/server/auth/routes.ts` and read the trust setting from their runtime; moving them onto the frame is auth's |
 | Client address behind "per IP" | `getClientAddress` (`client-address.ts`) | Implemented |
 | Origin | `assertSameOrigin(request, allowedOrigin)` (`http.ts`). The allowed origin is an argument; reading and validating `APP_URL` belongs to `src/server/env.ts` (devops) | Helper implemented; no handler calls it yet |
 | Content type | `assertContentType(request, expected)` (`http.ts`); `readJsonBody` calls it for JSON; a handler without a body calls it directly ([section 1.2](#12-mutations-without-a-body)) | Helper implemented; no handler calls it yet |
