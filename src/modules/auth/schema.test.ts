@@ -107,7 +107,18 @@ describe("signUpBodySchema", () => {
   });
 
   it("refuses a name with nothing visible in it (SEC-037)", () => {
-    for (const name of ["​", "​‌‍", "ㅤ", "ᅟᅠ", "ﾠ", "⠀", "⠀ ㅤ", "ั", "́́"]) {
+    for (const name of [
+      "\u200b",
+      "\u200b\u200c\u200d",
+      "\u3164",
+      "\u115f\u1160",
+      "\uffa0",
+      "\u2800",
+      "\u2800 \u3164",
+      "\u0e31",
+      "\u0301\u0301",
+      "\u{1d159}",
+    ]) {
       expect(signUpBodySchema.safeParse({ ...valid, name }).success, JSON.stringify(name)).toBe(
         false,
       );
@@ -115,7 +126,40 @@ describe("signUpBodySchema", () => {
   });
 
   it("accepts short and decorated names that have one visible character", () => {
-    for (const name of ["ก", "A", "1", "-", "❤️", "\u{1f469}‍\u{1f4bb}", "ㅤA"]) {
+    for (const name of ["\u0e01", "A", "1", "-", "\u2764\ufe0f", "\u{1f469}\u200d\u{1f4bb}"]) {
+      expect(signUpBodySchema.safeParse({ ...valid, name }).success, JSON.stringify(name)).toBe(
+        true,
+      );
+    }
+  });
+
+  it("refuses unassigned, private-use, and default-ignorable characters next to a visible one (SEC-039)", () => {
+    for (const hidden of [
+      "\u2065",
+      "\ufff0",
+      "\u{e0000}",
+      "\ufdd0",
+      "\uffff",
+      "\u{10ffff}",
+      "\ue000",
+      "\u{f0000}",
+      "\u034f",
+      "\u17b4",
+      "\u180b",
+      "\ufe00",
+      "\u{e0100}",
+      "\u3164",
+      "\u1160",
+    ]) {
+      const name = `Admin${hidden}`;
+      expect(signUpBodySchema.safeParse({ ...valid, name }).success, JSON.stringify(name)).toBe(
+        false,
+      );
+    }
+  });
+
+  it("keeps the emoji and text presentation selectors U+FE0E and U+FE0F (SEC-039)", () => {
+    for (const name of ["\u2764\ufe0f", "\u2764\ufe0e", "1\ufe0f\u20e3"]) {
       expect(signUpBodySchema.safeParse({ ...valid, name }).success, JSON.stringify(name)).toBe(
         true,
       );

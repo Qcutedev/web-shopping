@@ -42,13 +42,13 @@ function libraryCookies(cookieHeader: string): Map<string, string> {
 
 describe("SEC-038: cookie names padded beyond SP and HTAB", () => {
   it("the engine trims more than SP and HTAB (U+00A0, U+000B, U+000C, U+FEFF among them)", () => {
-    for (const char of [" ", "\u000b", "\u000c", "﻿", "　", " "]) {
+    for (const char of ["\u00a0", "\u000b", "\u000c", "\ufeff", "\u3000", "\u2028"]) {
       expect(TRIMMED_EXTRA).toContain(char);
     }
   });
 
   it("the parser alone reads a padded name as the session cookie (why the filter exists)", () => {
-    expect(parseCookies(` ${HOST}=attacker; ${HOST}=victim`).get(HOST)).toBe("attacker");
+    expect(parseCookies(`\u00a0${HOST}=attacker; ${HOST}=victim`).get(HOST)).toBe("attacker");
   });
 
   it("no padded name reaches the library, at the start or the end of the name", () => {
@@ -74,12 +74,12 @@ describe("SEC-038: cookie names padded beyond SP and HTAB", () => {
   });
 
   it("removes the Cookie header when no pair is left, and copies the other headers unchanged", () => {
-    const original = new Headers({ cookie: ` ${HOST}=x`, "user-agent": "ua", origin: "o" });
+    const original = new Headers({ cookie: `\u00a0${HOST}=x`, "user-agent": "ua", origin: "o" });
     const copy = headersForAuthLibrary(original);
     expect(copy.has("cookie")).toBe(false);
     expect(copy.get("user-agent")).toBe("ua");
     expect(copy.get("origin")).toBe("o");
-    expect(original.get("cookie")).toBe(` ${HOST}=x`);
+    expect(original.get("cookie")).toBe(`\u00a0${HOST}=x`);
     expect(headersForAuthLibrary(new Headers({ "user-agent": "ua" })).has("cookie")).toBe(false);
   });
 
@@ -88,7 +88,7 @@ describe("SEC-038: cookie names padded beyond SP and HTAB", () => {
       expect(hasSessionCookie(`${name}=v`)).toBe(true);
       expect(hasSessionCookie(` \t${name} =v`)).toBe(true);
       expect(hasSessionCookie(`${name}=`)).toBe(false);
-      expect(hasSessionCookie(` ${name}=v`)).toBe(false);
+      expect(hasSessionCookie(`\u00a0${name}=v`)).toBe(false);
       expect(hasSessionCookie(`${name}\u000c=v`)).toBe(false);
     }
     expect(hasSessionCookie(null)).toBe(false);

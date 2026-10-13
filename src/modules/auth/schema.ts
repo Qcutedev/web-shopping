@@ -18,7 +18,7 @@ export const NAME_MAX = 100;
 export const EMAIL_MAX = 254;
 
 /**
- * Characters a display name may not contain anywhere (Unicode General_Category):
+ * Characters a display name may not contain anywhere:
  *
  *   - `Cc` controls: C0, DEL, and C1, and so U+0000, which a PostgreSQL text column cannot hold;
  *   - `Cf` format characters, except U+200B zero-width space, U+200C zero-width non-joiner (Thai
@@ -28,21 +28,32 @@ export const EMAIL_MAX = 254;
  *     hyphen, U+180E, U+FEFF, U+2060 to U+2064, U+206A to U+206F, U+FFF9 to U+FFFB, and the tag
  *     characters U+E0001 and U+E0020 to U+E007F (hidden ASCII text);
  *   - `Zl` U+2028 and `Zp` U+2029, mandatory line breaks (SEC-037: "Admin" over "Verified seller");
- *   - `Cs` lone surrogates, which are not text.
+ *   - `Cs` lone surrogates, which are not text;
+ *   - `Cn` unassigned code points and noncharacters, and `Co` private-use characters (SEC-039):
+ *     no agreed glyph, and an unassigned one can later be assigned with any property;
+ *   - `Default_Ignorable_Code_Point`, except U+200B to U+200D (above) and the emoji variation
+ *     selectors U+FE0E (text style) and U+FE0F (emoji style) (SEC-039). This refuses U+034F,
+ *     U+17B4, U+17B5, U+180B to U+180F, the Hangul fillers U+115F, U+1160, U+3164, U+FFA0, and the
+ *     variation selectors U+FE00 to U+FE0D and U+E0100 to U+E01EF, which map one-to-one onto
+ *     bytes and so could carry hidden data in a name.
+ *
+ * The exceptions are written first as a negative lookahead; the source uses escapes only.
  */
-const NAME_FORBIDDEN_CHAR = String.raw`(?![​-‍])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}]`;
+const NAME_FORBIDDEN_CHAR = String.raw`(?![\u200B-\u200D\uFE0E\uFE0F])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}\p{Cn}\p{Co}\p{Default_Ignorable_Code_Point}]`;
 
 /**
  * A character that is visibly drawn: a letter, number, punctuation, or symbol, but not one of the
- * blank-looking fillers U+115F, U+1160, U+3164, U+FFA0 (Hangul fillers) and U+2800 (braille
- * blank). A name needs at least one (SEC-037: no name that looks blank, such as U+200B alone).
+ * blank-looking U+115F, U+1160, U+3164, U+FFA0 (Hangul fillers, also refused above), U+2800
+ * (braille blank), and U+1D159 (musical symbol null notehead, SEC-039). A name needs at least one
+ * (SEC-037: no name that looks blank, such as U+200B alone).
  */
-const NAME_VISIBLE_CHAR = String.raw`(?![ᅟᅠㅤﾠ⠀])[\p{L}\p{N}\p{P}\p{S}]`;
+const NAME_VISIBLE_CHAR = String.raw`(?![\u115F\u1160\u3164\uFFA0\u2800\u{1D159}])[\p{L}\p{N}\p{P}\p{S}]`;
 
 /**
  * Matches a whole name that contains no forbidden character and at least one visible one. Every
  * later free-text name field (store name, address name) uses the same rule. The source is
- * written with escapes only, so this file never contains one of these characters itself.
+ * written with escapes only, so this file never contains one of these characters itself
+ * (SEC-040; tests/security/sec037-038-recheck.test.ts checks every non-test file under src).
  */
 export const NAME_ALLOWED_TEXT = new RegExp(
   String.raw`^(?=[\s\S]*?${NAME_VISIBLE_CHAR})(?:(?!${NAME_FORBIDDEN_CHAR})[\s\S])*$`,

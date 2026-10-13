@@ -7,8 +7,8 @@
  * Every character outside ASCII is written as an escape, so this source holds no invisible or
  * format character; the last describe block checks that for every file under tests/security.
  *
- * An `it.fails` case states the secure behaviour of an open finding (SEC-039, SEC-040): it is
- * reported as an expected failure while the flaw exists and turns red when the code is fixed.
+ * The SEC-039 and SEC-040 cases state the secure behaviour of those findings. They were
+ * `it.fails` while the flaws existed and became `it`, bodies unchanged, with the fix (auth).
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -157,23 +157,20 @@ describe("SEC-039 names accept unassigned, private-use, and default-ignorable ch
   ];
 
   for (const [label, name] of cases) {
-    it.fails(`${label} is refused`, () => {
+    it(`${label} is refused`, () => {
       expect(accepted(name)).toBe(false);
     });
   }
 
-  it.fails(
-    "no Default_Ignorable_Code_Point other than U+200B to U+200D, U+FE0E, U+FE0F is accepted after a letter",
-    () => {
-      const keep = new Set([0x200b, 0x200c, 0x200d, 0xfe0e, 0xfe0f]);
-      const passed = scalarsWith(/^\p{Default_Ignorable_Code_Point}$/u).filter(
-        (code) => !keep.has(code) && NAME_ALLOWED_TEXT.test(`A${String.fromCodePoint(code)}`),
-      );
-      expect(ranges(passed)).toEqual([]);
-    },
-  );
+  it("no Default_Ignorable_Code_Point other than U+200B to U+200D, U+FE0E, U+FE0F is accepted after a letter", () => {
+    const keep = new Set([0x200b, 0x200c, 0x200d, 0xfe0e, 0xfe0f]);
+    const passed = scalarsWith(/^\p{Default_Ignorable_Code_Point}$/u).filter(
+      (code) => !keep.has(code) && NAME_ALLOWED_TEXT.test(`A${String.fromCodePoint(code)}`),
+    );
+    expect(ranges(passed)).toEqual([]);
+  });
 
-  it.fails("no unassigned or private-use code point is accepted after a letter", () => {
+  it("no unassigned or private-use code point is accepted after a letter", () => {
     const passed = scalarsWith(/^[\p{Cn}\p{Co}]$/u).filter((code) =>
       NAME_ALLOWED_TEXT.test(`A${String.fromCodePoint(code)}`),
     );
@@ -291,12 +288,9 @@ describe("Source hygiene: no literal invisible characters (SEC-040)", () => {
     expect(filesWithInvisible(sourceFiles(join(ROOT, "tests/security"), () => true))).toEqual([]);
   });
 
-  it.fails(
-    "no non-test source file under src holds one (the name rule is written with escapes only)",
-    () => {
-      expect(
-        filesWithInvisible(sourceFiles(join(ROOT, "src"), (path) => !isTestFile(path))),
-      ).toEqual([]);
-    },
-  );
+  it("no non-test source file under src holds one (the name rule is written with escapes only)", () => {
+    expect(filesWithInvisible(sourceFiles(join(ROOT, "src"), (path) => !isTestFile(path)))).toEqual(
+      [],
+    );
+  });
 });
