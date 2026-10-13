@@ -302,6 +302,15 @@ Answered by the owner on 2026-10-13 (interactive session, thirty-seventh). Items
 
 No owner question is open now.
 
+### D-037 Sign-up signs the user in; decoy cookie for a duplicate email (CR-57)
+Auth agent, 2026-10-13, built in `510ebe7`; settles D-036 item 3.
+
+Sign-up answers 200 `{accepted:true}` with one session `Set-Cookie` line in every accepted case. For a new email it is a real session, created by the library's sign-in with the chosen password. For an email that already has an account it is a decoy with the same name, attributes, and value form and no session; nothing changes and nobody is signed in, whatever password was sent. A session the request came with is deleted in both cases. The client learns the outcome from `GET /api/v1/auth/session` and, on `null`, shows the sign-in form with a generic message (REQ-C-01). Residual: that session check reveals whether the email was registered, at one sign-up allowance per probe; unavoidable without email verification.
+
+SEC-041 limit of 3 is built as `NAME_MAX_MARK_RUN = 3` (a run of 4 or more combining marks or U+200B to U+200D is refused). Two stricter rules are not built and wait for an owner answer: U+FE0E/U+FE0F only after an emoji, and no two kept invisible characters in a row.
+
+SEC-032 (D-036 item 5) is proposed, not built: see the SEC-032 entry in `docs/SECURITY.md`. Building it needs `src/server/rate-limit.ts` (backend-api) and a security ruling on the SR-02 capacity split.
+
 ## Pending decisions for the user
 
 Undecided, none blocking the MVP: marketplace name and logo, real product photos, hosting provider for staging and production, production object storage, email provider, payment gateway.
