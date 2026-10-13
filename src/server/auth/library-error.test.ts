@@ -100,13 +100,30 @@ describe("reduceLibraryError", () => {
     expect(reduced.cause).toEqual({ errorClass: "BetterAuthError" });
   });
 
-  // The control: without the reduction, the same error reaches the log with its message. This is
-  // the case of tests/security/sec043-045-recheck.test.ts (SEC-048); it shows that the next case
-  // fails when the fix is removed.
-  it("control: errorResponse given the raw error logs the quoted value", () => {
-    const { logger, text } = capture();
-    errorResponse(canaryError(), { requestId: "r-1", logger });
+  // The control (CR-79): the logger's redaction does not recognise the quoted value, so an error
+  // handed to it as it is reaches the log with its message. The line below is the one
+  // `errorResponse` wrote before 5dfa22f (`err: appError.cause ?? appError`, the raw error). It
+  // shows that the canary is a value the logger lets through, so the cases that assert its
+  // absence fail when the reduction is removed; it is the case of
+  // tests/security/sec043-045-recheck.test.ts (SEC-048).
+  it("control: the logger given the raw error writes the quoted value", () => {
+    const { lines, logger, text } = capture();
+    logger.error("Unhandled error", { code: "INTERNAL_ERROR", err: canaryError() });
+    expect(lines).toHaveLength(1);
     expect(text()).toContain(CANARY);
+  });
+
+  // Since 5dfa22f (SEC-048, http part) `errorResponse` reduces any error itself, so even a raw
+  // error that skipped `reduceLibraryError` is logged by its class name only.
+  it("errorResponse given the raw error logs the class name and not the quoted value", async () => {
+    const { lines, logger, text } = capture();
+    const response = errorResponse(canaryError(), { requestId: "r-1", logger });
+    expect(response.status).toBe(500);
+    expect(await response.text()).not.toContain(CANARY);
+    expect(lines).toHaveLength(1);
+    expect(text()).toContain("BetterAuthError");
+    expect(text()).not.toContain(CANARY);
+    expect(text()).not.toContain("BETTER_AUTH_SECRETS");
   });
 
   it("errorResponse given the reduced error logs the class name and the request id only", async () => {
