@@ -6,6 +6,7 @@ import {
   AppError,
   conflict,
   CONFLICT_REASON_PATTERN,
+  describeErrorForLog,
   ERROR_CODES,
   ERROR_STATUS,
   type ErrorCode,
@@ -37,6 +38,7 @@ import {
   RequestBodyAbortedError,
   sellerNotApproved,
   unauthenticated,
+  UNKNOWN_ERROR_CLASS,
   unsupportedMediaType,
   validationError,
 } from "./errors";
@@ -560,5 +562,143 @@ describe("jsonBodyTooDeep and requestBodyAborted (provisional, items 8.2-12 and 
       },
     });
     expect(reads).toEqual({ name: 1, code: 1 });
+  });
+});
+
+describe("describeErrorForLog (SEC-048, SR-04)", () => {
+  const CANARY = "Zq7SECRETcanary";
+  const QUOTED = `Invalid entry: "${CANARY}"; password=${CANARY}; somchai@example.com`;
+
+  /** Everything a record holds, own keys included, as one text. */
+  function everything(record: object): string {
+    return JSON.stringify(record) + Reflect.ownKeys(record).map(String).join(",");
+  }
+
+  class BetterAuthLikeError extends Error {
+    constructor(message: string) {
+      super(message, { cause: new Error(QUOTED) });
+      this.name = "BetterAuthError";
+    }
+  }
+  class APIError extends Error {
+    readonly status = "BAD_REQUEST";
+    readonly statusCode = 400;
+    readonly body = { code: "FAILED_TO_CREATE_USER", message: QUOTED };
+  }
+  class PrismaClientKnownRequestError extends Error {
+    readonly code = "P2002";
+    readonly meta = { target: [CANARY] };
+    readonly clientVersion = "7.0.0";
+    constructor(message: string) {
+      super(message);
+      this.name = "PrismaClientKnownRequestError";
+    }
+  }
+  class UnnamedError extends Error {}
+
+  it.each<[string, unknown, object]>([
+    ["an Error", new Error(QUOTED), { errorClass: "Error" }],
+    ["a TypeError", new TypeError(QUOTED), { errorClass: "TypeError" }],
+    [
+      "a library error with a nested cause",
+      new BetterAuthLikeError(QUOTED),
+      { errorClass: "BetterAuthError" },
+    ],
+    [
+      "an APIError-like error",
+      new APIError(QUOTED),
+      { errorClass: "APIError", status: 400, code: "FAILED_TO_CREATE_USER" },
+    ],
+    [
+      "a Prisma-like error",
+      new PrismaClientKnownRequestError(QUOTED),
+      { errorClass: "PrismaClientKnownRequestError", code: "P2002" },
+    ],
+    ["a subclass that sets no name", new UnnamedError(QUOTED), { errorClass: "UnnamedError" }],
+    ["a thrown string", QUOTED, { errorClass: "string" }],
+    ["a thrown number", 42, { errorClass: "number" }],
+    ["null", null, { errorClass: "null" }],
+    ["undefined", undefined, { errorClass: "undefined" }],
+    [
+      "a plain object",
+      { message: QUOTED, stack: QUOTED, name: "somchai", status: 418, code: "P2021" },
+      { errorClass: "Object", status: 418, code: "P2021" },
+    ],
+    [
+      "an AppError",
+      internalError(new Error(QUOTED)),
+      { errorClass: "AppError", status: 500, code: "INTERNAL_ERROR" },
+    ],
+  ])("%s is reduced to its labels, with nothing of its text", (_label, value, expected) => {
+    const record = describeErrorForLog(value);
+    expect(record).toEqual(expected);
+    expect(Object.isFrozen(record)).toBe(true);
+    for (const leaked of [CANARY, "password", "somchai", "Invalid entry", "    at "]) {
+      expect(everything(record)).not.toContain(leaked);
+    }
+  });
+
+  it("drops each label that is not of the right form, and keeps the others", () => {
+    const named = Object.assign(new Error("x"), {
+      name: `Error: ${CANARY}`,
+      code: "socket hang up",
+      statusCode: 1000,
+      status: "500",
+    });
+    expect(describeErrorForLog(named)).toEqual({ errorClass: "Error" });
+    const longCode = Object.assign(new Error("x"), { code: "A".repeat(65), status: 503 });
+    expect(describeErrorForLog(longCode)).toEqual({ errorClass: "Error", status: 503 });
+    const numericCode = Object.assign(new Error("x"), { code: -4077, statusCode: 502 });
+    expect(describeErrorForLog(numericCode)).toEqual({
+      errorClass: "Error",
+      status: 502,
+      code: "-4077",
+    });
+  });
+
+  it("the name of an object that is not an Error is never used as its class", () => {
+    expect(describeErrorForLog({ name: "Somchai" })).toEqual({ errorClass: "Object" });
+    expect(
+      describeErrorForLog(Object.assign(Object.create(null) as object, { name: "Somchai" })),
+    ).toEqual({
+      errorClass: UNKNOWN_ERROR_CLASS,
+    });
+  });
+
+  it("is idempotent, and keeps a record made by the auth code", () => {
+    const once = describeErrorForLog(new APIError(QUOTED));
+    expect(describeErrorForLog(once)).toEqual(once);
+    expect(describeErrorForLog({ errorClass: "BetterAuthError" })).toEqual({
+      errorClass: "BetterAuthError",
+    });
+    // A record whose class is not of the right form is not trusted.
+    expect(describeErrorForLog({ errorClass: QUOTED })).toEqual({ errorClass: "Object" });
+  });
+
+  it("never throws, whatever the value does when it is read", () => {
+    const hostile = new Proxy(
+      {},
+      {
+        get() {
+          throw new Error(QUOTED);
+        },
+        getPrototypeOf() {
+          throw new Error(QUOTED);
+        },
+      },
+    );
+    expect(describeErrorForLog(hostile)).toEqual({ errorClass: UNKNOWN_ERROR_CLASS });
+    const getters = new Error("x");
+    Object.defineProperty(getters, "name", {
+      get() {
+        throw new Error(QUOTED);
+      },
+    });
+    Object.defineProperty(getters, "code", {
+      get() {
+        throw new Error(QUOTED);
+      },
+    });
+    expect(describeErrorForLog(getters)).toEqual({ errorClass: "Error" });
   });
 });

@@ -82,6 +82,7 @@ import type { ZodType } from "zod";
 import {
   type AppError,
   type ErrorCode,
+  describeErrorForLog,
   type ErrorDetails,
   forbidden,
   fromZodError,
@@ -568,6 +569,22 @@ export async function readJsonBody(
 }
 
 /**
+ * The cause of the 500 that `parseInput` throws when the schema throws. The log records only
+ * its class name (SEC-048), so the name itself says what went wrong. What the schema threw is
+ * kept as its `cause`, in memory only.
+ */
+export class ParseInputSchemaError extends Error {
+  constructor(cause: unknown) {
+    super(
+      "parseInput: the schema threw instead of returning a result. A schema with an async " +
+        "refinement or transform is not supported here, and a refinement must not throw.",
+      { cause },
+    );
+    this.name = "ParseInputSchemaError";
+  }
+}
+
+/**
  * Validates request input (a body, a query, path parameters, or headers) against `schema`.
  * Returns the parsed value, or throws 400 VALIDATION_ERROR with `details.fields`.
  * This is the explicit conversion that makes a schema failure the client's fault; use it for
@@ -575,21 +592,15 @@ export async function readJsonBody(
  *
  * A schema with an async refinement or an async transform is not supported: parsing here is
  * synchronous. Such a schema, or one whose refinement throws, is a server fault and becomes
- * 500 INTERNAL_ERROR with an explanatory cause in the log; move the asynchronous check (for
- * example a uniqueness lookup) into the service.
+ * 500 INTERNAL_ERROR whose cause is a ParseInputSchemaError, the class name the log shows; move
+ * the asynchronous check (for example a uniqueness lookup) into the service.
  */
 export function parseInput<T>(schema: ZodType<T>, input: unknown): T {
   let result: ReturnType<typeof schema.safeParse>;
   try {
     result = schema.safeParse(input);
   } catch (error) {
-    throw internalError(
-      new Error(
-        "parseInput: the schema threw instead of returning a result. A schema with an async " +
-          "refinement or transform is not supported here, and a refinement must not throw.",
-        { cause: error },
-      ),
-    );
+    throw internalError(new ParseInputSchemaError(error));
   }
   if (!result.success) throw fromZodError(result.error);
   return result.data;
@@ -598,11 +609,13 @@ export function parseInput<T>(schema: ZodType<T>, input: unknown): T {
 /**
  * Normalises anything thrown into an AppError.
  * An AppError passes through. Everything else, a ZodError included, becomes a generic
- * INTERNAL_ERROR that keeps the original only as `cause` (see "Validation errors" above).
+ * INTERNAL_ERROR (see "Validation errors" above) whose cause is `describeErrorForLog(error)`:
+ * the class name, and a status and a code of the right form, never the message or the stack
+ * (SEC-048; SECURITY.md SR-04). The original is not kept.
  */
 export function toAppError(error: unknown): AppError {
   if (isAppError(error)) return error;
-  return internalError(error);
+  return internalError(describeErrorForLog(error));
 }
 
 export function errorBody(error: AppError, requestId: string): ErrorBody {
@@ -615,9 +628,15 @@ export function errorBody(error: AppError, requestId: string): ErrorBody {
  * `Cache-Control: no-store`.
  *
  * When a logger is given (it redacts what it writes, see src/server/logger.ts):
- *   - a 5xx is logged at error level with the original error, stack included;
- *   - a 4xx that carries a `cause` is logged at warn level with that cause, because the
- *     service attached it for the operator (for example the constraint behind a CONFLICT);
+ *   - a 5xx is logged at error level with `describeErrorForLog` of its cause (of the AppError
+ *     itself when it has none);
+ *   - a 4xx that carries a `cause` is logged at warn level with `describeErrorForLog` of that
+ *     cause, because the service attached it for the operator (for example the database error
+ *     behind a CONFLICT, recorded as its class and its code `P2002`);
+ *   - in both, what is logged of the error is its class name, status, and code only: never a
+ *     message, a stack, or a nested cause, whoever threw it (SEC-048, SR-04). A message of a
+ *     library or of the database client can quote configuration, input, or query arguments,
+ *     which no pattern of the logger recognises;
  *   - a request body that broke off (RequestBodyAbortedError; SR-05 item 10, SEC-024) is logged
  *     at warn level, one line with a fixed message: the code, the status, and the class name
  *     and code of the source's error. No stack, no error message, nothing of the body, and no
@@ -639,13 +658,13 @@ export function errorResponse(
   } else if (appError.status >= 500) {
     context.logger?.error("Unhandled error", {
       code: appError.code,
-      err: appError.cause ?? appError,
+      err: describeErrorForLog(appError.cause ?? appError),
     });
   } else if (appError.cause !== undefined) {
     context.logger?.warn("Request failed with a recorded cause", {
       code: appError.code,
       status: appError.status,
-      err: appError.cause,
+      err: describeErrorForLog(appError.cause),
     });
   }
 

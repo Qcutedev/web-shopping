@@ -266,13 +266,13 @@ describe("validation errors", () => {
       expect(text).not.toContain(leaked);
     }
 
-    // The original ZodError is the cause and is what the server logs.
     expect(toAppError(result.error).code).toBe("INTERNAL_ERROR");
-    expect(toAppError(result.error).cause).toBe(result.error);
+    expect(toAppError(result.error).cause).toEqual({ errorClass: "ZodError" });
     expect(lines).toHaveLength(1);
     const logged = entry(0);
     expect(logged).toMatchObject({ level: "error", code: "INTERNAL_ERROR", requestId });
-    expect(JSON.stringify(logged.err)).toContain("commissionBasisPoints");
+    expect(logged.err).toEqual({ errorClass: "ZodError" });
+    expect(lines[0]).not.toContain("commissionBasisPoints");
   });
 });
 
@@ -313,17 +313,17 @@ describe("unknown errors", () => {
     }
   });
 
-  it("toAppError keeps the original as the cause for server-side logging", () => {
-    const original = new Error("boom");
+  it("toAppError keeps a record of the original's labels as the cause, not the original (SEC-048)", () => {
+    const original = Object.assign(new Error("boom"), { code: "ECONNRESET" });
     const mapped = toAppError(original);
     expect(mapped.code).toBe("INTERNAL_ERROR");
-    expect(mapped.cause).toBe(original);
+    expect(mapped.cause).toEqual({ errorClass: "Error", code: "ECONNRESET" });
 
     const domain = notFound();
     expect(toAppError(domain)).toBe(domain);
   });
 
-  it("logs the original error on the server for 5xx, and nothing for a 4xx without a cause", () => {
+  it("logs the class name of a 5xx error on the server, and nothing for a 4xx without a cause", () => {
     const { logger, lines, entry } = captureLog();
 
     errorResponse(notFound(), { requestId, logger });
@@ -333,12 +333,12 @@ describe("unknown errors", () => {
     expect(lines).toHaveLength(1);
     const logged = entry(0);
     expect(logged).toMatchObject({ level: "error", requestId, code: "INTERNAL_ERROR" });
-    const err = logged.err as { message?: unknown; stack?: unknown };
-    expect(err.message).toBe("database exploded");
-    expect(typeof err.stack).toBe("string");
+    expect(logged.err).toEqual({ errorClass: "Error" });
+    expect(lines[0]).not.toContain("database exploded");
+    expect(lines[0]).not.toContain("    at ");
   });
 
-  it("logs the cause of a 4xx at warn level, through the redacting logger", async () => {
+  it("logs the cause of a 4xx at warn level, by class name and code only (SEC-048)", async () => {
     const { logger, lines, entry } = captureLog();
     const cause = new Error(
       'Unique constraint failed on "Product_storeId_sku_key"; seller somchai@example.com; password=hunter2',
@@ -354,9 +354,8 @@ describe("unknown errors", () => {
     expect(lines).toHaveLength(1);
     const logged = entry(0);
     expect(logged).toMatchObject({ level: "warn", requestId, code: "CONFLICT", status: 409 });
-    const err = logged.err as { name?: unknown; message?: unknown };
-    expect(err.name).toBe("Error");
-    expect(String(err.message)).toContain("Product_storeId_sku_key");
+    expect(logged.err).toEqual({ errorClass: "Error" });
+    expect(lines.join("\n")).not.toContain("Product_storeId_sku_key");
     expect(lines.join("\n")).not.toContain("somchai@example.com");
     expect(lines.join("\n")).not.toContain("hunter2");
   });
@@ -667,7 +666,8 @@ describe("parseInput and asynchronous schemas (N14)", () => {
     expect(text).not.toContain("async");
     expect(text).not.toContain("MARKER-SKU");
     expect(lines).toHaveLength(1);
-    expect(JSON.stringify(entry(0).err)).toContain("parseInput");
+    expect(entry(0).err).toEqual({ errorClass: "ParseInputSchemaError" });
+    expect(lines[0]).not.toContain("MARKER-SKU");
   });
 
   it("a schema with an async transform fails the same way", async () => {
@@ -2368,5 +2368,96 @@ describe("handler pattern in the order of refusals (CR-09; D-031 point 4, D-032 
     expect(outcome.status).toBe(200);
     expect(outcome.reads).toBeGreaterThan(0);
     expect(served).toEqual([{ quantity: 2 }]);
+  });
+});
+
+describe("only the class name, status, and code of an unexpected error are logged (SEC-048)", () => {
+  // Free text that no pattern of the logger masks: a value quoted after a colon.
+  const CANARY = "Zq7SECRETcanary";
+  const quoted = `Invalid BETTER_AUTH_SECRETS entry: "${CANARY}-rotated"`;
+  // What `internalError` in ./errors does; built here so that the imports above keep their lines.
+  const internalError = (cause?: unknown) => new AppError("INTERNAL_ERROR", { cause });
+
+  class LibraryError extends Error {
+    constructor(message: string) {
+      super(message, { cause: new Error(`nested ${CANARY}`) });
+      this.name = "LibraryError";
+    }
+  }
+  class PrismaLikeError extends Error {
+    readonly code = "P2002";
+    readonly meta = { target: [CANARY] };
+    constructor(message: string) {
+      super(message);
+      this.name = "PrismaClientKnownRequestError";
+    }
+  }
+
+  const cases: [string, unknown, number, string, object][] = [
+    ["a raw library error", new LibraryError(quoted), 500, "error", { errorClass: "LibraryError" }],
+    [
+      "a raw database error",
+      new PrismaLikeError(quoted),
+      500,
+      "error",
+      { errorClass: "PrismaClientKnownRequestError", code: "P2002" },
+    ],
+    [
+      "a service's internal error wrapping a library error",
+      internalError(new LibraryError(quoted)),
+      500,
+      "error",
+      { errorClass: "LibraryError" },
+    ],
+    [
+      "a CONFLICT whose cause is a database error",
+      conflict("DUPLICATE_SKU", { cause: new PrismaLikeError(quoted) }),
+      409,
+      "warn",
+      { errorClass: "PrismaClientKnownRequestError", code: "P2002" },
+    ],
+    [
+      "an AppError whose cause is another AppError with a raw cause",
+      internalError(internalError(new Error(quoted))),
+      500,
+      "error",
+      { errorClass: "AppError", status: 500, code: "INTERNAL_ERROR" },
+    ],
+    ["a thrown string", quoted, 500, "error", { errorClass: "string" }],
+  ];
+
+  it.each(cases)("%s", async (_label, thrown, status, level, err) => {
+    const { logger, lines, entry } = captureLog();
+    const response = errorResponse(thrown, { requestId, logger });
+    expect(response.status).toBe(status);
+    expect(await response.text()).not.toContain(CANARY);
+    expect(lines).toHaveLength(1);
+    expect(entry(0)).toMatchObject({ level, requestId });
+    expect(entry(0).err).toEqual(err);
+    for (const leaked of [CANARY, "BETTER_AUTH_SECRETS", "nested", "    at ", "stack"]) {
+      expect(lines[0]).not.toContain(leaked);
+    }
+  });
+
+  it("a record made by the auth code is logged as it is", () => {
+    const { logger, entry } = captureLog();
+    errorResponse(
+      internalError({ errorClass: "APIError", status: 400, code: "FAILED_TO_CREATE_USER" }),
+      {
+        requestId,
+        logger,
+      },
+    );
+    expect(entry(0).err).toEqual({
+      errorClass: "APIError",
+      status: 400,
+      code: "FAILED_TO_CREATE_USER",
+    });
+  });
+
+  it("a 500 without a cause is logged by its own labels", () => {
+    const { logger, entry } = captureLog();
+    errorResponse(internalError(), { requestId, logger });
+    expect(entry(0).err).toEqual({ errorClass: "AppError", status: 500, code: "INTERNAL_ERROR" });
   });
 });

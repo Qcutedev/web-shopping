@@ -7,9 +7,10 @@
  *
  * What reaches a client is exactly `code`, `message`, and `details`. Anything
  * attached as `cause` stays on the server. `errorResponse` in src/server/http.ts
- * writes it to the log through the redacting logger: at error level for a 5xx,
- * at warn level for a 4xx that carries a cause (a request body that broke off is
- * the one error with a log line of its own, see RequestBodyAbortedError).
+ * writes a record of its labels to the log (`describeErrorForLog`: class name,
+ * status, and code; never its message or stack; SEC-048): at error level for a
+ * 5xx, at warn level for a 4xx that carries a cause (a request body that broke
+ * off is the one error with a log line of its own, see RequestBodyAbortedError).
  * Therefore `message` and `details`
  * must be written as public, developer-facing English text and data: never a
  * database message, a stack, SQL, a secret, or an id the caller has no right to
@@ -317,18 +318,120 @@ const SOURCE_ERROR_LABEL_PATTERNS = {
 function readLabel(value: unknown, key: "name" | "code"): string | undefined {
   try {
     if (typeof value !== "object" || value === null) return undefined;
-    const found: unknown = (value as Record<string, unknown>)[key];
-    let label: string;
-    if (typeof found === "string") label = found;
-    else if (key === "code" && typeof found === "number" && Number.isFinite(found)) {
-      label = String(found);
-    } else return undefined;
-    // The length is judged first, so the pattern never runs over a long text.
-    if (label.length > MAX_SOURCE_ERROR_LABEL_LENGTH) return undefined;
-    return SOURCE_ERROR_LABEL_PATTERNS[key].test(label) ? label : undefined;
+    return asLabel((value as Record<string, unknown>)[key], key);
   } catch {
     return undefined;
   }
+}
+
+/** `found` when it has the form of a `kind` label (SOURCE_ERROR_LABEL_PATTERNS); never throws. */
+function asLabel(found: unknown, kind: "name" | "code"): string | undefined {
+  let label: string;
+  if (typeof found === "string") label = found;
+  else if (kind === "code" && typeof found === "number" && Number.isFinite(found)) {
+    label = String(found);
+  } else return undefined;
+  // The length is judged first, so the pattern never runs over a long text.
+  if (label.length > MAX_SOURCE_ERROR_LABEL_LENGTH) return undefined;
+  return SOURCE_ERROR_LABEL_PATTERNS[kind].test(label) ? label : undefined;
+}
+
+/** `value[key]`, or undefined when `value` is not an object or the read throws. */
+function readProperty(value: unknown, key: string): unknown {
+  try {
+    if ((typeof value !== "object" && typeof value !== "function") || value === null) {
+      return undefined;
+    }
+    return (value as Record<string, unknown>)[key];
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * What the server log keeps of an error that `errorResponse` logs (SEC-048; SECURITY.md SR-04):
+ * labels only, never a message, a stack, a nested cause, or any other property.
+ *
+ *   errorClass  the class name (`TypeError`, `BetterAuthError`, `PrismaClientKnownRequestError`),
+ *               `typeof` for a thrown primitive, `null` for null, UNKNOWN_ERROR_CLASS otherwise
+ *   status      an integer HTTP status from 100 to 599, read from `statusCode` or `status`
+ *   code        an error code (`P2002`, `ECONNRESET`, an `APIError` body's `code`)
+ *
+ * Each label is kept only when it has the form of SOURCE_ERROR_LABEL_PATTERNS (SEC-027), so prose,
+ * an address, or a quoted value cannot pass as one.
+ */
+export interface ErrorLogRecord {
+  readonly errorClass: string;
+  readonly status?: number;
+  readonly code?: string;
+}
+
+/** The `errorClass` recorded when no class name of the right form can be read. */
+export const UNKNOWN_ERROR_CLASS = "UnknownError";
+
+function isHttpStatus(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599;
+}
+
+/** True for an object whose prototype is `Object.prototype` or null. Never throws. */
+function isPlainObject(value: unknown): boolean {
+  try {
+    if (typeof value !== "object" || value === null) return false;
+    const prototype: unknown = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  } catch {
+    return false;
+  }
+}
+
+/** The class name of `value`, as described at ErrorLogRecord. Never throws. */
+function errorClassOf(value: unknown): string {
+  if (value === null) return "null";
+  if (typeof value !== "object" && typeof value !== "function") return typeof value;
+  // A record made earlier (here, or by src/server/auth/library-error.ts) keeps its class name,
+  // so that reducing twice gives the same record.
+  if (isPlainObject(value)) {
+    const recorded = asLabel(readProperty(value, "errorClass"), "name");
+    if (recorded !== undefined) return recorded;
+  }
+  let prototype: unknown;
+  let isError = false;
+  try {
+    prototype = Object.getPrototypeOf(value);
+    isError = value instanceof Error;
+  } catch {
+    return UNKNOWN_ERROR_CLASS;
+  }
+  const constructorName = asLabel(
+    readProperty(readProperty(prototype, "constructor"), "name"),
+    "name",
+  );
+  // The `name` of an object that is not an Error is data (SR-04 redacts the key `name`).
+  if (!isError) return constructorName ?? UNKNOWN_ERROR_CLASS;
+  const name = asLabel(readProperty(value, "name"), "name");
+  if (name !== undefined && name !== "Error") return name;
+  if (constructorName !== undefined && constructorName !== "Object") return constructorName;
+  return name ?? UNKNOWN_ERROR_CLASS;
+}
+
+/**
+ * Reduces anything thrown, or recorded as a cause, to an ErrorLogRecord. Every unexpected error
+ * is treated the same way: a library's, the database client's, the runtime's, and this
+ * application's own. Applying it to a record it returned gives an equal record. Never throws.
+ */
+export function describeErrorForLog(value: unknown): ErrorLogRecord {
+  const errorClass = errorClassOf(value);
+  const statusCode = readProperty(value, "statusCode");
+  const statusValue = isHttpStatus(statusCode) ? statusCode : readProperty(value, "status");
+  const status = isHttpStatus(statusValue) ? statusValue : undefined;
+  const code =
+    asLabel(readProperty(value, "code"), "code") ??
+    asLabel(readProperty(readProperty(value, "body"), "code"), "code");
+  return Object.freeze({
+    errorClass,
+    ...(status === undefined ? {} : { status }),
+    ...(code === undefined ? {} : { code }),
+  });
 }
 
 /**

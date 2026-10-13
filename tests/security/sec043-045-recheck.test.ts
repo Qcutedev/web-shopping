@@ -446,21 +446,18 @@ describe("SEC-046 the library's telemetry variables override `telemetry: { enabl
 });
 
 describe("SEC-048 an unexpected library error is logged with its message (SEC-045 remediation item 3, not done)", () => {
-  it.fails(
-    "errorResponse logs a library error by class name only, so a value quoted in its message stays out of the log",
-    async () => {
-      // The pre-fix SEC-045 message form, now unreachable for that variable, stands for any library
-      // error that quotes configuration or input.
-      const error = new BetterAuthError(
-        `Invalid BETTER_AUTH_SECRETS entry: "${CANARY}-rotated". Expected format: "<version>:<secret>"`,
-      );
-      const lines: string[] = [];
-      const logger = createLogger({ level: "debug", write: (line) => lines.push(line) });
-      const response = errorResponse(error, { requestId: "r-1", logger });
-      expect(response.status).toBe(500);
-      expect(await response.text()).not.toContain(CANARY);
-      expect(lines.join("\n")).toContain("BetterAuthError");
-      expect(lines.join("\n")).not.toContain(CANARY);
-    },
-  );
+  it("errorResponse logs a library error by class name only, so a value quoted in its message stays out of the log", async () => {
+    // The pre-fix SEC-045 message form, now unreachable for that variable, stands for any library
+    // error that quotes configuration or input.
+    const error = new BetterAuthError(
+      `Invalid BETTER_AUTH_SECRETS entry: "${CANARY}-rotated". Expected format: "<version>:<secret>"`,
+    );
+    const lines: string[] = [];
+    const logger = createLogger({ level: "debug", write: (line) => lines.push(line) });
+    const response = errorResponse(error, { requestId: "r-1", logger });
+    expect(response.status).toBe(500);
+    expect(await response.text()).not.toContain(CANARY);
+    expect(lines.join("\n")).toContain("BetterAuthError");
+    expect(lines.join("\n")).not.toContain(CANARY);
+  });
 });
