@@ -10,3 +10,8 @@ allowBuilds:
 # project ever uses MySQL.
 overrides:
   mysql2: "-"
+  # CR-82: Prisma 7.10 with @prisma/adapter-pg starts the relation loads of one query together on
+  # the single pg client of an interactive transaction. pg 8 queues them (with a DeprecationWarning);
+  # pg 9 removes the queueing and such a transaction would fail. Keep pg on major 8 until the
+  # adapter stops overlapping queries or the code follows DATA_MODEL.md section 7.8 everywhere.
+  pg: "^8"
