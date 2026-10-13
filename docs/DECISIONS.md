@@ -42,6 +42,7 @@ Decisions marked `PROPOSED` are not yet validated against the installed stack; e
 | D-032 | 2026-10-11 | After the security review: store status is judged before the body is read (amends D-031 point 4); every restore deletes all sessions and re-applies restrictions | ACCEPTED |
 | D-033 | 2026-10-12 | Owner answers to the parked questions: CR-15, REQUIREMENTS Q38 to Q41, filter chips, DEPLOYMENT DEP-Q1 to DEP-Q3, DEP-Q5, DEP-Q6, DEP-Q8, DEP-Q9 | ACCEPTED |
 | D-034 | 2026-10-13 | SEC-036: the unused optional peer `mysql2` is removed from the dependency tree with a pnpm override; no audit exception list | ACCEPTED |
+| D-035 | 2026-10-13 | CR-53: the admin bootstrap inserts `User` and `Account` directly in the auth library's formats, in one transaction | ACCEPTED |
 
 ## Details
 
@@ -271,6 +272,15 @@ Made by devops on 2026-10-13, following the security review of T-015 and T-016. 
 2. **Choice.** `overrides: { mysql2: "-" }` in `pnpm-workspace.yaml` removes the package from the resolution. Observed: the lockfile loses `mysql2` and its `denque`, `seq-queue`, and `sqlstring` dependencies, `pnpm audit --prod` exits 0 with "No known vulnerabilities found", and `pnpm install --frozen-lockfile` is clean.
 3. **Why not an exception list.** A list of ignored advisories would stay in force for a package that could come back with a new advisory. Removing the package leaves the audit unfiltered: every real advisory still fails it. Raising `mysql2` to a patched version (tried: `>=3.23.1` resolved to 3.24.5) fixes the advisories too but keeps an unused database driver installed and adds `@types/node` to the Prisma peer set.
 4. **Reversal.** If the project ever uses MySQL, delete the override in the same change that adds the use.
+
+### D-035 The admin bootstrap writes its rows directly (CR-53)
+Recorded by the database agent on 2026-10-13, from the code review of T-015 and T-016 (CR-53), where the orchestrator accepted the code as the correct design and ruled that the documents change. Technical only; BR-26 and D-028 are unchanged.
+
+1. **Choice.** `bootstrapAdmin` (`src/modules/auth/bootstrap-admin.ts`) inserts one `User` (role `ADMIN`) and one credential `Account` with Prisma inside one `$transaction`. It does not call the auth library to create them. The rows have the library's formats: ids from the library's `generateRandomString` (32 characters of `a-z`, `A-Z`, `0-9`), the email trimmed and lower-cased, `providerId` `credential`, `accountId` equal to the user id, and the password hashed with the library's own `hashPassword` (scrypt).
+2. **Why.** The library declares `role` with `input: false` (`src/server/auth/auth.ts`), so any user it creates is a `CUSTOMER`. Creating through the library and then updating the role would be an update of an existing row to `ADMIN`, which DATA_MODEL.md section 7.6 forbids and BR-26 relies on. Loosening `input: false` would reopen the escalation that the tests in `tests/integration/auth/guards-and-escalation.test.ts` close.
+3. **Proof.** "creates an active ADMIN with a credential account, and the admin can sign in" (`tests/integration/auth/bootstrap-admin.test.ts`): the admin signs in through the application's sign-in route, so the formats are the library's.
+4. **Consequence.** The library's `databaseHooks.user.*` do not run for an admin created this way. None is configured today; only `databaseHooks.session.create.before` exists, and it runs when the admin signs in. A change that adds a user hook must make the script do the same work, or record why admins are exempt. The seed (T-014) needs sample sellers, which sign-up cannot create, so it will insert its users the same way.
+5. **Documents.** DATA_MODEL.md sections 4.1 and 6.1 say the rows are inserted directly, not "through the auth library".
 
 ## Pending decisions for the user
 

@@ -2,7 +2,7 @@
 
 Owner: database agent. This is the **design** for schema v1, corrected on 2026-10-11 after the T-004 planning review ([reviews/T-004-findings.md](reviews/T-004-findings.md)) and the owner answers in [DECISIONS.md](DECISIONS.md) D-025, and again the same day for the second batch of owner answers, D-026 (OQ-25 to OQ-50), the follow-up answers, D-028, and the technical rulings, D-029. **Schema v1 exists since T-013 (2026-10-11):** `prisma/schema.prisma` and the migration `prisma/migrations/20261011121529_init_schema_v1`. The schema file and the migration are authoritative and this document must match them. [Section 21](#21-schema-v1-as-built-t-013) lists what was built, every constraint and index by name, and what T-013 validated.
 
-Items marked **to validate in T-015** are technical points that depend on the installed Better Auth version; they are not asserted here. The items that were marked "to validate in T-013" have been validated against Prisma 7.10.0 and PostgreSQL 18.6; their results are in [section 19.4](#194-to-validate-against-installed-versions). No owner question is open in this document: every one raised here has been answered, and [section 19](#19-open-points) lists the answers and the few technical points that remain for later tasks.
+The items that were marked "to validate in T-015" depend on the installed Better Auth version; T-015 settled them against Better Auth 1.7.7, and [section 6.1](#61-auth-tables-s19) gives each result with the test that proves it. The items that were marked "to validate in T-013" have been validated against Prisma 7.10.0 and PostgreSQL 18.6; their results are in [section 19.4](#194-to-validate-against-installed-versions). No owner question is open in this document: every one raised here has been answered, and [section 19](#19-open-points) lists the answers and the few technical points that remain for later tasks.
 
 ## 1. Conventions
 
@@ -79,11 +79,21 @@ Application status lives on `SellerApplication`. Store status holds only states 
 
   | The email given to the script | What the script does | Rows changed |
   | --- | --- | --- |
-  | Has no account | Creates the user through the auth library, with role `ADMIN` | one `User`, one `Account` inserted |
+  | Has no account | Inserts the user with role `ADMIN` and its credential account directly, in the auth library's formats, in one transaction (see below) | one `User`, one `Account` inserted |
   | Belongs to an account whose role is `ADMIN` | Finishes without change (not an error) | none |
   | Belongs to an account whose role is `CUSTOMER` or `SELLER` | **Refuses** | none |
 
   The unique constraint on the email is the backstop: if the script's lookup and its insert race with a sign-up for the same address, the insert fails and nothing is promoted. A seller therefore can never become an admin, which keeps "one role per user" and "an admin owns no store" true without a constraint.
+
+  **How the admin rows are written (D-035, CR-53).** The script does not go through the auth library. The library declares `role` as a field no input may set (`input: false` in `src/server/auth/auth.ts`), so a user it creates is always a `CUSTOMER`; creating one and then raising its role would be an update of an existing row to `ADMIN`, which [section 7.6](#76-status-columns-and-what-each-guarded-update-needs) forbids ("No statement anywhere updates an existing row to `ADMIN`"). The script (`src/modules/auth/bootstrap-admin.ts`, `bootstrapAdmin`) therefore inserts both rows itself with Prisma, inside one `$transaction`, in the formats the library would write:
+
+  - `User.id` and `Account.id`: the library's id format, 32 characters of `a-z`, `A-Z`, `0-9` (`generateRandomString` from `better-auth/crypto`);
+  - `User.email`: trimmed and lower-cased, as the library stores it; `emailVerified` `false`, `isActive` `true`;
+  - `Account`: `providerId` `credential`, `accountId` equal to the user id, `password` the library's own `hashPassword` (scrypt, the hasher the instance in `src/server/auth/auth.ts` uses, since it configures no other).
+
+  A unique violation on the email (a racing sign-up or a second run) rolls the whole transaction back, so no user without an account is left behind. The integration test "creates an active ADMIN with a credential account, and the admin can sign in" (`tests/integration/auth/bootstrap-admin.test.ts`) proves the formats: the admin signs in through `POST /api/v1/auth/sign-in`.
+
+  Consequence: **the library's `databaseHooks.user.*` do not run for an admin created this way.** None is configured today (`auth.ts` has only `databaseHooks.session.create.before`, which does run when the admin signs in). Anyone who adds a user hook must make the script do the same work, or record why admins are exempt.
 
 ### 4.2 Product status and moderation (S5, OQ-04, OQ-05, OQ-06, OQ-35, OQ-36, OQ-42)
 
@@ -296,7 +306,7 @@ Two separate figures for the seller, both counted **only over products that are 
 
 ### 6.1 Auth tables (S19)
 
-The auth library is Better Auth (D-004), pinned at **1.7.7** (D-031). It owns four tables. **T-013 created them from the published schema of that version**; the library itself is not installed yet. T-015 installs exactly 1.7.7 and checks the tables against the running library; if it finds a difference, the database agent adds a new corrective migration (the applied one is not edited).
+The auth library is Better Auth (D-004), pinned at **1.7.7** (D-031). It owns four tables. **T-013 created them from the published schema of that version.** T-015 installed exactly 1.7.7 (`package.json`: `"better-auth": "1.7.7"`) and runs it against these tables through its Prisma adapter. No difference was found and no corrective migration was needed: `20261011121529_init_schema_v1` is still the only migration. The proof is the auth integration suite (`tests/integration/auth/`), in which the running library creates and reads `User`, `Account`, and `Session` rows (sign-up, sign-in, session read, sign-out, `updateUser`); on 2026-10-13 `pnpm test:integration tests/integration/auth` passed 4 files, 59 tests. `Verification` is not used by any flow the application offers (email verification is off, and the library's own endpoints are not mounted), so no test writes to it. If the library version ever changes, a difference becomes a new corrective migration (the applied one is not edited).
 
 **Where the columns come from.** The core table definitions of `@better-auth/core` 1.7.7 (`getAuthTables`, file `dist/db/get-tables.mjs` of the published package), translated to Prisma the way the library's own command-line tool does it (`auth` 1.7.7, its Prisma generator for PostgreSQL). The packages were read as data; nothing from them was installed or run. Every column below is from that definition, with its type, nullability, default, uniqueness, index, and `onDelete`. The three columns this application adds to `User` are listed after the table.
 
@@ -309,7 +319,7 @@ The auth library is Better Auth (D-004), pinned at **1.7.7** (D-031). It owns fo
 
 Every text column is `String` (`text`), every time column `DateTime`.
 
-**Three deliberate differences from what the library's tool would write**, each for T-015 to confirm:
+**Three deliberate differences from what the library's tool would write.** T-015 confirmed that the library works with all three: the same integration suite runs against these model names, `timestamptz` columns, and the extra index.
 
 | Difference | Reason |
 | --- | --- |
@@ -317,7 +327,7 @@ Every text column is `String` (`text`), every time column `DateTime`.
 | `@db.Timestamptz(3)` on every time column; the tool writes plain `DateTime` (`timestamp(3)` without time zone) | Section 1: every timestamp is `timestamptz` |
 | The index `Session(expiresAt)` (`Session_expiresAt_idx`) | Added by this application for the purge below; the library does not define it |
 
-Because `updatedAt` of these four tables has no database default (as in the library's schema), a raw `INSERT` into them must supply it. The application never inserts into them by raw SQL: users, sessions, and accounts are created through the library.
+Because `updatedAt` of these four tables has no database default (as in the library's schema), a raw `INSERT` into them must supply it. The application never inserts into them by raw SQL. Sessions are created only by the library. Users and accounts are created by the library at sign-up, with one exception: the admin bootstrap script inserts its `User` and `Account` rows itself through the Prisma model API (which supplies `updatedAt`), in the library's formats and in one transaction ([section 4.1](#41-seller-application-store-and-role-b3), D-035).
 
 Columns this application adds to `User`:
 
@@ -327,9 +337,9 @@ Columns this application adds to `User`:
 | `isActive` | `Boolean`, default `true` | The admin user-management service | Sign-up, profile update, any request body |
 | `phone?` | `String` | The profile service (`PATCH /me`), for the acting user only | Sign-up |
 
-- **Not client-settable.** The three columns are declared to the library as additional fields that do not accept input, so a sign-up or library update request carrying `role`, `isActive`, or `phone` cannot set them. The option that does this is to validate in T-015. The database defaults make a row created without them a plain active customer.
-- **Ids.** The library generates the id of every row in these four tables, in its own format. See [section 1](#1-conventions): ids are opaque. The seed and the bootstrap script create users through the library so that ids and password hashes have the library's format.
-- **Email** is stored lower-cased and is unique. Whether the library normalises the case itself is to validate in T-015; if it does not, uniqueness moves to a unique index on `lower(email)` in raw SQL.
+- **Not client-settable.** The three columns are declared to the library as additional fields that do not accept input, so a sign-up or library update request carrying `role`, `isActive`, or `phone` cannot set them. Settled in T-015: the option is `input: false` on each of the three `user.additionalFields` in `src/server/auth/auth.ts`. A value sent straight to the library at sign-up is replaced by the default, and an update through the library is refused with `400`. Proved by "role sent straight to the library at sign-up is replaced by CUSTOMER" and "role in a profile update through the library is refused and changes nothing" (`tests/integration/auth/guards-and-escalation.test.ts`). The database defaults make a row created without them a plain active customer.
+- **Ids.** Rows in these four tables have the library's id format: 32 characters of `a-z`, `A-Z`, `0-9`. The library generates them, except for the bootstrap script's `User` and `Account`, which the script generates with the library's own `generateRandomString` (section 4.1). See [section 1](#1-conventions): ids are opaque. The seed (T-014) cannot create sellers through the library either, because sign-up always gives `CUSTOMER`; it will insert its users the same way as the bootstrap script, so that ids and password hashes have the library's format.
+- **Email** is stored lower-cased and is unique. Settled in T-015: the library lower-cases the email itself at sign-up and at sign-in (Better Auth 1.7.7, `dist/api/routes/sign-up.mjs` and `sign-in.mjs`), and the bootstrap script does the same. The unique constraint `User_email_key` is therefore enough, and no index on `lower(email)` is added. Proved by "stores the email lower-cased and trimmed" (`tests/integration/auth/sign-up-sign-in.test.ts`) and "stores the email lower-cased and trimmed, so sign-in in any letter case works" (`tests/integration/auth/bootstrap-admin.test.ts`).
 - `emailVerified` and `image` exist only because the library requires them. No feature reads them in the MVP.
 
 **Sessions, suspension, and deactivation.** D-004 says database sessions allow revocation "on logout, deactivation, and suspension". BR-14 requires a suspended store's seller to stay able to log in and fulfil existing orders. The model resolves it this way:
@@ -340,13 +350,13 @@ Columns this application adds to `User`:
 | **User deactivation** | **All of the user's `Session` rows are deleted**, in the transaction that sets `isActive = false` | Sign-in is refused while inactive; `requireActor` also reads `isActive` on every request |
 | **Store suspension** | **Not touched** | `requireActor` reads `Store.status` from the database on every request, so the suspended seller is blocked from creating, publishing, and selling at once, and keeps access to existing seller orders (BR-14) |
 
-No role, status, or store id is cached in the session or the cookie; the library's session cookie cache stays off (to validate in T-015).
+No role, status, or store id is cached in the session or the cookie; the library's session cookie cache is off. Settled in T-015: `session.cookieCache: { enabled: false }` in `src/server/auth/auth.ts`. Proved by "are Secure, HttpOnly, SameSite=Lax, Path=/, with the __Host- prefix and a bounded Max-Age" (`tests/integration/auth/limits-and-cookies.test.ts`): a sign-in sets exactly one cookie, the session token, and no cookie-cache cookie.
 
 **Login IP address and browser details (OQ-22; D-026, OQ-49).** `Session.ipAddress` and `Session.userAgent` are the only place the database stores them. They are personal data. They must disappear when the session ends, and **within one day of its expiry** when nobody ended it:
 
 - logout and deactivation delete the row, at once;
 - an expired row is deleted by a purge, `DELETE FROM "Session" WHERE "expiresAt" < now()`. The statement is safe to run at any time and any number of times, and is served by the index on `Session(expiresAt)`;
-- the library is expected to delete an expired session when its cookie is presented (to validate in T-015). This cannot be relied on: an abandoned session is never presented again;
+- the library does **not** delete an expired session when its cookie is presented. Settled in T-015: the session is refused and the row is left for the purge, because reading a session writes nothing (D-029 point 1; D-031 point 6). Proved by "refuses an expired session, writes nothing while reading it, and the purge removes it" (`tests/integration/auth/sign-up-sign-in.test.ts`). Request handling would not have been enough anyway: an abandoned session is never presented again;
 - no other table, and no audit entry, copies these two values.
 
 **The limit and the interval.** The binding limit is the owner's: no `Session` row may exist more than **24 hours** after its `expiresAt` (OQ-49). The purge interval this document asks for stays **one hour**, which was the earlier design and is stricter. The reason for keeping it is margin, not a stricter promise: with a purge once a day, a row that expires just after a run already waits almost the full 24 hours, so one late or failed run breaks the limit; with an hourly purge, about a full day of runs in a row has to fail first.
@@ -368,7 +378,7 @@ Consequences that follow from this:
 - **A restore ends with the session clean-up (D-028).** A restored database contains sessions that have expired since the backup was taken. The restore procedure is not finished until the purge statement above has run against the restored database, and the application does not serve requests before that. The procedure belongs to devops (DEPLOYMENT.md); the statement is the same one.
 - D-029 records that the scheduled run **of the session clean-up** is chosen in T-015 together with devops. D-029 says nothing about the overdue-order sweep; that sweep is planned for T-032, on the scheduler T-015 chooses (DEPLOYMENT.md, "Scheduled work").
 
-The address the library writes must be the one derived by SECURITY.md SR-01, never a client-controlled header (to validate in T-015).
+The address stored in `Session.ipAddress` is the one derived by SECURITY.md SR-01, never a client-controlled header. Settled in T-015: the library's own IP detection is off (`advanced.ipAddress.disableIpTracking`), and the session hook in `src/server/auth/auth.ts` sets the address from `getClientAddress`, storing nothing when it is unknown. Proved by "stores the SR-01 address behind a trusted proxy, never a client-written one" and "stores nothing for an unknown address, even when the client sends X-Forwarded-For" (`tests/integration/auth/limits-and-cookies.test.ts`).
 
 Indexes: `Session(userId)` (revocation; `Session_userId_idx`), `Session(expiresAt)` (purge; `Session_expiresAt_idx`), `Account(userId)` (`Account_userId_idx`), `Verification(identifier)` (the library's; `Verification_identifier_idx`).
 
@@ -880,7 +890,7 @@ Hand-written in the first migration and kept in sync here. **Every name is liste
 
 - Sequence `order_number_seq` and the default expression of `Order.orderNumber`.
 - The single `MarketplaceSettings` row (id 1, fee 4,000, commission 500).
-- A unique index on `lower(email)`, only if T-015 finds the library does not normalise the case.
+- No unique index on `lower(email)`: T-015 found that the library lower-cases the email itself ([section 6.1](#61-auth-tables-s19)).
 
 ## 14. Foreign keys and deletion policy
 
@@ -891,7 +901,7 @@ Hand-written in the first migration and kept in sync here. **Every name is liste
 | `ProductImage.productId` | `Cascade` | Link rows have no meaning without the product. The `Upload` rows stay |
 | `CartItem.cartId` | `Cascade` | |
 | `CartItem.productId` | `Cascade` | A cart is not history; a hard-deleted product leaves carts (S10) |
-| `Session.userId`, `Account.userId` | as the auth library defines (expected `Cascade`; to validate in T-015) | Users are never deleted by the application, so it does not fire |
+| `Session.userId`, `Account.userId` | `Cascade`, as the auth library defines (`prisma/schema.prisma`) | Users are never deleted by the application, so it does not fire |
 
 Named `Restrict` keys that matter: `OrderItem.productId`, `OrderItem.productImageUploadId`, `OrderItem.sellerOrderId`, `SellerOrder.orderId`, `SellerOrder.storeId`, `Order.userId`, `Payment.orderId`, `Shipment.sellerOrderId`, `Review.orderItemId`, `Review.productId`, `Review.userId`, `Product.storeId`, `Product.categoryId`, `Store.ownerId`, `Store.logoUploadId`, `ProductImage.uploadId`, `Upload.storeId`, `AuditLog.actorId`. Orders, seller orders, order items, payments, and audit entries are never reachable by a cascade.
 
@@ -948,7 +958,7 @@ Indexes are listed with their tables in section 6; each serves a query a require
 
 ## 18. Seed data
 
-Local development and tests only; refuses to run when `NODE_ENV` is `production`. Creates sample categories, sample stores, sample products, and sample customer and seller accounts, each marked as in section 16, with credentials documented in the README as local-only. Accounts are created through the auth library so that ids and password hashes have its format (T-014 depends on T-015). Sample stores are created with their `APPROVED` application row and the `SELLER` role, the same end state the approval transaction produces. The seed creates no reviews, no orders presented as real, and no admin; the first admin comes from the bootstrap script.
+Local development and tests only; refuses to run when `NODE_ENV` is `production`. Creates sample categories, sample stores, sample products, and sample customer and seller accounts, each marked as in section 16, with credentials documented in the README as local-only. Accounts are inserted directly in the auth library's formats (its id format and its `hashPassword`), as the bootstrap script does, because sign-up cannot create a seller ([section 4.1](#41-seller-application-store-and-role-b3), D-035). Sample stores are created with their `APPROVED` application row and the `SELLER` role, the same end state the approval transaction produces. The seed creates no reviews, no orders presented as real, and no admin; the first admin comes from the bootstrap script.
 
 ## 19. Open points
 
@@ -1028,8 +1038,8 @@ Validated on 2026-10-11 against Prisma 7.10.0 (`prisma`, `@prisma/client`, `@pri
 
 | Item | During | Result |
 | --- | --- | --- |
-| Auth tables: model names, column names, types, id generation, the option that blocks input to `role`, `isActive`, `phone`, email case handling, deletion of expired sessions, the source of `Session.ipAddress`, cookie cache off | T-015 | Open. T-015 compares the tables T-013 created (next row) with the installed library |
-| **The four auth tables are created from the published schema of Better Auth 1.7.7 (D-031 point 1), with the three differences listed in section 6.1** | T-013 | Done, from the package files read as data; **not** checked against a running library, which is the row above |
+| Auth tables: model names, column names, types, id generation, the option that blocks input to `role`, `isActive`, `phone`, email case handling, deletion of expired sessions, the source of `Session.ipAddress`, cookie cache off | T-015 | Confirmed on 2026-10-13 against the installed Better Auth 1.7.7, no corrective migration. Each item, its result, and the test that proves it are in section 6.1. The admin bootstrap writes its rows directly (section 4.1, D-035) |
+| **The four auth tables are created from the published schema of Better Auth 1.7.7 (D-031 point 1), with the three differences listed in section 6.1** | T-013 | Done, from the package files read as data; checked against the running library in T-015 (row above) |
 | Checkout statement and claim statement as raw queries inside an interactive transaction; conditional updates that return rows | T-013 | Confirmed. `tx.$queryRaw` returns the `RETURNING` rows of both; the model API offers `updateManyAndReturn` as well (sections 7.1, 7.3, 21.6) |
 | The classification read and the lowering statement of the refusal transaction as raw queries; a thrown error rolls the attempt transaction back completely; (fallback only) raw `SAVEPOINT` inside an interactive transaction | T-013 | Confirmed, all four. After `ROLLBACK TO SAVEPOINT` issued as a raw statement the same transaction client kept working, raw and through the model API, and committed (section 21.6) |
 | A check constraint that compares an enum column with a literal (`Order.paidAt` against `paymentStatus`) is accepted in the hand-written migration and survives `migrate dev` without drift | T-013 | Confirmed. `Order_paidAt_check` is accepted, enforced in both directions, and invisible to `migrate dev` and `migrate diff` |
@@ -1090,6 +1100,8 @@ Validated on 2026-10-11 against Prisma 7.10.0 (`prisma`, `@prisma/client`, `@pri
 | D-028: bootstrap script and existing accounts; backups | 4.1, 6.1 |
 | D-029: a `GET` never writes; the refused checkout stores the lowered quantity; return columns confirmed | 6.9, 7.1, 6.12 |
 | D-031: auth tables from Better Auth 1.7.7; `contentRevision` on a price-only resubmission; refused-checkout candidates validated | 6.1, 6.6, 7.1, 19.4, 21 |
+| CR-53, D-035: the bootstrap script inserts `User` and `Account` directly in the library's formats | 4.1, 6.1 |
+| CR-56: the auth-table items left "to validate in T-015" are settled, each with its test | 6.1, 13, 14, 19.4 |
 
 ## 21. Schema v1 as built (T-013)
 
