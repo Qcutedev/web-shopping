@@ -11,7 +11,9 @@
  *                      then the library creates the account and signs it in (a duplicate
  *                      email gets a decoy cookie instead, CR-57)
  *   sign-in  (public)  1 Origin, 2 Content-Type, 5 `sign-in-address`, 6 body, 7 schema,
- *                      then `sign-in-email` on the normalised email, then the password check
+ *                      then `sign-in-email` on address and normalised email, then
+ *                      `sign-in-account` on the normalised email (SEC-032), then the password
+ *                      check
  *   sign-out (user)    1 Origin, 2 Content-Type, 3 session, then the session row is deleted;
  *                      no body is read
  *   session  (public)  GET; the actor of the session, or null
@@ -21,7 +23,7 @@
  * timing does not tell a registered email from an unknown one. Refusals before that step (origin,
  * content type, rate limit, body, schema) do not wait.
  *
- * The two sign-in limits and the bound on the body are on the only two routes of the library that
+ * The three sign-in limits and the bound on the body are on the only two routes of the library that
  * check a password or create an account, because the library's own handler is not mounted
  * (auth.ts; docs/API_CONTRACTS.md item 8.2-9).
  */
@@ -50,6 +52,7 @@ import {
 import { logger as defaultLogger, type StructuredLogger } from "../logger";
 import { RATE_LIMITS, type RateLimiter, rateLimiter, type RateLimitRule } from "../rate-limit";
 import { resolveRequestId, trustsIncomingRequestId } from "../request-id";
+import { signInEmailChecks, signInRetryAfterSeconds } from "../sign-in-rate-limit";
 import type { Actor } from "./actor";
 import { type Auth, getAuth } from "./auth";
 import { AUTH_RESPONSE_FLOOR, type ResponseFloor } from "./config";
@@ -171,12 +174,16 @@ function checkOrigin(request: Request, runtime: AuthRuntime, scope: RequestScope
   }
 }
 
-/** Uses one allowance of `rule` for `subject`; 429 when there is none (security event, throttled). */
+/**
+ * Uses one allowance of `rule` for `subject`; 429 when there is none (security event, throttled).
+ * `retryAfter` maps the limiter's retry time to the one reported (sign-in caps it, SEC-032).
+ */
 async function consume(
   runtime: AuthRuntime,
   scope: RequestScope,
   subject: string,
   rule: RateLimitRule,
+  retryAfter: (seconds: number) => number = (seconds) => seconds,
 ): Promise<void> {
   const result = await runtime.limiter.consume(subject, rule);
   if (result.allowed) return;
@@ -188,7 +195,7 @@ async function consume(
     rule: rule.name,
     saturated: result.saturated,
   });
-  throw rateLimited(result.retryAfterSeconds);
+  throw rateLimited(retryAfter(result.retryAfterSeconds));
 }
 
 /** The `Set-Cookie` lines of a library answer, as headers for the envelope helper. */
@@ -306,11 +313,20 @@ export async function handleSignIn(request: Request, source: AuthRuntimeSource):
     checkOrigin(request, runtime, scope);
     assertContentType(request, JSON_CONTENT_TYPE);
     scope.clientIp = getClientAddress(request, runtime.trustedProxy);
-    await consume(runtime, scope, scope.clientIp, RATE_LIMITS.SIGN_IN_ADDRESS);
+    await consume(
+      runtime,
+      scope,
+      scope.clientIp,
+      RATE_LIMITS.SIGN_IN_ADDRESS,
+      signInRetryAfterSeconds,
+    );
     const body = await readJsonBody(request);
     const input = parseInput(signInBodySchema, body);
-    // After the per-address limit, after the body, before the password (SR-05 item 5).
-    await consume(runtime, scope, emailRateLimitSubject(input.email), RATE_LIMITS.SIGN_IN_EMAIL);
+    // After the per-address limit, after the body, before the password (SR-05 item 5), in
+    // order: `sign-in-email` (address and email), then `sign-in-account` (email; SEC-032).
+    for (const check of signInEmailChecks(scope.clientIp, emailRateLimitSubject(input.email))) {
+      await consume(runtime, scope, check.subject, check.rule, signInRetryAfterSeconds);
+    }
 
     // SEC-035: every failed sign-in answers after the same time, measured from here.
     const startedAt = performance.now();

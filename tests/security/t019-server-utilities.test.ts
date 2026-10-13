@@ -496,7 +496,7 @@ describe("SEC-004 one flood of new keys refuses every other rate-limited action"
     expect(refused.retryAfterSeconds).toBeLessThanOrEqual(60);
   });
 
-  it("re-check 2026-10-11: with all three anonymous rules flooded, the signed-in rules still serve, refusals are short, visible, and leak no key", async () => {
+  it("re-check 2026-10-11: with all anonymous rules flooded, the signed-in rules still serve, refusals are short, visible, and leak no key", async () => {
     let now = 1_000_000;
     const warnings: string[] = [];
     const store = new MemoryRateLimitStore();
@@ -505,7 +505,14 @@ describe("SEC-004 one flood of new keys refuses every other rate-limited action"
       now: () => now,
       logger: { warn: (message, fields) => warnings.push(`${message} ${JSON.stringify(fields)}`) },
     });
-    const anonymous = [RATE_LIMITS.SIGN_UP, RATE_LIMITS.SIGN_IN_ADDRESS, RATE_LIMITS.SIGN_IN_EMAIL];
+    // SEC-032 split (2026-10-13): sign-in-email 30,000 and sign-in-account 10,000 (was
+    // sign-in-email 40,000), so the anonymous rules still hold 120,000 windows together.
+    const anonymous = [
+      RATE_LIMITS.SIGN_UP,
+      RATE_LIMITS.SIGN_IN_ADDRESS,
+      RATE_LIMITS.SIGN_IN_EMAIL,
+      RATE_LIMITS.SIGN_IN_ACCOUNT,
+    ];
     for (const rule of anonymous) {
       for (let i = 0; i < rule.maxKeys + 2_000; i += 1) {
         await limiter.consume(`flood-subject-${i}`, rule);
@@ -532,7 +539,7 @@ describe("SEC-004 one flood of new keys refuses every other rate-limited action"
     }
 
     // One warn line per rule for the whole flood, holding no subject.
-    expect(warnings).toHaveLength(3);
+    expect(warnings).toHaveLength(anonymous.length);
     expect(warnings.join("\n")).not.toContain("flood-subject");
     expect(warnings.join("\n")).not.toContain("203.0.113.200");
 

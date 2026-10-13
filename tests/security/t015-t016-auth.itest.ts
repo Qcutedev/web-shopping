@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 import { BOOTSTRAP_ENV, BOOTSTRAP_EXIT, runBootstrapAdmin } from "@/modules/auth/bootstrap-admin";
 import { handleGetSession, handleSignIn, handleSignOut, handleSignUp } from "@/server/auth/routes";
 import { db } from "@/server/db";
+import { createRateLimiter } from "@/server/rate-limit";
 
 import {
   captureLog,
@@ -43,31 +44,28 @@ function signIn(
 }
 
 describe("SEC-032 per-email sign-in limit: one address locks any account out", () => {
-  it.fails(
-    "after five wrong passwords from one address, the owner signs in from another address",
-    async () => {
-      const runtime = makeRuntime({ trustedProxy: { trustedProxyHops: 1 } });
-      const victim = freshEmail("victim");
-      await register(runtime, victim);
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        const wrong = await signIn(
-          runtime,
-          { email: victim, password: "guess-" + String(attempt) },
-          { "x-forwarded-for": "203.0.113.66" },
-        );
-        expect(wrong.status).toBe(401);
-      }
-      // The owner, elsewhere, with the right password.
-      const owner = await signIn(
+  it("after five wrong passwords from one address, the owner signs in from another address", async () => {
+    const runtime = makeRuntime({ trustedProxy: { trustedProxyHops: 1 } });
+    const victim = freshEmail("victim");
+    await register(runtime, victim);
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const wrong = await signIn(
         runtime,
-        { email: victim, password: PASSWORD },
-        { "x-forwarded-for": "198.51.100.7" },
+        { email: victim, password: "guess-" + String(attempt) },
+        { "x-forwarded-for": "203.0.113.66" },
       );
-      expect(owner.status).toBe(200);
-    },
-  );
+      expect(wrong.status).toBe(401);
+    }
+    // The owner, elsewhere, with the right password.
+    const owner = await signIn(
+      runtime,
+      { email: victim, password: PASSWORD },
+      { "x-forwarded-for": "198.51.100.7" },
+    );
+    expect(owner.status).toBe(200);
+  });
 
-  it("pins the cost: one address keeps one account locked with five requests a minute", async () => {
+  it("pins the cost: five requests a minute from one address no longer keep an admin out", async () => {
     const runtime = makeRuntime({ trustedProxy: { trustedProxyHops: 1 } });
     const victim = freshEmail("admin-victim");
     const userId = await register(runtime, victim);
@@ -79,14 +77,117 @@ describe("SEC-032 per-email sign-in limit: one address locks any account out", (
         { "x-forwarded-for": "203.0.113.66" },
       );
     }
+    // The attacker's own address is out of allowance; the owner's is not.
+    const sixth = await signIn(
+      runtime,
+      { email: victim, password: PASSWORD },
+      { "x-forwarded-for": "203.0.113.66" },
+    );
+    expect(sixth.status).toBe(429);
     const owner = await signIn(
       runtime,
       { email: victim, password: PASSWORD },
       { "x-forwarded-for": "198.51.100.7" },
     );
-    expect(owner.status).toBe(429);
-    expect(await db.session.count({ where: { userId } })).toBe(0);
+    expect(owner.status).toBe(200);
+    expect(await db.session.count({ where: { userId } })).toBe(1);
+    // Keeping the owner out now takes a full `sign-in-account` window (60 per 300 s), which two
+    // addresses cannot fill and a third can: see the two cases below.
   });
+
+  /**
+   * A runtime whose limiter (built-in rules) runs on a simulated clock, and a helper that sends
+   * `count` wrong passwords from each address at `seconds` and returns how many reached the
+   * password check (401) per address; the others are 429.
+   */
+  function simulated() {
+    const clock = { now: 1_800_000_000_000 };
+    const start = clock.now;
+    const runtime = makeRuntime({
+      trustedProxy: { trustedProxyHops: 1 },
+      limiter: createRateLimiter({ now: () => clock.now }),
+    });
+    const at = (seconds: number) => {
+      clock.now = start + seconds * 1_000;
+    };
+    async function attack(
+      email: string,
+      addresses: readonly string[],
+      seconds: number,
+      count: number,
+    ): Promise<number[]> {
+      at(seconds);
+      const checked: number[] = [];
+      for (const address of addresses) {
+        let reached = 0;
+        for (let index = 0; index < count; index += 1) {
+          const response = await signIn(
+            runtime,
+            { email, password: `wrong-${String(seconds)}-${String(index)}` },
+            { "x-forwarded-for": address },
+          );
+          expect([401, 429]).toContain(response.status);
+          if (response.status === 401) reached += 1;
+        }
+        checked.push(reached);
+      }
+      return checked;
+    }
+    /**
+     * The strongest timing against the `sign-in-account` window that starts at `start`: one hit
+     * in the window before, one a second before `start` (each address's own 60 s windows then
+     * straddle it, six overlapping it), and full rate after. Each address adds 4 + 5 * 5 = 29
+     * hits to that window by `start + 299` s.
+     */
+    async function straddle(email: string, addresses: readonly string[], begin: number) {
+      const total = addresses.map(() => 0);
+      const add = (counts: number[]) => {
+        counts.forEach((count, index) => {
+          total[index] = (total[index] ?? 0) + count;
+        });
+      };
+      add(await attack(email, addresses, begin - 300, 1));
+      add(await attack(email, addresses, begin - 1, 1));
+      add(await attack(email, addresses, begin, 7));
+      for (let minute = 1; minute <= 5; minute += 1) {
+        add(await attack(email, addresses, begin - 1 + minute * 60, 7));
+      }
+      return total;
+    }
+    const owner = (email: string, seconds: number) => {
+      at(seconds);
+      return signIn(runtime, { email, password: PASSWORD }, { "x-forwarded-for": "198.51.100.7" });
+    };
+    return { runtime, attack, straddle, owner };
+  }
+
+  it("sign-in-account is not exhausted by one address over 10 simulated minutes", async () => {
+    const { runtime, straddle, owner } = simulated();
+    const victim = freshEmail("one-address");
+    const userId = await register(runtime, victim);
+    // Minutes 0 to 10, with the account window of 300 to 600 s loaded as far as one address can.
+    expect(await straddle(victim, ["203.0.113.66"], 300)).toEqual([31]);
+    // At the last second of that window, after 29 of the address's attempts in it.
+    expect((await owner(victim, 599)).status).toBe(200);
+    expect(await db.session.count({ where: { userId } })).toBe(1);
+  }, 60_000);
+
+  it("two addresses at their strongest timing do not exhaust sign-in-account; a third does", async () => {
+    const { runtime, attack, straddle, owner } = simulated();
+    const victim = freshEmail("two-addresses");
+    const userId = await register(runtime, victim);
+    expect(await straddle(victim, ["203.0.113.66", "203.0.113.67"], 300)).toEqual([31, 31]);
+    // 58 attempts in the window: the owner's is the 59th.
+    expect((await owner(victim, 599)).status).toBe(200);
+    // A third address fills the window (60th); the owner's next attempt is the 61st.
+    expect(await attack(victim, ["192.0.2.1"], 599, 1)).toEqual([1]);
+    const refused = await owner(victim, 599);
+    expect(refused.status).toBe(429);
+    expect(Number(refused.headers.get("retry-after"))).toBeLessThanOrEqual(60);
+    expect(await db.session.count({ where: { userId } })).toBe(1);
+    // The window ends at 600 s.
+    expect((await owner(victim, 600)).status).toBe(200);
+  }, 60_000);
 });
 
 describe("SEC-033 sign-up display name accepts bidirectional control characters", () => {

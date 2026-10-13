@@ -62,20 +62,26 @@ describe("rate limits", () => {
     expect(correct.headers.getSetCookie()).toEqual([]);
   });
 
-  it("sign-in: the per-email limit holds across addresses, and an unknown email is counted the same way", async () => {
+  it("sign-in: the per-account limit holds across addresses, an unknown email is counted the same way, and its 429 does not say which limit refused", async () => {
     const runtime = makeRuntime({ trustedProxy: { trustedProxyHops: 1 } });
     const known = freshEmail("known");
     await register(known);
-    for (const email of [known, freshEmail("unknown")]) {
-      for (let i = 0; i < RATE_LIMITS.SIGN_IN_EMAIL.limit; i += 1) {
-        const response = await handleSignIn(
-          signInRequest(
-            { email, password: "wrong" },
-            { "x-forwarded-for": `198.51.100.${String(i + 1)}` },
-          ),
-          runtime,
-        );
-        expect(response.status).toBe(401);
+    const perAddress = RATE_LIMITS.SIGN_IN_ADDRESS.limit;
+    const addresses = RATE_LIMITS.SIGN_IN_ACCOUNT.limit / perAddress;
+    const refusals: string[] = [];
+    for (const [round, email] of [known, freshEmail("unknown")].entries()) {
+      // `sign-in-account` (60 per 300 s) filled from 12 addresses at 5 each (SEC-032).
+      for (let a = 0; a < addresses; a += 1) {
+        for (let i = 0; i < perAddress; i += 1) {
+          const response = await handleSignIn(
+            signInRequest(
+              { email, password: "wrong" },
+              { "x-forwarded-for": `198.51.${String(100 + round)}.${String(a + 1)}` },
+            ),
+            runtime,
+          );
+          expect(response.status).toBe(401);
+        }
       }
       const refused = await handleSignIn(
         signInRequest(
@@ -85,8 +91,34 @@ describe("rate limits", () => {
         runtime,
       );
       expect(refused.status).toBe(429);
+      expect(refused.headers.getSetCookie()).toEqual([]);
+      // The window is 300 s; the answer reports at most the per-address window.
+      expect(Number(refused.headers.get("retry-after"))).toBeGreaterThan(0);
+      expect(Number(refused.headers.get("retry-after"))).toBeLessThanOrEqual(60);
+      const error = (await json(refused))["error"] as Record<string, unknown>;
+      delete error["requestId"];
+      refusals.push(JSON.stringify(error));
     }
-  });
+    // A per-address refusal answers with the same body.
+    for (let i = 0; i < perAddress; i += 1) {
+      await handleSignIn(
+        signInRequest(
+          { email: freshEmail(), password: "wrong" },
+          { "x-forwarded-for": "192.0.2.5" },
+        ),
+        runtime,
+      );
+    }
+    const byAddress = await handleSignIn(
+      signInRequest({ email: freshEmail(), password: "wrong" }, { "x-forwarded-for": "192.0.2.5" }),
+      runtime,
+    );
+    expect(byAddress.status).toBe(429);
+    const error = (await json(byAddress))["error"] as Record<string, unknown>;
+    delete error["requestId"];
+    refusals.push(JSON.stringify(error));
+    expect(new Set(refusals).size).toBe(1);
+  }, 60_000);
 
   it(`sign-up: the ${String(RATE_LIMITS.SIGN_UP.limit + 1)}th attempt from one address in an hour is 429 and creates nothing`, async () => {
     const runtime = makeRuntime();

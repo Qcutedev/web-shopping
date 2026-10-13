@@ -147,7 +147,17 @@ const DIGEST_PREFIX = "sha256:";
  */
 export const RATE_LIMITS = {
   SIGN_IN_ADDRESS: { name: "sign-in-address", limit: 5, windowMs: 60_000, maxKeys: 40_000 },
-  SIGN_IN_EMAIL: { name: "sign-in-email", limit: 5, windowMs: 60_000, maxKeys: 40_000 },
+  /**
+   * Subject `<client address>|<normalised email>` (SEC-032, D-036 item 5): an address's failures
+   * use only its own allowance for that account. Built by `signInEmailSubject`.
+   */
+  SIGN_IN_EMAIL: { name: "sign-in-email", limit: 5, windowMs: 60_000, maxKeys: 30_000 },
+  /**
+   * Subject the normalised email, over all addresses (SEC-032). Consumed only after
+   * `sign-in-address` and `sign-in-email` allowed the request. One address reaches it at most 5
+   * times per 60 s, so it can add at most 29 hits to one 300 s window and never exhaust it.
+   */
+  SIGN_IN_ACCOUNT: { name: "sign-in-account", limit: 60, windowMs: 300_000, maxKeys: 10_000 },
   SIGN_UP: { name: "sign-up", limit: 5, windowMs: 3_600_000, maxKeys: 40_000 },
   CHECKOUT: { name: "checkout", limit: 10, windowMs: 60_000, maxKeys: 20_000 },
   UPLOADS: { name: "uploads", limit: 30, windowMs: 3_600_000, maxKeys: 20_000 },

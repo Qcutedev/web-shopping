@@ -486,6 +486,23 @@ describe("isolated capacity per rule (SEC-004)", () => {
     expect(total).toBeLessThanOrEqual(MAX_TOTAL_WINDOWS);
   });
 
+  it("the capacity split is the one recorded in SR-02 (SEC-032 split; security ruling pending)", () => {
+    const split = Object.fromEntries(
+      Object.values(RATE_LIMITS).map((rule) => [rule.name, rule.maxKeys]),
+    );
+    expect(split).toEqual({
+      "sign-in-address": 40_000,
+      "sign-in-email": 30_000,
+      "sign-in-account": 10_000,
+      "sign-up": 40_000,
+      checkout: 20_000,
+      uploads: 20_000,
+      "seller-application": 20_000,
+      "review-create": 20_000,
+    });
+    expect(Object.values(split).reduce((sum, keys) => sum + keys, 0)).toBe(MAX_TOTAL_WINDOWS);
+  });
+
   it("refuses a store whose total bound is above the documented maximum", () => {
     expect(() => new MemoryRateLimitStore({ maxKeys: MAX_TOTAL_WINDOWS + 1 })).toThrow(TypeError);
   });
@@ -666,6 +683,7 @@ describe("contract", () => {
     expect(limits).toEqual({
       SIGN_IN_ADDRESS: { limit: 5, windowMs: 60 * 1000 },
       SIGN_IN_EMAIL: { limit: 5, windowMs: 60 * 1000 },
+      SIGN_IN_ACCOUNT: { limit: 60, windowMs: 5 * 60 * 1000 },
       SIGN_UP: { limit: 5, windowMs: 60 * 60 * 1000 },
       CHECKOUT: { limit: 10, windowMs: 60 * 1000 },
       UPLOADS: { limit: 30, windowMs: 60 * 60 * 1000 },
