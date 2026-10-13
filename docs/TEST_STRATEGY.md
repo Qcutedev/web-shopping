@@ -493,3 +493,14 @@ Runs of `pnpm verify` and of the unit, component, and security projects are reco
 | 2026-10-12 | `pnpm test:integration` on one temporary file that closed the connection of the run's own lock holder; the file was deleted afterwards | 1 | 1 | 0 | 0 | Exit 1 with "error during close RunLockLostError": a lost lock fails a run whose tests all passed (CR-26) |
 
 No end-to-end run yet.
+
+### Follow-up round CR-59, CR-61, CR-63, CR-68 (2026-10-13)
+
+| Finding | Change | Shown to fail without the code |
+| --- | --- | --- |
+| CR-59 | `tests/integration/auth/sign-up-sign-in.test.ts`: two parallel `handleSignUp` calls for one email; both 200 `{ accepted: true }`, one user, one account, sign-in works | Yes: with the `FAILED_TO_CREATE_USER` branch in `src/server/auth/routes.ts` replaced by `throw error`, the answers were `[500, 200]` |
+| CR-61 | `src/modules/auth/bootstrap-admin.test.ts`: the hash-format test is relabelled as a library pin check (it calls only `better-auth/crypto`); the module's own hash use is covered by the integration sign-in as the bootstrapped admin | Not applicable: it is a pin on the library, not on this module |
+| CR-63 | `tests/integration/auth/bootstrap-admin.test.ts`: the first two `findFirst` lookups are stubbed to return `null`, so both runs insert; asserts exactly three lookups (two forced misses and one for the winner), so the P2002 branch certainly ran once | Yes: with the `isUniqueViolation` check replaced by `throw error`, this test and the older race test failed |
+| CR-68 | Not done: Playwright, its config, and a browser are not installed (see Environment requirements). Nothing installed | n/a |
+
+Run on 2026-10-13: `pnpm test:integration`, 23 files, 848 passed, 1 expected fail, 0 failed; `pnpm test`, 52 files, 2033 passed, 7 expected fail.

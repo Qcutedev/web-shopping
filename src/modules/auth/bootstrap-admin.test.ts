@@ -1,6 +1,6 @@
 /**
- * Unit tests of the admin bootstrap (T-016): input rules, exit statuses, output hygiene, and the
- * password hash format. No database: the step that writes rows is replaced. The rows themselves
+ * Unit tests of the admin bootstrap (T-016): input rules, exit statuses, output hygiene, and a
+ * pin check of the library's password hash format. No database: the step that writes rows is replaced. The rows themselves
  * are tested in tests/integration/auth/bootstrap-admin.test.ts.
  */
 import { hashPassword, verifyPassword } from "better-auth/crypto";
@@ -212,8 +212,12 @@ describe("runBootstrapAdmin", () => {
   });
 });
 
-describe("password hash format", () => {
-  it("is the library's own scrypt format, which the library verifies at sign-in", async () => {
+// Library pin check only (CR-61): this calls better-auth's own helpers, not this module. It fails
+// when a library upgrade changes the hash format that bootstrap-admin.ts relies on. That the
+// module stores such a hash, and that the admin can sign in, is tested in
+// tests/integration/auth/bootstrap-admin.test.ts.
+describe("better-auth password hash format (library pin check)", () => {
+  it("hashPassword gives the scrypt format that verifyPassword accepts", async () => {
     const hash = await hashPassword(PASSWORD);
     expect(hash).toMatch(/^[0-9a-f]+:[0-9a-f]+$/);
     expect(await verifyPassword({ hash, password: PASSWORD })).toBe(true);

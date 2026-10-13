@@ -6,7 +6,7 @@
  * scripts/bootstrap-admin.ts, so the cases below run it with an environment object and a captured
  * output. Sign-in goes through the real route module, as for any other user.
  */
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { POST as signInRoute } from "@/app/api/v1/auth/sign-in/route";
 import { POST as signUpRoute } from "@/app/api/v1/auth/sign-up/route";
@@ -222,6 +222,36 @@ describe("admin bootstrap (BR-26)", () => {
     const user = await db.user.findUniqueOrThrow({ where: { email }, include: { accounts: true } });
     expect(user.accounts).toHaveLength(1);
     expect((await signIn(email, ADMIN_PASSWORD)).status).toBe(200);
+  });
+
+  it("reaches the unique-violation path for certain when both runs see no user first (CR-63)", async () => {
+    const email = freshEmail("forced-race");
+    const input = { email, password: ADMIN_PASSWORD, name: "Admin" };
+    // Both runs get "no user" from the first lookup, so both go on to insert; the second insert
+    // must hit the unique index (P2002). The lookup after the failed insert is the real one.
+    const realFindFirst = db.user.findFirst.bind(db.user);
+    let lookups = 0;
+    const spy = vi.spyOn(db.user, "findFirst").mockImplementation(((args: never) => {
+      lookups += 1;
+      if (lookups <= 2) return Promise.resolve(null);
+      return realFindFirst(args);
+    }) as never);
+    try {
+      const outcomes = await Promise.all([bootstrapAdmin(input), bootstrapAdmin(input)]);
+      const kinds = outcomes.map((outcome) => outcome.kind).sort();
+      expect(kinds).toEqual(["ALREADY_ADMIN", "CREATED"]);
+      // Two forced misses plus exactly one lookup of the winner: the P2002 branch ran once.
+      expect(lookups).toBe(3);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await db.user.count({ where: { email } })).toBe(1);
+    const user = await db.user.findUniqueOrThrow({ where: { email }, include: { accounts: true } });
+    expect(user).toMatchObject({ role: "ADMIN" });
+    expect(user.accounts).toHaveLength(1);
+    expect(await db.account.count({ where: { providerId: "credential", userId: user.id } })).toBe(
+      1,
+    );
   });
 
   it("never promotes: a run never changes the role of any existing user", async () => {

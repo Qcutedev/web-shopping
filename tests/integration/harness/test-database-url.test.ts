@@ -345,7 +345,7 @@ describe("resolveTestDatabase refuses a URL another reader could understand diff
     ["a tab inside the host", `postgresql://${CREDENTIALS}@127.0.0.1\t:5433/shop_test`],
     ["a line break inside the name", `postgresql://${CREDENTIALS}@127.0.0.1:5433/shop\n_test`],
     ["a blank in the query", `${PLAIN_URL}?schema=pub lic`],
-    ["a no-break space in the name", urlFor("127.0.0.1", "shop _test")],
+    ["a no-break space in the name", urlFor("127.0.0.1", "shop\u00A0_test")],
     ["a NUL character", `${PLAIN_URL}\u0000`],
     ["a backslash before a second host", `${PLAIN_URL}\\@${OTHER_HOST}`],
     [

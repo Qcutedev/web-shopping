@@ -198,7 +198,7 @@ function invisibleInRepository(): string[] {
 }
 
 describe("SEC-043 literal invisible characters remain in test files outside tests/security", () => {
-  it.fails("no tracked or untracked text file of the repository holds one", () => {
+  it("no tracked or untracked text file of the repository holds one", () => {
     expect(invisibleInRepository()).toEqual([]);
   });
 });

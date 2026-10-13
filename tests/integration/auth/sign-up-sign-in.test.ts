@@ -123,6 +123,27 @@ describe("sign-up (REQ-C-01)", () => {
     expect((await signIn(email, "another password")).status).toBe(401);
   });
 
+  it("answers 200 to both of two parallel sign-ups for one email, and keeps one user and one account (CR-59)", async () => {
+    const email = freshEmail("parallel");
+    const responses = await Promise.all(
+      [1, 2].map((n) =>
+        handleSignUp(
+          post("/api/v1/auth/sign-up", { body: { name: `Racer ${n}`, email, password: PASSWORD } }),
+          makeRuntime({ limiter: createRateLimiter() }),
+        ),
+      ),
+    );
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    for (const response of responses) {
+      expect(await json(response)).toEqual({ data: { accepted: true } });
+    }
+    expect(await db.user.count({ where: { email } })).toBe(1);
+    const user = await db.user.findUniqueOrThrow({ where: { email }, include: { accounts: true } });
+    expect(user.accounts).toHaveLength(1);
+    expect(user).toMatchObject({ role: "CUSTOMER", isActive: true });
+    expect((await signIn(email, PASSWORD)).status).toBe(200);
+  });
+
   it("refuses a password under 8 or over 128 characters on the server, creating no user", async () => {
     for (const password of ["1234567", "x".repeat(129)]) {
       const email = freshEmail();
