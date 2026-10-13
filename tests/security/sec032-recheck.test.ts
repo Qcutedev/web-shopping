@@ -105,8 +105,8 @@ describe("SEC-032 re-check: the attacker cannot get a fresh counter for the same
       "owner@example.test",
       "OWNER@example.test",
       " Owner@Example.Test ",
-      "owner@EXAMPLE.TEST ",
-      "　owner@example.test",
+      "owner@EXAMPLE.TEST\u00a0",
+      "\u3000owner@example.test",
     ];
     for (const variant of variants) {
       expect((await signIn(runtime, variant, ATTACKER)).status).toBe(401);
