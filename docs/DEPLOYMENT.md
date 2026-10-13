@@ -206,11 +206,11 @@ Refusals that apply only when `NODE_ENV=production`:
 | `DATABASE_URL` | It contains one of the two local placeholder passwords of `.env.example` and `docker-compose.yml`, as written or in a form the database driver turns into one (below) | SEC-009, SEC-025 |
 | `PGPASSWORD` | It contains one of the two placeholder passwords, as written | SEC-025 |
 | `AUTH_SECRET` | It contains `not_a_secret`, the marker of every throwaway value in `.env.example` | SEC-009 |
-| `AUTH_SECRET` | It is not a random-looking value (below): a character outside printable ASCII, fewer than 8 distinct characters, a repeated pattern, a run of 8 characters in steady steps, or a published value | SEC-044, SEC-047 |
+| `AUTH_SECRET` | It is not a random-looking value (below): a character outside printable ASCII, fewer than 8 distinct characters, a repeated pattern, a run of 8 characters in steady steps, a pattern at a distance of 1 to 8 characters, or a published value or its prefix | SEC-044, SEC-047, SEC-049 |
 | `DATABASE_URL_TEST` | It is set at all | SEC-009 |
 | `TRUSTED_PROXY_HOPS` | It is not set. `0` is accepted, but it must be written | SR-01: no silent default |
 
-The weak-secret rule for `AUTH_SECRET` (SEC-044, SEC-047). A value that is at least 32 characters long and does not contain `not_a_secret` is still refused when `NODE_ENV=production` if any of these holds:
+The weak-secret rule for `AUTH_SECRET` (SEC-044, SEC-047, SEC-049). A value that is at least 32 characters long and does not contain `not_a_secret` is still refused when `NODE_ENV=production` if any of these holds:
 
 - It has fewer than 8 distinct characters (counted by code point). `aaaaaaaa...` and 32 blanks fail.
 - It is one shorter unit written two or more times, for example `abcdefgh` repeated four times. The test is on the whole string, UTF-16 code unit by code unit.
@@ -218,8 +218,10 @@ The weak-secret rule for `AUTH_SECRET` (SEC-044, SEC-047). A value that is at le
 - Some run of 8 characters occurs twice in it (`password` four times plus `1` fails; so does `a` 25 times followed by `bcdefgh`).
 - It holds a run of 8 characters with a constant code-point step: `abcdefgh`, `12345678`, `hgfedcba`, `aaaaaaaa`.
 - It contains one of the published values that must never be used: the built-in default of the auth library (`better-auth-secret-12345678901234567890`) and the secret of the integration tests (`integration-test-secret-0123456789-abcdefghij`). The comparison ignores case and is made as a substring, so an upper-case copy, a copy with a character added, and a copy inside a longer value are refused.
+- It starts with `better-auth-secret` or `integration-test-secret`, in any case, so a published value with its tail changed is refused too (SEC-049).
+- For some distance (lag) from 1 to 8 characters, one and the same difference between the code points that far apart covers at least half of the positions (SEC-049). This refuses a word with a counter (`secret1secret2secret3...`), a short unit with changing separators (`abcdefg!abcdefg@...`), two interleaved sequences (`a1b2c3d4...`), and counting in hexadecimal (`000102030405...`).
 
-This is a floor against copy and paste mistakes, not a measure of randomness. A value that passes is not thereby random; generate it as shown in the table above. A random value from the documented command is refused with a probability of about 1 in 500,000 (measured over 500,000 values per form in the SEC-047 re-check: 0 of base64url-43, base64-44, and hex-32, and 1 of hex-64); if it ever happens, generate another. A keyboard row such as `qwertyuiop` is not recognised.
+This is a floor against copy and paste mistakes, not a measure of randomness. A value that passes is not thereby random; generate it as shown in the table above. A random value from the documented command is refused with a probability of about 1 in 500,000 (measured over 500,000 values per form in the SEC-047 re-check: 0 of base64url-43, base64-44, and hex-32, and 1 of hex-64; the SEC-049 lag rule refused 0 of 1,000,000 in each of 6 forms, base64-32 and upper-case hex-32 included); if it ever happens, generate another. A keyboard row such as `qwertyuiop` is not recognised.
 
 What the operator sees. The server does not start. The log line of "What a failure looks like" lists the variable and one fixed rule text, never the value:
 

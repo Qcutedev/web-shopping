@@ -827,6 +827,22 @@ describe("AUTH_SECRET in production: values that are plainly not random (SEC-044
       "better-auth-secret-12345678901234567890\u200b",
     ],
     ["the test secret in upper case", "INTEGRATION-TEST-SECRET-0123456789-ABCDEFGHIJ"],
+    // SEC-049: the lag rule (one code-point difference at a lag of 1 to 8 over half the positions).
+    ["a word with a counter", "secret1secret2secret3secret4secret5"],
+    ["a 7-run with changing separators", "abcdefg!abcdefg@abcdefg#abcdefg$"],
+    ["the alphabet in alternating case", "aBcDeFgHiJkLmNoPqRsTuVwXyZ012345"],
+    ["two interleaved sequences", "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6"],
+    ["steps of 1 and 2 alternating", "acdfgijlmoprsuvxyACDFGIJLMOPRSUVX"],
+    ["counting in hexadecimal", "000102030405060708090a0b0c0d0e0f"],
+    ["a period of 5 with one changing character", "Kd2Xw1Kd2Xw2Kd2Xw3Kd2Xw4Kd2Xw5Kd2Xw6"],
+    // SEC-049: the prefixes of the two published values, in any case, with a random tail.
+    ["the library prefix and a random tail", "better-auth-secret-Kd2Xw9Lm4Rt6Pn3b"],
+    ["the library prefix in mixed case", "Better-Auth-Secret:Kd2Xw9Lm4Rt6Pn3bYc5"],
+    ["the test prefix and a random tail", "integration-test-secret-Kd2Xw9Lm4Rt6Pn3b"],
+    [
+      "the test secret with two characters changed",
+      "integration-test-secret-0123456799-abcdefghXX",
+    ],
   ] as const;
 
   it("refuses each, in parseEnv and readAuthSecret alike, naming the variable and the rule", () => {
@@ -893,10 +909,46 @@ describe("AUTH_SECRET in production: values that are plainly not random (SEC-044
     expect(parseEnv(production()).authSecret).toBe(AUTH_SECRET);
   });
 
+  it("accepts random values of more forms in production: the lag rule refuses none (SEC-049)", async () => {
+    const { randomBytes } = await import("node:crypto");
+    // Measured when the rule was written: 0 of 1,000,000 in each of hex-64, hex-32, base64-44, and
+    // base64url-43 refused by the lag rule. The older rules refuse about 2 in 1,000,000, so one
+    // refusal per form in 3,000 values is allowed (the chance of 2 or more is below 1e-9).
+    const forms = {
+      "base64url-43": () => randomBytes(32).toString("base64url"),
+      "hex-32": () => randomBytes(16).toString("hex"),
+      "hex-32-upper": () => randomBytes(16).toString("hex").toUpperCase(),
+      "hex-64": () => randomBytes(32).toString("hex"),
+      "base64-44": () => randomBytes(32).toString("base64"),
+      "base64-32": () => randomBytes(24).toString("base64"),
+    };
+    for (const [form, generate] of Object.entries(forms)) {
+      let refused = 0;
+      for (let i = 0; i < 3_000; i += 1) {
+        try {
+          parseEnv(production({ AUTH_SECRET: generate() }));
+        } catch (error) {
+          if (!(error instanceof EnvValidationError)) throw error;
+          refused += 1;
+        }
+      }
+      expect(refused, form).toBeLessThanOrEqual(1);
+    }
+  });
+
   it("a placeholder is reported once, with the placeholder rule, even when it is also weak", () => {
     expect(issuesOf(production({ AUTH_SECRET: "not_a_secret".repeat(3) }))).toEqual([
       { variable: "AUTH_SECRET", rule: ENV_RULES.authSecretPlaceholder },
     ]);
+    // SEC-049: also when only the lag rule and the prefix rule would refuse it.
+    for (const secret of [
+      "not_a_secret1not_a_secret2not_a_secret3",
+      "better-auth-secret-not_a_secret-Kd2Xw9Lm4Rt6",
+    ]) {
+      expect(issuesOf(production({ AUTH_SECRET: secret })), secret).toEqual([
+        { variable: "AUTH_SECRET", rule: ENV_RULES.authSecretPlaceholder },
+      ]);
+    }
   });
 });
 

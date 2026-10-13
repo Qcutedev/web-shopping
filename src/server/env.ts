@@ -407,12 +407,58 @@ function containsPublishedSecret(secret: string): boolean {
 }
 
 /**
- * SEC-044, SEC-047: a production `AUTH_SECRET` that is long enough but plainly not random.
+ * SEC-049: the prefixes of the two published values (D-036 item 6). A value that starts with one
+ * is refused in any case, so the published value with its tail changed is refused as well.
+ */
+const PUBLISHED_PREFIXES: readonly string[] = ["better-auth-secret", "integration-test-secret"];
+
+function hasPublishedPrefix(secret: string): boolean {
+  const lower = secret.toLowerCase();
+  return PUBLISHED_PREFIXES.some((prefix) => lower.startsWith(prefix));
+}
+
+/**
+ * SEC-049: the largest lag (distance between two compared positions) of the lag rule, and the
+ * share of positions one code-point difference must cover to count as a pattern. Measured
+ * (docs/reviews/SEC-046-047-recheck.md): refuses `secret1secret2...`, interleaved runs, and
+ * hexadecimal counting; 0 of 1,000,000 random values refused in each of hex-64, hex-32, base64-44,
+ * and base64url-43.
+ */
+const MAX_PATTERN_LAG = 8;
+const MIN_PATTERN_SHARE = 0.5;
+
+/**
+ * SEC-049: true when, for some lag from 1 to MAX_PATTERN_LAG, a single difference between the
+ * code points `lag` apart covers at least MIN_PATTERN_SHARE of the positions. Difference 0 is a
+ * period of `lag` ("abcdefg!abcdefg@" repeats at lag 8); a constant non-zero difference is a
+ * counter or an interleaved sequence ("a1b2c3d4" at lag 2). Text is printable ASCII here.
+ */
+function hasLagPattern(text: string): boolean {
+  for (let lag = 1; lag <= MAX_PATTERN_LAG; lag += 1) {
+    const positions = text.length - lag;
+    if (positions <= 0) break;
+    const counts = new Map<number, number>();
+    let most = 0;
+    for (let index = 0; index < positions; index += 1) {
+      const difference = text.charCodeAt(index + lag) - text.charCodeAt(index);
+      const count = (counts.get(difference) ?? 0) + 1;
+      counts.set(difference, count);
+      if (count > most) most = count;
+    }
+    if (most >= positions * MIN_PATTERN_SHARE) return true;
+  }
+  return false;
+}
+
+/**
+ * SEC-044, SEC-047, SEC-049: a production `AUTH_SECRET` that is long enough but plainly not random.
  * Refused: a code point outside printable ASCII U+0021 to U+007E (blanks, invisible padding,
  * look-alikes; every documented generator emits ASCII); fewer than
  * AUTH_SECRET_MIN_DISTINCT_CHARACTERS distinct characters; a shorter unit repeated; a run of 8
  * characters that occurs twice; a run of 8 characters with a constant code-point step; a
- * published value inside it, in any case. This is a floor against mistakes, not an entropy
+ * published value inside it, in any case; a start with `better-auth-secret` or
+ * `integration-test-secret`, in any case; a single code-point difference at one lag from 1 to 8
+ * that covers at least half of the positions (SEC-049). This is a floor against mistakes, not an entropy
  * measurement: a value that passes is not thereby random. A random value from the generation
  * commands of docs/DEPLOYMENT.md is refused with a probability below one in 100,000 (measured
  * in src/server/env.test.ts).
@@ -424,7 +470,9 @@ function isWeakAuthSecret(secret: string): boolean {
     isRepetition(secret) ||
     hasRepeatedWindow(secret) ||
     hasConstantStepRun(secret) ||
-    containsPublishedSecret(secret)
+    containsPublishedSecret(secret) ||
+    hasPublishedPrefix(secret) ||
+    hasLagPattern(secret)
   );
 }
 

@@ -417,22 +417,19 @@ describe("SEC-047 re-check: no part of a refused secret reaches an error or the 
 // SEC-049
 
 describe("SEC-049 the pattern floor misses periodic values with a counter, interleaved runs, and lag patterns", () => {
-  it.fails(
-    "production refuses plainly patterned values that the four SEC-047 rules let through",
-    () => {
-      for (const weak of [
-        "secret1secret2secret3secret4secret5", // a 7-character word with a counter
-        "abcdefg!abcdefg@abcdefg#abcdefg$", // a 7-character run with changing separators
-        "aBcDeFgHiJkLmNoPqRsTuVwXyZ012345", // the alphabet in alternating case
-        "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6", // two interleaved sequences
-        "acdfgijlmoprsuvxyACDFGIJLMOPRSUVX", // steps of 1 and 2 alternating
-        "000102030405060708090a0b0c0d0e0f", // counting in hexadecimal
-      ]) {
-        expect(
-          issuesOf(() => parseEnv(production({ AUTH_SECRET: weak }))),
-          JSON.stringify(weak),
-        ).toEqual(WEAK);
-      }
-    },
-  );
+  it("production refuses plainly patterned values that the four SEC-047 rules let through", () => {
+    for (const weak of [
+      "secret1secret2secret3secret4secret5", // a 7-character word with a counter
+      "abcdefg!abcdefg@abcdefg#abcdefg$", // a 7-character run with changing separators
+      "aBcDeFgHiJkLmNoPqRsTuVwXyZ012345", // the alphabet in alternating case
+      "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6", // two interleaved sequences
+      "acdfgijlmoprsuvxyACDFGIJLMOPRSUVX", // steps of 1 and 2 alternating
+      "000102030405060708090a0b0c0d0e0f", // counting in hexadecimal
+    ]) {
+      expect(
+        issuesOf(() => parseEnv(production({ AUTH_SECRET: weak }))),
+        JSON.stringify(weak),
+      ).toEqual(WEAK);
+    }
+  });
 });
