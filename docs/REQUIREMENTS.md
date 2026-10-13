@@ -319,13 +319,13 @@ Q7 to Q41 are answered and are listed under [Confirmed decisions](#confirmed-dec
 
 ## Traceability
 
-[PROJECT_PLAN.md](PROJECT_PLAN.md) is authoritative for what each task covers; this table is the reverse index and shows gaps. Test file mapping is recorded in [TEST_STRATEGY.md](TEST_STRATEGY.md) as tests are written. Unit and component test files exist next to the server utilities and the design-system primitives (`src/**/*.test.ts`, `src/**/*.test.tsx`) and under `tests/security/`. None of them tests a marketplace requirement end to end, and the integration and end-to-end suites do not exist yet. A "Test files" cell that starts with "partial" names existing files that check one stated part of the requirement at unit or component level; what it leaves uncovered is said in the cell. "none yet" means no existing test file covers the requirement.
+[PROJECT_PLAN.md](PROJECT_PLAN.md) is authoritative for what each task covers; this table is the reverse index and shows gaps. Test file mapping is recorded in [TEST_STRATEGY.md](TEST_STRATEGY.md) as tests are written. Unit and component test files exist next to the server utilities and the design-system primitives (`src/**/*.test.ts`, `src/**/*.test.tsx`) and under `tests/security/`. None of them tests a marketplace requirement end to end, and the end-to-end suite does not exist yet. Integration test files exist under `tests/integration/catalog/`; they have never run against PostgreSQL because Docker is down, so the cells that cite them are not evidence of a passing check. A "Test files" cell that starts with "partial" names existing files that check one stated part of the requirement at unit or component level; what it leaves uncovered is said in the cell. "none yet" means no existing test file covers the requirement.
 
 | Requirement | Tasks | Test files |
 | --- | --- | --- |
 | REQ-C-01, REQ-C-02 | T-015 | none yet |
 | REQ-C-03, REQ-C-04 | T-030 | none yet |
-| REQ-C-05 to REQ-C-09 | T-020, T-021 | none yet |
+| REQ-C-05 to REQ-C-09 | T-020, T-021 | partial, API read side only (T-020; no storefront page exists, T-021 none yet). Unit: `src/modules/catalog/schema.test.ts` (pagination, price filter, sort, search text, slugs), `src/modules/catalog/service.test.ts` (list and detail shapes, sold-out mark, no hidden fields), `src/modules/catalog/visibility.test.ts`, `src/modules/catalog/repository.test.ts`. Security, with a mocked database: `tests/security/t020-t018-catalog-shell.test.ts` (visible rows only, same 404 for hidden and unknown, 400 before any read). Integration, never run against PostgreSQL because Docker is down: `tests/integration/catalog/endpoints.test.ts` (list, search, filter, sort, paging, detail, reviews, categories, store pages), `tests/integration/catalog/visibility.test.ts` (hidden cases give 404, sold-out stays listed, store page and category rules). Homepage, empty state, "sample" label, gallery, and Thai text on pages: none yet |
 | REQ-C-10 | T-031, T-034 | none yet |
 | REQ-C-11 to REQ-C-13 | T-032, T-034 | none yet |
 | REQ-C-14 | T-035 | none yet |
@@ -336,20 +336,20 @@ Q7 to Q41 are answered and are listed under [Confirmed decisions](#confirmed-dec
 | REQ-S-07, REQ-S-08 | T-043, T-044 | none yet |
 | REQ-A-01 to REQ-A-10 | T-050, T-051 | none yet |
 | REQ-A-11 | T-016 | none yet |
-| REQ-N-01 | T-017, T-018 | partial: `src/lib/format.test.ts`, `src/components/ui/price.test.tsx` (THB and `th-TH` formatting of the price primitive only; Thai text on pages: none yet) |
+| REQ-N-01 | T-017, T-018 | partial: `src/lib/format.test.ts` (THB amounts, and dates and times shown in Asia/Bangkok: "shows the Bangkok day, not the UTC day", "shows the Bangkok time of day", "display time zone"), `src/components/ui/price.test.tsx` (THB and `th-TH` formatting of the price primitive); Thai text on pages: none yet |
 | REQ-N-02 | T-017, T-018 | none yet |
 | REQ-N-03 | T-017, T-021, T-034, T-044, T-051 | partial: `src/components/ui/tokens.test.ts` (contrast of the colour tokens), `src/components/ui/input.test.tsx`, `src/components/ui/field.test.tsx` (labels and error text of the form primitives), `src/components/ui/button.test.tsx` (focus ring), `src/components/ui/quantity-stepper.test.tsx` (keyboard stepping); primitives only, no page: none yet |
 | REQ-N-04 | T-015, T-045, T-052 | none yet |
 | REQ-N-05 | T-023, T-033 | none yet |
-| REQ-N-06 | T-020, T-050 | none yet |
+| REQ-N-06 | T-020, T-050 | partial, catalog lists only: `src/modules/catalog/schema.test.ts` (page size 1 to 50, 51 refused, default 20), `tests/security/t020-t018-catalog-shell.test.ts` (page size 50 is the most rows one request asks for); integration, never run against PostgreSQL because Docker is down: `tests/integration/catalog/endpoints.test.ts` ("caps the page size at 50: 50 is served, 51 is 400", reviews and categories "paginates and refuses pageSize 51"). Admin lists (T-050): none yet |
 | REQ-N-07 | T-011, T-019 | partial: `src/server/logger.test.ts`, `tests/security/t019-server-utilities.test.ts` (structured log lines and redaction only; health endpoint and environment validation: none yet) |
 | REQ-N-08 | T-011 | none yet |
 | REQ-N-09 | T-014, T-032, T-034 | none yet |
 | REQ-N-10 | T-010, T-012 | none yet |
-| REQ-N-12 | T-018 | none yet |
+| REQ-N-12 | T-018 | `src/i18n/site-name.test.ts` ("is defined once, in src/i18n/th.ts", "is not an empty string") |
 | BR-01 to BR-16 | T-013 (schema) | none yet |
 | BR-03, BR-04 | T-032 | none yet |
-| BR-05 | T-020 | none yet |
+| BR-05 | T-020 | partial, read side: `src/modules/catalog/visibility.test.ts`, `tests/security/t020-t018-catalog-shell.test.ts` (mocked database); integration, never run against PostgreSQL because Docker is down: `tests/integration/catalog/visibility.test.ts` ("hidden case %s"). Cart and checkout use of the rule: none yet |
 | BR-06 | T-040 | none yet |
 | BR-07 to BR-15 | T-032 | none yet |
 | BR-16 | T-013, T-031, T-032 | none yet |
@@ -364,16 +364,16 @@ BR-17 to BR-30 were added on 2026-10-11 from D-025. The tasks below are the ones
 | BR-20 (OQ-07) | T-013, T-032, T-034 | none yet |
 | BR-21 (OQ-08) | T-013, T-032, T-043, T-050 | none yet |
 | BR-22 (OQ-09) | T-031, T-032, T-034 | none yet |
-| BR-23 (OQ-10) | T-020 | none yet |
-| BR-24 (OQ-11) | T-020, T-021 | none yet |
+| BR-23 (OQ-10) | T-020 | partial, integration only, never run against PostgreSQL because Docker is down: `tests/integration/catalog/visibility.test.ts` ("categories (BR-23)", "brings back the products of a category switched on again"). Cart and checkout refusal: none yet |
+| BR-24 (OQ-11) | T-020, T-021 | partial: `src/modules/catalog/visibility.test.ts` ("isSoldOut (BR-24)"), `src/modules/catalog/service.test.ts` (stock 0 marked sold out); integration, never run against PostgreSQL because Docker is down: `tests/integration/catalog/visibility.test.ts` ("keeps a sold-out product listed and readable, marked soldOut (BR-24)"). Mark on pages: none yet |
 | BR-25 (OQ-12) | T-021, T-042, T-043 | none yet |
 | BR-26 (OQ-13) | T-016, T-050 | none yet |
-| BR-27 (OQ-14) | T-020, T-050 | none yet |
+| BR-27 (OQ-14) | T-020, T-050 | partial, public store page only (admin side T-050: none yet); integration, never run against PostgreSQL because Docker is down: `tests/integration/catalog/visibility.test.ts` ("store pages (BR-27)") |
 | BR-28 (OQ-16) | T-013, T-050 | none yet |
 | BR-29 (OQ-17) | T-013, T-043 | none yet |
 | BR-30 (OQ-23) | T-021, T-031, T-034 | none yet |
 | BR-09 store name snapshot (OQ-18) | T-013 | none yet |
-| REQ-N-12 placeholder name (OQ-15) | T-018 | none yet |
+| REQ-N-12 placeholder name (OQ-15) | T-018 | `src/i18n/site-name.test.ts` |
 
 BR-31 to BR-38 were added, and BR-12, BR-18 to BR-20, BR-22, BR-23, BR-25 to BR-28, and BR-30 were refined, on 2026-10-11 from D-026. The "Covers" columns in PROJECT_PLAN.md list BR-17 to BR-38 against the same tasks as the D-025, D-026, and D-028 tables here; no gap is open for these rules. The tasks below are the ones STATUS.md names as blocked by the corresponding owner question, plus the task that already covers the story the rule is stated in.
 
@@ -385,7 +385,7 @@ BR-31 to BR-38 were added, and BR-12, BR-18 to BR-20, BR-22, BR-23, BR-25 to BR-
 | BR-38 (OQ-29) | T-031, T-034 | none yet |
 | BR-22, BR-30 checkout stops for re-confirmation (OQ-30) | T-031, T-032, T-034 | none yet |
 | BR-30 message wording (OQ-46) | T-021, T-034 | none yet |
-| BR-23, BR-27 return on reactivation (OQ-31) | T-020, T-050 | none yet |
+| BR-23, BR-27 return on reactivation (OQ-31) | T-020, T-050 | partial, catalog side; integration, never run against PostgreSQL because Docker is down: `tests/integration/catalog/visibility.test.ts` ("return on reactivation (D-026, OQ-31)"). Admin side (T-050): none yet |
 | BR-27 paid orders of a deactivated owner (OQ-32) | T-050 | none yet |
 | BR-25 (OQ-33) | T-042, T-043 | none yet |
 | BR-33 (OQ-34) | T-043, T-050 | none yet |
