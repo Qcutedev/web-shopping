@@ -107,3 +107,14 @@ describe("ProfileCard", () => {
     expect(link.getAttribute("href")).toBe("/sign-in?next=%2Faccount");
   });
 });
+
+describe("ProfileCard clipping (SEC-042 display part)", () => {
+  it("clips a name with 1,000 combining marks in its own box and its cell", () => {
+    const stacked = "ก" + "́".repeat(1000);
+    const { container } = render(<ProfileCard profile={{ ...profile, name: stacked }} />);
+    const bdi = container.querySelector("dd > bdi");
+    expect(bdi?.textContent).toBe(stacked);
+    expect(bdi?.parentElement?.classList.contains("overflow-hidden")).toBe(true);
+    expect(bdi?.parentElement?.classList.contains("max-w-full")).toBe(true);
+  });
+});

@@ -6,7 +6,7 @@ import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { InputField } from "@/components/ui/input";
-import { UserName } from "@/components/user-name";
+import { USER_NAME_CONTAINER_CLASS, UserName } from "@/components/user-name";
 import { th } from "@/i18n/th";
 import type { ApiFailure } from "@/lib/api-client/http";
 import { updateProfile } from "@/lib/api-client/me";
@@ -161,11 +161,11 @@ export function ProfileCard({ profile }: { profile: ProfileView }) {
         <>
           <dl className="mt-4 grid gap-4 sm:grid-cols-[max-content_1fr] sm:gap-x-8">
             <dt className="type-label text-foreground-secondary">{th.account.profile.name}</dt>
-            <dd>
+            <dd className={USER_NAME_CONTAINER_CLASS}>
               <UserName>{current.name}</UserName>
             </dd>
             <dt className="type-label text-foreground-secondary">{th.account.profile.email}</dt>
-            <dd className="min-w-0 break-words">
+            <dd className={`${USER_NAME_CONTAINER_CLASS} break-words`}>
               {current.email}
               <span className="type-small text-foreground-muted block">
                 {th.account.profile.emailNote}

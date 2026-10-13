@@ -208,3 +208,19 @@ describe("AddressBook", () => {
     expect(screen.getByText(NAME)).toBeTruthy();
   });
 });
+
+describe("AddressBook clipping (SEC-042 display part)", () => {
+  it("clips every user-typed value, and its row, when a value carries 1,000 combining marks", () => {
+    const stacked = "ก" + "́".repeat(1000);
+    const { container } = renderBook([
+      address({ recipientName: stacked, line1: stacked, province: stacked }),
+    ]);
+    const names = [...container.querySelectorAll("li bdi")];
+    expect(names.length).toBe(5);
+    for (const node of names) {
+      expect(node.parentElement?.classList.contains("overflow-hidden")).toBe(true);
+      expect(node.parentElement?.classList.contains("max-w-full")).toBe(true);
+    }
+    expect(names[0]?.textContent).toBe(stacked);
+  });
+});

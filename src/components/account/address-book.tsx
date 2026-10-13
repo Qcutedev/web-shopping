@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { UserName } from "@/components/user-name";
+import { USER_NAME_CONTAINER_CLASS, UserName } from "@/components/user-name";
 import { fill } from "@/i18n/fill";
 import { th } from "@/i18n/th";
 import type { ApiFailure } from "@/lib/api-client/http";
@@ -139,7 +139,7 @@ export function AddressBook({
             return (
               <Card as="li" key={address.id} padding="panel" className="flex flex-col gap-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <p className="type-card-title min-w-0 break-words">
+                  <p className={`type-card-title ${USER_NAME_CONTAINER_CLASS}`}>
                     <UserName>{address.recipientName}</UserName>
                   </p>
                   {address.isDefault ? (
@@ -147,7 +147,7 @@ export function AddressBook({
                   ) : null}
                 </div>
                 <p className="type-body text-foreground-secondary">{address.phone}</p>
-                <p className="type-body break-words">
+                <p className={`type-body ${USER_NAME_CONTAINER_CLASS}`}>
                   <UserName>{address.line1}</UserName> <UserName>{address.subdistrict}</UserName>{" "}
                   <UserName>{address.district}</UserName> <UserName>{address.province}</UserName>{" "}
                   {address.postalCode}
