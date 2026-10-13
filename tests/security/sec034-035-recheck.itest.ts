@@ -180,7 +180,9 @@ describe("SEC-038 a whitespace-padded name is read as the __Host- session cookie
     // trimmed. Only a raw 0xA0 byte (not valid UTF-8) reaches the parser as a lone U+00A0.
     const runtime = productionRuntime();
     const { value } = await productionSession(runtime);
-    expect(await sessionUserFor(runtime, `theme=dark; Â ${HOST_NAME}=${value}`)).toBeNull();
+    expect(
+      await sessionUserFor(runtime, `theme=dark; \u00c2\u00a0${HOST_NAME}=${value}`),
+    ).toBeNull();
   });
 
   it("a padded attacker cookie sent first does not win over the victim's real cookie", async () => {

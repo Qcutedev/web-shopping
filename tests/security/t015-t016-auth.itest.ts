@@ -91,12 +91,12 @@ describe("SEC-032 per-email sign-in limit: one address locks any account out", (
 
 describe("SEC-033 sign-up display name accepts bidirectional control characters", () => {
   for (const [label, char] of [
-    ["U+202E right-to-left override", "‮"],
-    ["U+202D left-to-right override", "‭"],
-    ["U+2066 left-to-right isolate", "⁦"],
-    ["U+2067 right-to-left isolate", "⁧"],
-    ["U+200F right-to-left mark", "‏"],
-    ["U+061C Arabic letter mark", "؜"],
+    ["U+202E right-to-left override", "\u202e"],
+    ["U+202D left-to-right override", "\u202d"],
+    ["U+2066 left-to-right isolate", "\u2066"],
+    ["U+2067 right-to-left isolate", "\u2067"],
+    ["U+200F right-to-left mark", "\u200f"],
+    ["U+061C Arabic letter mark", "\u061c"],
   ] as const) {
     it(`a name with ${label} is 400 VALIDATION_ERROR and creates nothing`, async () => {
       const runtime = makeRuntime();

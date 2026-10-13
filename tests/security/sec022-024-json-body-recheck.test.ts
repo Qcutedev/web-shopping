@@ -290,7 +290,7 @@ describe("SEC-022 re-check: a body that is not valid UTF-8 is refused, whatever 
       ),
     ).toEqual([1]);
     // Inside a string it is a character the client sent, and it is kept.
-    expect(await readJsonBody(post(bytesOf('"a', mark, 'b"')))).toBe("a﻿b");
+    expect(await readJsonBody(post(bytesOf('"a', mark, 'b"')))).toBe("a\ufeffb");
     // A mark is not a document, a second mark is not blank space, and a mark is not a separator.
     await expectRefused(post(Uint8Array.from(mark)), "mark alone");
     await expectRefused(post(bytesOf(mark, mark, "{}")), "two marks");
@@ -331,10 +331,10 @@ describe("SEC-022 re-check: a body that is not valid UTF-8 is refused, whatever 
       ["U+0080", [0xc2, 0x80], "\u0080"],
       ["U+07FF", [0xdf, 0xbf], "߿"],
       ["U+0800", [0xe0, 0xa0, 0x80], "ࠀ"],
-      ["U+D7FF", [0xed, 0x9f, 0xbf], "퟿"],
-      ["U+E000", [0xee, 0x80, 0x80], ""],
+      ["U+D7FF", [0xed, 0x9f, 0xbf], "\ud7ff"],
+      ["U+E000", [0xee, 0x80, 0x80], "\ue000"],
       ["U+FFFD", [0xef, 0xbf, 0xbd], "�"],
-      ["U+FFFF", [0xef, 0xbf, 0xbf], "￿"],
+      ["U+FFFF", [0xef, 0xbf, 0xbf], "\uffff"],
       ["U+10000", [0xf0, 0x90, 0x80, 0x80], "\u{10000}"],
       ["U+10FFFF", [0xf4, 0x8f, 0xbf, 0xbf], "\u{10FFFF}"],
     ];
@@ -833,10 +833,10 @@ describe("SEC-024 re-check: a body that breaks off is a client error that keeps 
       const raw = (await answer(await rejection(readJsonBody(probe.request)))).raw;
       expect(raw.toLowerCase(), label).not.toContain(SECRET.toLowerCase());
     }
-    const split = breaksOff(Object.assign(new Error("x"), { name: 'a\n{"level":"error"} b' }));
+    const split = breaksOff(Object.assign(new Error("x"), { name: 'a\n{"level":"error"}\u2028b' }));
     const splitRaw = (await answer(await rejection(readJsonBody(split.request)))).raw;
     expect(splitRaw.split("\n")).toHaveLength(1);
-    expect(splitRaw).not.toContain(" ");
+    expect(splitRaw).not.toContain("\u2028");
   });
 
   // SEC-027 (OPEN, Low). The two labels are whatever strings the source's error carries, cut to
@@ -1100,7 +1100,7 @@ describe("CR-02 re-check: a CONFLICT reason is a fixed word, never text from a r
       "DUPLICATE_",
       "1DUPLICATE",
       "DUPLICATE-SKU",
-      "DUPLICATE_SKU ",
+      "DUPLICATE_SKU\u2028",
       "ＤＵＰＬＩＣＡＴＥ",
       `A${"_A".repeat(40)}`,
       "",

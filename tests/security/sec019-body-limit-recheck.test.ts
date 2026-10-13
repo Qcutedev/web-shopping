@@ -195,7 +195,7 @@ describe("SEC-019 re-check: the declared length is judged before any of the body
       "1 1",
       "1\t1",
       "²",
-      "1 ",
+      "1\u00a0",
       "0x",
       "null",
       "true",

@@ -632,8 +632,8 @@ describe("SEC-027 re-check: a label is written only in the form of a class name 
       "ก",
       "ส",
       "é",
-      " ",
-      "‮",
+      "\u2028",
+      "\u202e",
       "\u0000",
       "\ud83d",
       "\ude00",
@@ -676,7 +676,7 @@ describe("SEC-027 re-check: a label is written only in the form of a class name 
       `\nTypeError`,
       ` ${MARKER}`,
       `${MARKER} `,
-      `TypeError ${MARKER}`,
+      `TypeError\u2028${MARKER}`,
       `${MARKER}\u0000`,
       `TypeกError${MARKER}`,
       `password=${MARKER}`,
@@ -938,7 +938,7 @@ describe("SEC-028 re-check: a string that is not well-formed Unicode is refused 
       [`"\u{1f600}"`, "\u{1f600}"],
       [`{"${HIGH}${LOW}":"${HIGH}${LOW}${HIGH}${LOW}"}`, { "\u{1f600}": "\u{1f600}\u{1f600}" }],
       [`"\\udbff\\udfff"`, "\u{10ffff}"],
-      [`"\\ud7ff\\ue000\\uffff\\ufffd"`, "퟿￿�"],
+      [`"\\ud7ff\\ue000\\uffff\\ufffd"`, "\ud7ff\ue000\uffff�"],
       [`"\\\\ud83d"`, "\\ud83d"],
       // The half is in a value that the parser itself discards: what is handed out is clean.
       [`{"a":"${HIGH}","a":"ok"}`, { a: "ok" }],
