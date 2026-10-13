@@ -44,6 +44,24 @@ const DB_LAYER_IMPORTERS = [
 // `prisma/config`, which the driver pattern does not cover.
 const GENERATED_CLIENT = "prisma/generated/**";
 const siblingPattern = { ...layerPattern, regex: SIBLING_DB };
+
+// D-022 (CR-65): a module reaches the auth layer only through the pure file src/server/auth/actor.ts
+// (the Actor type and the permission helpers). Everything else there (session.ts, auth.ts,
+// routes.ts, config.ts, ...) reads the database or the framework and belongs to route handlers and
+// the auth layer itself. The allow-list holds file names without extension; add one only with a
+// decision, and only for a file that imports no database client and no framework code.
+const AUTH_LAYER = "(^|/)server/auth";
+const MODULE_AUTH_ALLOWED = ["actor"];
+const authPattern = {
+  regex: `${AUTH_LAYER}(/(?!(${MODULE_AUTH_ALLOWED.join("|")})(\\.[cm]?[jt]s)?$)|$)`,
+  message:
+    "Modules import src/server/auth only through actor.ts (D-022). Take what you need as a parameter, or import the pure helpers from actor.",
+};
+// Test files of a module may import any part of the auth layer: they exercise it.
+const MODULE_TESTS = [
+  "src/modules/**/*.test.{ts,tsx,mts,cts}",
+  "src/modules/**/*.itest.{ts,tsx,mts,cts}",
+];
 const normalPattern = {
   regex: NOT_NORMAL,
   message: "Write import paths in normal form so the architecture import rules can check them.",
@@ -97,6 +115,16 @@ const eslintConfig = defineConfig([
   {
     files: ["prisma/generated/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"],
     rules: importGuard([layerPattern], layerPattern.message),
+  },
+  // Module code (not its tests): the auth layer only through actor.ts. A later block replaces the
+  // rules of an earlier one for the same file, so this block repeats the driver pattern.
+  {
+    files: ["src/modules/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"],
+    ignores: MODULE_TESTS,
+    rules: importGuard(
+      [driverPattern, authPattern],
+      "Only src/server/db may import the database client or driver, and modules import src/server/auth only through actor.ts (D-022).",
+    ),
   },
   // Inside src/server the database layer is a sibling, so short relative paths reach it too.
   {
