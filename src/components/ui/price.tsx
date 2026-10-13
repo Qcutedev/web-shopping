@@ -1,6 +1,6 @@
 import type { HTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
-import { formatSatang } from "./format-price";
+import { formatSatang } from "@/lib/format";
 
 export type PriceSize = "inline" | "card" | "page";
 
