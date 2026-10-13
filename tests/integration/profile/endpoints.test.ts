@@ -480,6 +480,48 @@ describe("PATCH and DELETE /api/v1/me/addresses/{id}: ownership", () => {
     expect(second.status).toBe(404);
   });
 
+  it("an address deleted while its edit waits is 404, and the edit's default switch is undone (CR-91)", async () => {
+    const user = await signedIn();
+    const kept = await addAddress(user, { isDefault: true });
+    const doomed = await addAddress(user);
+    let edit: Promise<Response> | undefined;
+
+    // The DELETE holds the row lock and stays uncommitted, so the edit's ownership read still
+    // sees the address, the edit clears `kept` as the old default, and its UPDATE waits on the
+    // lock. The DELETE then commits and the UPDATE matches no row (P2025).
+    await db.$transaction(
+      async (tx) => {
+        await tx.address.delete({ where: { id: doomed } });
+        edit = patchAddressRoute(
+          request("PATCH", `/api/v1/me/addresses/${doomed}`, {
+            cookie: user.cookie,
+            body: { isDefault: true, province: "เชียงใหม่" },
+          }),
+          idParams(doomed),
+        );
+        const deadline = Date.now() + 5_000;
+        for (;;) {
+          const [waiting] = await tx.$queryRaw<{ n: number }[]>`
+            SELECT count(*)::int AS n FROM pg_stat_activity
+            WHERE datname = current_database()
+              AND pid <> pg_backend_pid()
+              AND wait_event_type = 'Lock'`;
+          if ((waiting?.n ?? 0) > 0) break;
+          if (Date.now() > deadline) throw new Error("the edit never waited on the deleted row");
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+      },
+      { timeout: 10_000 },
+    );
+
+    if (edit === undefined) throw new Error("the edit was not started");
+    const response = await edit;
+    expect(response.status).toBe(404);
+    expect(await body(response)).toMatchObject({ error: { code: "NOT_FOUND" } });
+    expect(await db.address.count({ where: { id: doomed } })).toBe(0);
+    expect(await defaultsOf(user.userId)).toEqual([kept]);
+  });
+
   it("refuses an invalid edit and changes nothing", async () => {
     const user = await signedIn();
     const id = await addAddress(user);

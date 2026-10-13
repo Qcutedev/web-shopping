@@ -123,9 +123,14 @@ beforeEach(() => {
   calls.length = 0;
   db.$transaction.mockImplementation(async (run: (client: typeof tx) => Promise<unknown>) => {
     calls.push("begin");
-    const result = await run(tx);
-    calls.push("commit");
-    return result;
+    try {
+      const result = await run(tx);
+      calls.push("commit");
+      return result;
+    } catch (error) {
+      calls.push("rollback");
+      throw error;
+    }
   });
   tx.$queryRaw.mockImplementation(async () => {
     calls.push("lock");
@@ -365,6 +370,41 @@ describe("updateAddress", () => {
     await updateAddress(CUSTOMER, "addr_1", { province: "เชียงใหม่", phone: undefined });
     const data = (tx.address.update.mock.calls[0]?.[0] as { data: Record<string, unknown> }).data;
     expect(data).toEqual({ province: "เชียงใหม่" });
+  });
+
+  describe("an address deleted between the ownership read and the update (CR-91)", () => {
+    it("is 404, not a 500, when the update finds no row (P2025)", async () => {
+      tx.address.update.mockImplementation(async () => {
+        calls.push("update");
+        throw recordNotFound();
+      });
+      expect(await refusal(updateAddress(CUSTOMER, "addr_1", { province: "เชียงใหม่" }))).toBe(
+        "404 NOT_FOUND",
+      );
+      expect(calls).toEqual(["begin", "find-owned", "update", "rollback"]);
+    });
+
+    it("rolls back the default it already cleared before answering 404", async () => {
+      tx.address.update.mockImplementation(async () => {
+        calls.push("update");
+        throw recordNotFound();
+      });
+      expect(await refusal(updateAddress(CUSTOMER, "addr_1", { isDefault: true }))).toBe(
+        "404 NOT_FOUND",
+      );
+      // The P2025 leaves the transaction callback, so the clear of the old default is undone.
+      expect(calls).toEqual(["begin", "lock", "find-owned", "clear-default", "update", "rollback"]);
+    });
+
+    it("passes any other database error of the update on", async () => {
+      const failure = new Prisma.PrismaClientKnownRequestError("Unique constraint failed.", {
+        code: "P2002",
+        clientVersion: "test",
+      });
+      tx.address.update.mockRejectedValue(failure);
+      await expect(updateAddress(CUSTOMER, "addr_1", { isDefault: true })).rejects.toBe(failure);
+      expect(calls.at(-1)).toBe("rollback");
+    });
   });
 });
 

@@ -174,26 +174,37 @@ export async function insertAddress(userId: string, input: AddressCreate): Promi
  * Changes an address the user owns and returns it, or null when the user owns no address with
  * this id (unknown and foreign alike). When the write makes it the default, the previous default
  * is cleared in the same transaction.
+ *
+ * Concurrent delete (code-review finding CR-91). The ownership read takes no row lock, so a
+ * DELETE of the same address can commit between the read and the update. The update then
+ * matches no row and Prisma throws P2025. That error is left to leave the transaction, so the
+ * transaction rolls back (a default already cleared in it is restored), and only then is it
+ * turned into null: the caller answers 404, as for an address that does not exist.
  */
 export async function updateOwnedAddress(
   userId: string,
   addressId: string,
   update: AddressWrite,
 ): Promise<AddressRow | null> {
-  return db.$transaction(async (tx) => {
-    if (update.isDefault === true) await lockUserForDefaultSwitch(tx, userId);
-    const owned = await tx.address.findFirst({
-      where: { id: addressId, userId },
-      select: { id: true },
+  try {
+    return await db.$transaction(async (tx) => {
+      if (update.isDefault === true) await lockUserForDefaultSwitch(tx, userId);
+      const owned = await tx.address.findFirst({
+        where: { id: addressId, userId },
+        select: { id: true },
+      });
+      if (owned === null) return null;
+      if (update.isDefault === true) await clearDefault(tx, userId, addressId);
+      return tx.address.update({
+        where: { id: addressId, userId },
+        data: update,
+        select: ADDRESS_SELECT,
+      });
     });
-    if (owned === null) return null;
-    if (update.isDefault === true) await clearDefault(tx, userId, addressId);
-    return tx.address.update({
-      where: { id: addressId, userId },
-      data: update,
-      select: ADDRESS_SELECT,
-    });
-  });
+  } catch (error) {
+    if (isRecordNotFound(error)) return null;
+    throw error;
+  }
 }
 
 /** Deletes an address the user owns. False when the user owns none with this id. One statement. */
