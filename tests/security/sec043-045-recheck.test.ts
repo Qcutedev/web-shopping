@@ -7,7 +7,8 @@
  *
  * A case written `it.fails` states the secure behaviour of an open finding (SEC-046 to SEC-048):
  * it is reported as an expected failure while the flaw exists and turns red when the code is
- * fixed; the fix then changes `it.fails` to `it` without touching the body.
+ * fixed; the fix then changes `it.fails` to `it` without touching the body. SEC-046 and SEC-047
+ * were flipped in commit 544d2ee (re-checked in sec046-047-recheck.test.ts).
  *
  * One case starts a child Node process and a listener on 127.0.0.1 (SEC-046); nothing leaves the
  * machine. Everything else is pure: no database, no network.
@@ -216,19 +217,32 @@ describe("SEC-044 re-check: weak production secrets refused by both readers", ()
     }
   });
 
-  it("random secrets of the documented and common forms are never refused (8 not 16 distinct is right)", () => {
+  it("random secrets of the documented and common forms are accepted (8 not 16 distinct is right)", () => {
     // 16 distinct would refuse about 93 percent of `openssl rand -hex 16` values and about 24
     // percent of `openssl rand -hex 32` values (measured in this re-check on 200,000 each).
+    // Since SEC-047 (commit 544d2ee) the floor also refuses a run of 8 in constant steps, which a
+    // random value holds with a tiny probability (1 of 1,000,000 `openssl rand -hex 16` values in
+    // the SEC-046/047 re-check, 0 of 1,000,000 for the other forms). "Never" would make this case
+    // flaky, so at most 1 refusal per form in 3,000 is allowed, and a refusal must be the weak
+    // rule. At the measured rate more than 1 has a probability below 1e-5.
+    const forms = [
+      () => randomBytes(32).toString("base64url"),
+      () => randomBytes(16).toString("hex"),
+      () => randomBytes(32).toString("hex"),
+      () => randomBytes(24).toString("base64"),
+    ];
+    const refused = forms.map(() => 0);
     for (let i = 0; i < 3000; i += 1) {
-      for (const value of [
-        randomBytes(32).toString("base64url"),
-        randomBytes(16).toString("hex"),
-        randomBytes(32).toString("hex"),
-        randomBytes(24).toString("base64"),
-      ]) {
-        expect(readAuthSecret(production({ AUTH_SECRET: value }))).toBe(value);
-      }
+      forms.forEach((generate, form) => {
+        const value = generate();
+        const issues = issuesOf(() => readAuthSecret(production({ AUTH_SECRET: value })));
+        if (issues.length > 0) {
+          expect(issues).toEqual(WEAK);
+          refused[form] = (refused[form] ?? 0) + 1;
+        }
+      });
     }
+    for (const count of refused) expect(count).toBeLessThanOrEqual(1);
   });
 
   it("development and test accept the weak values (by design; production is the gate)", () => {
