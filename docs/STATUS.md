@@ -480,3 +480,5 @@ Thirty-seventh session (interactive, 2026-10-13): owner answered the open questi
 Thirty-seventh session, owner answers continued (D-036 items 5 to 9): SEC-032 fix, SEC-049 use the proposed rule, SEC-041 limit 3 in a row, CR-70 show the link, Buddhist year. Not built, no agent running. Next for an agent run: auth (CR-57, `/sign-in`, SEC-032, SEC-041), devops (SEC-049), frontend (CR-70). Still open: `th.ts` proposal strings and footer labels (owner asked what they mean), address cap.
 
 Owner answers, last two (D-036 items 10, 11): the `th.ts` proposal strings are approved as written; the footer of every page shows the mock payment and simulated shipping pills. Frontend to mark the strings approved and add the footer pills. Only owner question left open: the address cap. No agent is running.
+
+Owner left the address cap to the orchestrator: ruled 10 addresses per user (D-036 item 12), not built; backend-api, database, frontend. No owner question is open. No agent is running.

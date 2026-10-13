@@ -298,7 +298,9 @@ Answered by the owner on 2026-10-13 (interactive session, thirty-seventh). Items
 10. **The proposal strings in `src/i18n/th.ts` are approved as written** (owner: "10 use as is"): app shell (`skipToContent`, `navLabel`, `search.label`, `cart.label`, `cart.labelWithCount`, footer `navLabel` and `copyright`), `notFound.*`, `errors.*`, `pagination.*`, and the `account.*` texts of the T-030 pages. The frontend agent changes the "proposal" comments to "approved" and DESIGN_SYSTEM.md "Copy guidelines" lists them.
 11. **The footer of every page shows the two approved notice pills** `th.notice.mockPayment` ("การชำระเงินจำลอง") and `th.notice.simulatedShipping` ("การจัดส่งจำลอง") (owner: "11 as recommended"). Site-wide, not only on cart, checkout, and order pages. Frontend builds it with the T-018 shell follow-up.
 
-Still open for the owner: the address cap (STATUS.md lines disagree).
+12. **Address cap: 10 saved addresses per user** (owner left the number to the orchestrator). This replaces the earlier note "no cap and no rate limit on addresses per user" (thirty-third session). Enough for home, work, and family; small enough that one account cannot fill the table. Creating the 11th is refused with a validation error and Thai text to be proposed; the count and the insert run under the existing `User` row lock (`FOR NO KEY UPDATE`, DATA_MODEL 7.5) so two parallel requests cannot pass 10. Owner agents: backend-api (module `src/modules/profile/`, API_CONTRACTS 5.3.1, tests), database (DATA_MODEL note), frontend (message and disabled add button).
+
+No owner question is open now.
 
 ## Pending decisions for the user
 
