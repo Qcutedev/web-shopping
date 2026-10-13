@@ -69,15 +69,48 @@ const WEAK = [{ variable: "AUTH_SECRET", rule: ENV_RULES.authSecretWeak }];
 // ---------------------------------------------------------------------------------------------
 // SEC-043
 
+const BACKSLASH = String.fromCharCode(0x5c);
+/** The six-character source escape of a BMP code point, upper-case hex: backslash, u, 4 digits. */
+const escapeOf = (code: number): string =>
+  `${BACKSLASH}u${code.toString(16).toUpperCase().padStart(4, "0")}`;
+
+/**
+ * A line of SEC-043 is pinned either by its 1-based number or by its exact statement (the line
+ * with leading and trailing blanks removed). A statement pin survives edits that move the line;
+ * it must match exactly one line of the file. Built with `escapeOf` so this file holds no escape.
+ */
+type LinePin = number | { statement: string };
+
 /** The seven lines named in SEC-043 and the code point each one held as a literal. */
-const SEC043_LINES: [string, number, number[]][] = [
+const SEC043_LINES: [string, LinePin, number[]][] = [
   ["src/proxy.test.ts", 74, [0xa0]],
   ["src/server/http.test.ts", 1549, [0xd7ff, 0xe000]],
   ["src/server/http.test.ts", 2034, [0x2028]],
-  ["src/server/logger.test.ts", 1633, [0x2028]],
-  ["src/server/logger.test.ts", 1642, [0x2028]],
+  // Were lines 1633 and 1642; pinned by content since commit 19ca0ad edited this file.
+  [
+    "src/server/logger.test.ts",
+    {
+      statement: `log.security("warn", "Sign-in failed for somchai@example.com${escapeOf(0x2028)}", {`,
+    },
+    [0x2028],
+  ],
+  [
+    "src/server/logger.test.ts",
+    { statement: `expect(raw).not.toContain("${escapeOf(0x2028)}");` },
+    [0x2028],
+  ],
   ["tests/integration/harness/test-database-url.test.ts", 348, [0xa0]],
 ];
+
+/** The pinned line's text and a label; a statement pin must match exactly one line. */
+function pinnedLine(path: string, pin: LinePin): { text: string; label: string } {
+  const lines = readFileSync(join(ROOT, path), "utf8").split("\n");
+  if (typeof pin === "number")
+    return { text: lines[pin - 1] ?? "", label: `${path}:${String(pin)}` };
+  const hits = lines.flatMap((text, index) => (text.trim() === pin.statement ? [index + 1] : []));
+  expect(hits, `${path}: lines equal to ${pin.statement}`).toHaveLength(1);
+  return { text: lines[(hits[0] ?? 0) - 1] ?? "", label: `${path}:${String(hits[0])}` };
+}
 
 const TEXT_EXTENSIONS = new Set([
   ".ts",
@@ -102,17 +135,15 @@ const TEXT_EXTENSIONS = new Set([
 
 describe("SEC-043 re-check: the literals are escapes now, and the repository scan has no blind spot", () => {
   it("the four files hold none of the seven code points as a literal, and each line now spells an escape", () => {
-    const backslash = String.fromCharCode(0x5c);
     for (const [path, , codes] of SEC043_LINES) {
       const text = readFileSync(join(ROOT, path), "utf8");
       for (const code of codes)
         expect(text.includes(cp(code)), `${path} ${String(code)}`).toBe(false);
     }
-    for (const [path, line, codes] of SEC043_LINES) {
-      const text = readFileSync(join(ROOT, path), "utf8").split("\n")[line - 1] ?? "";
+    for (const [path, pin, codes] of SEC043_LINES) {
+      const { text, label } = pinnedLine(path, pin);
       for (const code of codes) {
-        const escape = `${backslash}u${code.toString(16).toUpperCase().padStart(4, "0")}`;
-        expect(text.toUpperCase(), `${path}:${String(line)}`).toContain(escape.toUpperCase());
+        expect(text.toUpperCase(), label).toContain(escapeOf(code).toUpperCase());
       }
     }
   });
