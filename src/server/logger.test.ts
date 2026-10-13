@@ -1453,13 +1453,13 @@ describe("cost of the patterns added for SEC-012 to SEC-016", () => {
   });
 
   it("writes 100 lines full of characters that need escaping within the time bound", () => {
-    const text = String.fromCodePoint(0x202e, 0xe0041, 0x9b).repeat(2_000);
-    const lines: string[] = [];
-    const log = createLogger({ write: (line) => lines.push(line) });
-    const started = performance.now();
-    for (let round = 0; round < 100; round += 1) log.info(text, { a: text, b: [text, text] });
-    expect(performance.now() - started).toBeLessThan(1_000);
-    expect(lines).toHaveLength(100);
+    // Bound relative to shorter lines plus a generous ceiling, see measureEscapingCost at the end
+    // of this file (kept there so the line numbers pinned by the SEC-043 re-check do not move).
+    const cost = measureEscapingCost();
+    expect(cost.longLines).toHaveLength(100);
+    expect(cost.growth, cost.timings).toBeLessThan(8);
+    expect(cost.longTotal, cost.timings).toBeLessThan(10_000);
+    expectEscapedAndReadable(cost.longLines[0] ?? "", cost.longText);
   });
 });
 
@@ -1898,3 +1898,68 @@ describe("the level is one per process, shared by every copy of the module", () 
     expect(handlers.getLogLevel()).toBe("warn");
   });
 });
+
+/**
+ * Cost of writing lines full of characters that need escaping, for the case "writes 100 lines
+ * full of characters that need escaping within the time bound" above.
+ *
+ * A wall-clock bound of 1,000 ms for 100 lines failed under a loaded full `pnpm test` run (1,064
+ * to 1,237 ms) while passing alone. The case now checks two things that do not depend on how busy
+ * the machine is:
+ *   1. `growth`: lines four times as long must cost less than eight times as much (linear gives
+ *      about 4, a quadratic escape about 16 or more). Both sizes are measured interleaved in the
+ *      same test, so load slows them alike, and the fastest of several samples is compared;
+ *   2. `longTotal`: a generous ceiling on the 100 long lines, which a quadratic escape of 32,000
+ *      escaped code units per line still exceeds (a temporary quadratic probe in
+ *      escapeUnsafeCharacters measured growth 29 and a total of about 15,700 ms).
+ */
+function measureEscapingCost() {
+  // Four UTF-16 code units, every one of which is written as a \uXXXX escape.
+  const unit = String.fromCodePoint(0x202e, 0xe0041, 0x9b);
+  const shortText = unit.repeat(500);
+  const longText = unit.repeat(2_000);
+  expect(longText.length).toBe(8_000);
+
+  const ROUNDS = 5;
+  const LINES_PER_SAMPLE = 20;
+  const longLines: string[] = [];
+  const longLog = createLogger({ write: (line) => longLines.push(line) });
+  const shortLog = createLogger({ write: () => undefined });
+
+  function sample(log: Logger, text: string): number {
+    const started = performance.now();
+    for (let line = 0; line < LINES_PER_SAMPLE; line += 1) {
+      log.info(text, { a: text, b: [text, text] });
+    }
+    return performance.now() - started;
+  }
+
+  // Warm-up, so that compiling the code paths is not charged to the first sample.
+  sample(shortLog, shortText);
+
+  const shortSamples: number[] = [];
+  const longSamples: number[] = [];
+  for (let round = 0; round < ROUNDS; round += 1) {
+    shortSamples.push(sample(shortLog, shortText));
+    longSamples.push(sample(longLog, longText));
+  }
+
+  const fastestShort = Math.max(Math.min(...shortSamples), 0.5);
+  const fastestLong = Math.min(...longSamples);
+  const rounded = (samples: number[]) => samples.map((elapsed) => Math.round(elapsed)).join("/");
+  return {
+    longText,
+    longLines,
+    growth: fastestLong / fastestShort,
+    longTotal: longSamples.reduce((sum, elapsed) => sum + elapsed, 0),
+    timings: `long ${rounded(longSamples)} ms, short ${rounded(shortSamples)} ms`,
+  };
+}
+
+/** The work measured is the escaping: no unsafe character reaches the line, and it reads back. */
+function expectEscapedAndReadable(line: string, text: string): void {
+  expect(line.includes(String.fromCodePoint(0x202e))).toBe(false);
+  expect(line.includes(String.fromCodePoint(0x9b))).toBe(false);
+  expect(line).toContain("\\u202e\\udb40\\udc41\\u009b");
+  expect(JSON.parse(line)).toMatchObject({ message: text, a: text, b: [text, text] });
+}
