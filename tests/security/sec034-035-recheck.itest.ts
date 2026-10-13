@@ -342,10 +342,22 @@ describe("SEC-035 re-check: every failure path waits for the production floor", 
       );
       expect(response.status, label).toBe(200);
       expect(ms, label).toBeGreaterThanOrEqual(FLOOR.minimumMs - TOLERANCE_MS);
+      // Change by auth for CR-57 (D-036 item 3), for security to review: sign-up now sets a
+      // session cookie (a decoy for a duplicate), whose value is random by nature; it is masked
+      // here and its form is compared instead. Every other header is compared whole, as before.
       const headers = [...response.headers.entries()]
         .filter(([key]) => key !== "x-request-id")
-        .map(([key, value]) => `${key}: ${value}`)
+        .map(([key, value]) =>
+          key === "set-cookie"
+            ? `${key}: ${value.slice(0, value.indexOf("="))}=<value>${value.slice(value.indexOf(";"))}`
+            : `${key}: ${value}`,
+        )
         .sort();
+      const cookieValues = response.headers
+        .getSetCookie()
+        .map((line) => decodeURIComponent(line.slice(line.indexOf("=") + 1, line.indexOf(";"))));
+      expect(cookieValues, label).toHaveLength(1);
+      expect(cookieValues[0], label).toMatch(/^[A-Za-z0-9]{32}\.[A-Za-z0-9+/]{43}=$/);
       answers.add(JSON.stringify({ headers, body: await json(response) }));
     }
     expect(answers.size).toBe(1);

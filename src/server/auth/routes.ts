@@ -8,7 +8,8 @@
  * SECURITY.md SR-05 item 5, and the handler pattern of src/server/http.ts:
  *
  *   sign-up  (public)  1 Origin, 2 Content-Type, 5 `sign-up` per address, 6 body, 7 schema,
- *                      then the library creates the account
+ *                      then the library creates the account and signs it in (a duplicate
+ *                      email gets a decoy cookie instead, CR-57)
  *   sign-in  (public)  1 Origin, 2 Content-Type, 5 `sign-in-address`, 6 body, 7 schema,
  *                      then `sign-in-email` on the normalised email, then the password check
  *   sign-out (user)    1 Origin, 2 Content-Type, 3 session, then the session row is deleted;
@@ -56,6 +57,7 @@ import { headersForAuthLibrary } from "./cookies";
 import { reduceLibraryError } from "./library-error";
 import { recordSecurityEvent, type SecurityEventKind } from "./security-events";
 import { loadActor, readSession } from "./session";
+import { decoySessionCookieLine, equaliseSignInWork } from "./sign-up-cookie";
 
 export interface AuthRuntime {
   auth: Auth;
@@ -213,8 +215,17 @@ function event(
 
 /**
  * `POST /api/v1/auth/sign-up`. Creates a `CUSTOMER` (the role column's default; no input can set
- * another) and does not sign in. An email that already has an account gets exactly the same
- * answer and nothing is created or changed (TM-03): 200 `{ "data": { "accepted": true } }`.
+ * another) and signs the new user in (CR-57, D-036 item 3): the answer carries the session cookie.
+ *
+ * An email that already has an account gets an answer of the same form (TM-03): the same status,
+ * body, and headers, and a `Set-Cookie` line that differs only in its value, which is a decoy and
+ * no session (sign-up-cookie.ts). Nothing is created or changed for the existing account, and its
+ * holder is not signed in, whatever password was sent: sign-up is not a second way to check a
+ * password. Both answers are 200 `{ "data": { "accepted": true } }` after the response floor; the
+ * client asks `GET /api/v1/auth/session` who is signed in.
+ *
+ * A session the request came with is deleted in both cases, as at sign-in (rotation), because the
+ * new cookie replaces it in the browser either way.
  */
 export async function handleSignUp(request: Request, source: AuthRuntimeSource): Promise<Response> {
   let opened: RequestScope | undefined;
@@ -230,6 +241,7 @@ export async function handleSignUp(request: Request, source: AuthRuntimeSource):
 
     // SEC-035: a new and a duplicate email answer after the same time, measured from here.
     const startedAt = performance.now();
+    const previous = await readSession(request, runtime.auth);
     let createdUserId: string | undefined;
     try {
       const result = await runtime.auth.api.signUpEmail({
@@ -253,9 +265,28 @@ export async function handleSignUp(request: Request, source: AuthRuntimeSource):
       // Reduced here, because an AppError passes the outer mapper unchanged (SEC-048).
       if (existing === null) throw reduceLibraryError(error);
     }
+
+    const cookies = new Headers();
+    if (createdUserId === undefined) {
+      // Duplicate: the same password work as the sign-in below, then the decoy line.
+      await equaliseSignInWork(input.password);
+      cookies.append("Set-Cookie", await decoySessionCookieLine(runtime.auth));
+    } else {
+      // New: the library signs the user in with the password just chosen. Its session hook runs
+      // (active check, SR-07 address and browser details) and it writes the real cookie.
+      const signedIn = await signInWithLibrary(
+        runtime.auth,
+        input.email,
+        input.password,
+        request.headers,
+      );
+      for (const line of signedIn.headers.getSetCookie()) cookies.append("Set-Cookie", line);
+    }
+    if (previous !== null) await db.session.deleteMany({ where: { token: previous.token } });
+
     event(scope, "sign-up", "accepted", createdUserId);
     await waitForFloor(startedAt, runtime.responseFloor);
-    return ok({ accepted: true }, { requestId: scope.requestId });
+    return ok({ accepted: true }, { requestId: scope.requestId, headers: cookies });
   } catch (error) {
     return failure(request, opened, error);
   }

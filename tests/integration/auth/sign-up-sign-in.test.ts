@@ -56,29 +56,49 @@ async function signIn(
   return signInRoute(post("/api/v1/auth/sign-in", { body: { email, password }, ...extra }));
 }
 
+/**
+ * A registered user with no session: the session that sign-up starts (CR-57) is deleted, so the
+ * cases below count only the sessions they create themselves.
+ */
 async function registered(name = "สมชาย ใจดี"): Promise<{ email: string; userId: string }> {
   const email = freshEmail();
   const response = await signUp({ name, email, password: PASSWORD });
   expect(response.status).toBe(200);
   const user = await db.user.findUniqueOrThrow({ where: { email }, select: { id: true } });
+  await db.session.deleteMany({ where: { userId: user.id } });
   return { email, userId: user.id };
 }
 
+/** A `Set-Cookie` line with its value replaced by a marker. */
+function maskedCookieLines(response: Response): string[] {
+  return response.headers
+    .getSetCookie()
+    .map((line) => `${line.slice(0, line.indexOf("="))}=<value>${line.slice(line.indexOf(";"))}`);
+}
+
 describe("sign-up (REQ-C-01)", () => {
-  it("creates an active CUSTOMER with a hashed password, and does not sign in", async () => {
+  it("creates an active CUSTOMER with a hashed password, and signs it in (CR-57)", async () => {
     const email = freshEmail();
     const response = await signUp({ name: "สมหญิง", email, password: PASSWORD });
     expect(response.status).toBe(200);
     expect(await json(response)).toEqual({ data: { accepted: true } });
-    expect(response.headers.getSetCookie()).toEqual([]);
     expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(maskedCookieLines(response)).toEqual([
+      `better-auth.session_token=<value>; Max-Age=${String(SESSION_LIFETIME_SECONDS)}; Path=/; HttpOnly; SameSite=Lax`,
+    ]);
 
     const user = await db.user.findUniqueOrThrow({
       where: { email },
       include: { accounts: true, sessions: true },
     });
     expect(user).toMatchObject({ role: "CUSTOMER", isActive: true, name: "สมหญิง", phone: null });
-    expect(user.sessions).toEqual([]);
+    expect(user.sessions).toHaveLength(1);
+    expect(await getActor(get("/x", { cookie: cookieFrom(response) }))).toEqual({
+      userId: user.id,
+      role: "CUSTOMER",
+      storeId: null,
+      storeStatus: null,
+    });
     expect(user.accounts).toHaveLength(1);
     const account = user.accounts[0];
     expect(account?.providerId).toBe("credential");
@@ -109,7 +129,14 @@ describe("sign-up (REQ-C-01)", () => {
     });
     expect(duplicate.status).toBe(fresh.status);
     expect(await json(duplicate)).toEqual(await json(fresh));
-    expect(duplicate.headers.getSetCookie()).toEqual([]);
+    // CR-57: both set one session cookie line; only the value differs.
+    expect(maskedCookieLines(duplicate)).toHaveLength(1);
+    expect(maskedCookieLines(duplicate)).toEqual(maskedCookieLines(fresh));
+    const headerNames = (response: Response) => [...response.headers.keys()].sort();
+    expect(headerNames(duplicate)).toEqual(headerNames(fresh));
+    // The duplicate's cookie is a decoy: no session, and no session row for the existing user.
+    expect(await getActor(get("/x", { cookie: cookieFrom(duplicate) }))).toBeNull();
+    expect(await db.session.count({ where: { userId } })).toBe(0);
 
     const after = await db.user.findUniqueOrThrow({
       where: { id: userId },
@@ -121,6 +148,65 @@ describe("sign-up (REQ-C-01)", () => {
     expect((await signIn(email, PASSWORD)).status).toBe(200);
     resetProcessRateLimiter();
     expect((await signIn(email, "another password")).status).toBe(401);
+  });
+
+  it("a duplicate sign-up with the account's own password does not sign in either (CR-57)", async () => {
+    const { email, userId } = await registered();
+    const response = await signUp({ name: "Other", email, password: PASSWORD });
+    expect(response.status).toBe(200);
+    expect(maskedCookieLines(response)).toHaveLength(1);
+    expect(await getActor(get("/x", { cookie: cookieFrom(response) }))).toBeNull();
+    expect(await db.session.count({ where: { userId } })).toBe(0);
+  });
+
+  it("a new and a duplicate sign-up set the same cookie line but for the value, in production too", async () => {
+    const runtime = makeRuntime({
+      secureCookies: true,
+      baseUrl: "https://shop.example.test",
+      appOrigin: "https://shop.example.test",
+    });
+    const send = (email: string) =>
+      handleSignUp(
+        post("/api/v1/auth/sign-up", {
+          body: { name: "T", email, password: PASSWORD },
+          origin: "https://shop.example.test",
+          url: "https://shop.example.test/api/v1/auth/sign-up",
+        }),
+        { ...runtime, limiter: createRateLimiter() },
+      );
+    const email = freshEmail("prod-signup");
+    const fresh = await send(email);
+    const duplicate = await send(email);
+    expect(maskedCookieLines(fresh)).toEqual([
+      `__Host-better-auth.session_token=<value>; Max-Age=${String(SESSION_LIFETIME_SECONDS)}; Path=/; HttpOnly; Secure; SameSite=Lax`,
+    ]);
+    expect(maskedCookieLines(duplicate)).toEqual(maskedCookieLines(fresh));
+    // Values of one form: 32 characters, a dot, a 44-character base64 signature.
+    for (const response of [fresh, duplicate]) {
+      const line = response.headers.getSetCookie()[0] ?? "";
+      const value = decodeURIComponent(line.slice(line.indexOf("=") + 1, line.indexOf(";")));
+      expect(value).toMatch(/^[A-Za-z0-9]{32}\.[A-Za-z0-9+/]{43}=$/);
+    }
+  });
+
+  it("ends the session the request came with, for a new and a duplicate email alike (rotation)", async () => {
+    for (const duplicateEmail of [false, true]) {
+      const holder = await registered();
+      const held = cookieFrom(await signIn(holder.email, PASSWORD));
+      resetProcessRateLimiter();
+      expect(await getActor(get("/x", { cookie: held }))).not.toBeNull();
+      const email = duplicateEmail ? holder.email : freshEmail("rotate");
+      const response = await signUpRoute(
+        post("/api/v1/auth/sign-up", {
+          body: { name: "T", email, password: PASSWORD },
+          cookie: held,
+        }),
+      );
+      expect(response.status).toBe(200);
+      expect(await getActor(get("/x", { cookie: held }))).toBeNull();
+      expect(await db.session.count({ where: { userId: holder.userId } })).toBe(0);
+      resetProcessRateLimiter();
+    }
   });
 
   it("answers 200 to both of two parallel sign-ups for one email, and keeps one user and one account (CR-59)", async () => {

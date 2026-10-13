@@ -433,14 +433,19 @@ Implemented in T-015 (2026-10-13). Written into this section by the auth agent; 
 
 | Method | Path | Access | Notes |
 | --- | --- | --- | --- |
-| POST | `/auth/sign-up` | public | Body `{ name, email, password }`. Creates a `CUSTOMER`; does not sign in. Rate-limited per address (`sign-up`). |
+| POST | `/auth/sign-up` | public | Body `{ name, email, password }`. Creates a `CUSTOMER` and signs it in (sets the session cookie; CR-57, D-036 item 3). Rate-limited per address (`sign-up`). |
 | POST | `/auth/sign-in` | public | Body `{ email, password }`. Sets the session cookie. Rate-limited per address and per email. |
 | POST | `/auth/sign-out` | user | No body. Deletes the session on the server and clears the cookie. |
 | GET | `/auth/session` | public | The caller's actor, or `null`. Writes nothing. |
 
 **`POST /auth/sign-up`.** Strict body (section 1.1): `name` (trimmed, 1 to 100 characters, the display-name rule `NAME_ALLOWED_TEXT`: see section 5.3.1 for the characters refused; at least one visible character; at most 3 combining marks or kept invisible characters U+200B to U+200D in a row, SEC-041, SEC-042, D-036 item 7), `email` (trimmed, at most 254 characters, a valid address; stored lower-cased), `password` (8 to 128 characters, checked on the server). Any other key, `role`, `isActive`, `phone`, `storeId`, `userId`, `emailVerified`, and `image` included, is `400 VALIDATION_ERROR` and nothing is created. The new user is an active `CUSTOMER`.
 
-- `200 { "data": { "accepted": true } }`, no cookie, **both** for a new email and for an email that already has an account; for the latter nothing is created or changed (SECURITY.md TM-03). The client signs in next with `POST /auth/sign-in` (REQUIREMENTS REQ-C-01 asks for sign-up to log in and for a duplicate to get a generic error; that cannot hold together with an identical answer, and the point is with the owner, see the T-015 report).
+- `200 { "data": { "accepted": true } }` with one `Set-Cookie` line for the session cookie (name and attributes as at sign-in, SECURITY.md "Session and cookie settings"), **both** for a new email and for an email that already has an account (CR-57, D-036 item 3; SECURITY.md TM-03):
+  - new email: the account is created and signed in; the cookie holds a real session.
+  - email that already has an account: nothing is created or changed, and nobody is signed in, whatever password was sent (sign-up is not a second way to check a password). The cookie line has the same name, attributes, and value form (32 characters, a dot, a 44-character signature, URL-encoded) but its value is a decoy that is no session; it replaces any session cookie the browser held.
+  - In both cases a session the request came with is ended on the server (rotation, as at sign-in), and the answer comes after the response floor (SEC-035).
+  - The answer itself does not say which case happened. The client calls `GET /auth/session` next: an actor means the new account is signed in; `null` means the email was already registered (or the account could not be signed in), and the client shows the sign-in form with a generic message that does not state that the email exists (REQUIREMENTS REQ-C-01 "generic error"). The holder of the existing account signs in normally with `POST /auth/sign-in`.
+  - If the sign-in after a successful creation fails unexpectedly, the answer is `500` and the account exists; a retry of the sign-up is then a duplicate, and the user signs in normally.
 - `400 VALIDATION_ERROR`: the body fails the schema. `403 FORBIDDEN`, `415`, `413`, `429 RATE_LIMITED` as in section 1.8.
 
 **`POST /auth/sign-in`.** Strict body: `email` (as above), `password` (1 to 128 characters; the length policy is not applied at sign-in).

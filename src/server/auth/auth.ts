@@ -20,9 +20,11 @@
  *     store status are read from the database on every request (TM-26), and reading a session
  *     writes nothing (D-029 point 1; D-031 point 6 settled this way). An expired session is
  *     ignored when it is presented and removed by the scheduled purge (session-purge.ts).
- *   - Sign-up never signs in (`autoSignIn: false`), which also makes the library answer an
+ *   - The library's sign-up never signs in (`autoSignIn: false`), which also makes it answer an
  *     email that is already registered exactly like a new one, after hashing the password so the
- *     time taken is alike (TM-03).
+ *     time taken is alike (TM-03). The sign-up route then signs a new user in through the
+ *     library's sign-in, and gives a duplicate a decoy cookie of the same form (CR-57,
+ *     routes.ts and sign-up-cookie.ts).
  *   - Its log lines go to the application's logger at `error` only: the library writes the
  *     email of a duplicate sign-up attempt into an `info` line, which SR-04 forbids.
  *
