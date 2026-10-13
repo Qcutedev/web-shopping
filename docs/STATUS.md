@@ -40,6 +40,8 @@ Sixteenth session (interactive, 2026-10-13): owner asked for two tasks, then sto
 
 Seventeenth session (interactive, 2026-10-13): owner asked for two tasks, then stop. Starting in parallel: (1) agent security, re-check of SEC-033, SEC-034, SEC-035 (commits `6bd3542`, `c1bf5e3`, `c7dd1cc`, `b2dd578`); paths `docs/SECURITY.md`, `docs/reviews/`, `tests/security/`. (2) agent code-review, read-only review of T-018 app shell (commit `1018fde`); the orchestrator records its findings in `docs/reviews/T-018-code-review.md`. Not touched: SEC-032, CR-57, `tsx` (owner decisions), devops, database, qa fixes, T-014. If interrupted, read `git status` and continue from disk.
 
+Seventeenth session, continued (owner said run the two tasks on): (2) code review of T-018 is DONE, report `docs/reviews/T-018-code-review.md` (APPROVED WITH FOLLOW-UPS, CR-67 to CR-78; T-018 stays IMPLEMENTED until CR-68). (1) Security re-check was interrupted: on disk, uncommitted, `tests/security/sec033-name-recheck.test.ts` (7 passed, 14 expected fail) and `tests/security/sec034-035-recheck.itest.ts`; no report and no register update yet. Relaunching agent security on the same task, told to continue from those files; paths `docs/SECURITY.md`, `docs/reviews/`, `tests/security/`.
+
 Before starting, check the machine: Docker Desktop running and `docker compose up -d --wait` (the test database is empty after every container start); `pnpm install --frozen-lockfile`; copy `.env.example` to `.env` if `.env` is missing; `pnpm verify` should exit 0 with 29 files, 1672 passed, 82 import-guard probes, and 2 expected failures (the SEC-030 and SEC-031 reproductions); `pnpm test:integration` should exit 0 with 14 files and 678 passed.
 
 Done in the third session (each committed):
