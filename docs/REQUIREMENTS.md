@@ -336,7 +336,7 @@ Q7 to Q41 are answered and are listed under [Confirmed decisions](#confirmed-dec
 | REQ-S-07, REQ-S-08 | T-043, T-044 | none yet |
 | REQ-A-01 to REQ-A-10 | T-050, T-051 | none yet |
 | REQ-A-11 | T-016 | none yet |
-| REQ-N-01 | T-017, T-018 | partial: `src/components/ui/format-price.test.ts`, `src/components/ui/price.test.tsx` (THB and `th-TH` formatting of the price primitive only; Thai text on pages: none yet) |
+| REQ-N-01 | T-017, T-018 | partial: `src/lib/format.test.ts`, `src/components/ui/price.test.tsx` (THB and `th-TH` formatting of the price primitive only; Thai text on pages: none yet) |
 | REQ-N-02 | T-017, T-018 | none yet |
 | REQ-N-03 | T-017, T-021, T-034, T-044, T-051 | partial: `src/components/ui/tokens.test.ts` (contrast of the colour tokens), `src/components/ui/input.test.tsx`, `src/components/ui/field.test.tsx` (labels and error text of the form primitives), `src/components/ui/button.test.tsx` (focus ring), `src/components/ui/quantity-stepper.test.tsx` (keyboard stepping); primitives only, no page: none yet |
 | REQ-N-04 | T-015, T-045, T-052 | none yet |
