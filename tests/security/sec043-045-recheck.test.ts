@@ -241,27 +241,24 @@ describe("SEC-044 re-check: weak production secrets refused by both readers", ()
 });
 
 describe("SEC-047 the weak-secret floor lets near-repetitions, skewed values, and altered published values through", () => {
-  it.fails(
-    "production refuses plainly non-random values that differ from the refused shapes by one character",
-    () => {
-      for (const weak of [
-        `${"password".repeat(4)}1`, // a word four times and a digit
-        `${"abcdefgh".repeat(4)}i`, // a period-8 run plus one character
-        `${"0123456789abcdef".repeat(2)}X`,
-        `${"a".repeat(25)}bcdefgh`, // one character 25 times, exactly 8 distinct
-        "abcdefghijklmnopqrstuvwxyz012345", // the alphabet
-        `${cp(0x200b).repeat(25)}abcdefg`, // invisible padding, 8 distinct
-        LIBRARY_DEFAULT_SECRET.toUpperCase(),
-        `${LIBRARY_DEFAULT_SECRET}!`,
-        `${LIBRARY_DEFAULT_SECRET}${cp(0x200b)}`,
-      ]) {
-        expect(
-          issuesOf(() => parseEnv(production({ AUTH_SECRET: weak }))),
-          JSON.stringify(weak),
-        ).toEqual(WEAK);
-      }
-    },
-  );
+  it("production refuses plainly non-random values that differ from the refused shapes by one character", () => {
+    for (const weak of [
+      `${"password".repeat(4)}1`, // a word four times and a digit
+      `${"abcdefgh".repeat(4)}i`, // a period-8 run plus one character
+      `${"0123456789abcdef".repeat(2)}X`,
+      `${"a".repeat(25)}bcdefgh`, // one character 25 times, exactly 8 distinct
+      "abcdefghijklmnopqrstuvwxyz012345", // the alphabet
+      `${cp(0x200b).repeat(25)}abcdefg`, // invisible padding, 8 distinct
+      LIBRARY_DEFAULT_SECRET.toUpperCase(),
+      `${LIBRARY_DEFAULT_SECRET}!`,
+      `${LIBRARY_DEFAULT_SECRET}${cp(0x200b)}`,
+    ]) {
+      expect(
+        issuesOf(() => parseEnv(production({ AUTH_SECRET: weak }))),
+        JSON.stringify(weak),
+      ).toEqual(WEAK);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -319,11 +316,14 @@ describe("SEC-045 re-check: the library takes no secret, URL, or origin from its
     );
   });
 
-  it("each of the four variables is refused by both readers in every NODE_ENV, by name only; empty is not refused", () => {
+  it("each of the library variables (SEC-045, SEC-046) is refused by both readers in every NODE_ENV, by name only; empty is not refused", () => {
     expect([...AUTH_LIBRARY_VARIABLES].sort()).toEqual(
       [
         "BETTER_AUTH_SECRET",
         "BETTER_AUTH_SECRETS",
+        "BETTER_AUTH_TELEMETRY",
+        "BETTER_AUTH_TELEMETRY_DEBUG",
+        "BETTER_AUTH_TELEMETRY_ENDPOINT",
         "BETTER_AUTH_TRUSTED_ORIGINS",
         "BETTER_AUTH_URL",
       ].sort(),
@@ -364,22 +364,19 @@ describe("SEC-045 re-check: the library takes no secret, URL, or origin from its
 });
 
 describe("SEC-046 the library's telemetry variables override `telemetry: { enabled: false }` and are not refused", () => {
-  it.fails(
-    "parseEnv and readAuthSecret refuse BETTER_AUTH_TELEMETRY and BETTER_AUTH_TELEMETRY_ENDPOINT by name",
-    () => {
-      for (const variable of ["BETTER_AUTH_TELEMETRY", "BETTER_AUTH_TELEMETRY_ENDPOINT"]) {
-        const env = production({ [variable]: "1" });
-        expect(
-          issuesOf(() => parseEnv(env)),
-          variable,
-        ).toEqual([{ variable, rule: ENV_RULES.authLibraryVariable }]);
-        expect(
-          issuesOf(() => readAuthSecret(env)),
-          variable,
-        ).toEqual([{ variable, rule: ENV_RULES.authLibraryVariable }]);
-      }
-    },
-  );
+  it("parseEnv and readAuthSecret refuse BETTER_AUTH_TELEMETRY and BETTER_AUTH_TELEMETRY_ENDPOINT by name", () => {
+    for (const variable of ["BETTER_AUTH_TELEMETRY", "BETTER_AUTH_TELEMETRY_ENDPOINT"]) {
+      const env = production({ [variable]: "1" });
+      expect(
+        issuesOf(() => parseEnv(env)),
+        variable,
+      ).toEqual([{ variable, rule: ENV_RULES.authLibraryVariable }]);
+      expect(
+        issuesOf(() => readAuthSecret(env)),
+        variable,
+      ).toEqual([{ variable, rule: ENV_RULES.authLibraryVariable }]);
+    }
+  });
 
   it("library behaviour pinned: with both variables set and NODE_ENV=production the library posts to the endpoint despite `enabled: false`", async () => {
     // Why the refusal above is needed. Runs in a child process because the library reads

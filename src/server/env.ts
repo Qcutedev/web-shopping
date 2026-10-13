@@ -102,20 +102,27 @@ const PUBLISHED_AUTH_SECRETS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * SEC-045: variables the auth library reads by itself from the process environment
- * (better-auth 1.7.7 `dist/context/create-context.mjs`, `dist/context/helpers.mjs`). This
- * application configures the library only from `AUTH_SECRET` and `APP_URL` (src/server/auth/auth.ts
- * passes every value explicitly), so one of these being set means a configuration the operator
- * believes is in force while it is not, or, for `BETTER_AUTH_SECRETS` and
- * `BETTER_AUTH_TRUSTED_ORIGINS`, one that would change the signing secret or the trusted origins
- * behind the validation of this file. They are refused in every NODE_ENV. Only the name is
- * reported: a value of one of them may be a secret.
+ * SEC-045, SEC-046: variables the auth library reads by itself from the process environment
+ * (better-auth 1.7.7 `dist/context/create-context.mjs`, `dist/context/helpers.mjs`, and
+ * @better-auth/telemetry `dist/node.mjs`). This application configures the library only from
+ * `AUTH_SECRET` and `APP_URL`, but passing a value explicitly does not always win: the library
+ * also reads these variables, and for some it ORs or merges them with the option (the telemetry
+ * variables override `telemetry: { enabled: false }` in src/server/auth/auth.ts). One of them
+ * being set means a configuration the operator believes is in force while it is not, or, for
+ * `BETTER_AUTH_SECRETS` and `BETTER_AUTH_TRUSTED_ORIGINS`, one that would change the signing
+ * secret or the trusted origins behind the validation of this file, or, for the telemetry
+ * variables, an outbound report of host details. They are refused in every NODE_ENV. Only the
+ * name is reported: a value of one of them may be a secret. Re-list the library's `env.*` reads
+ * when it is updated.
  */
 export const AUTH_LIBRARY_VARIABLES = [
   "BETTER_AUTH_SECRET",
   "BETTER_AUTH_SECRETS",
   "BETTER_AUTH_URL",
   "BETTER_AUTH_TRUSTED_ORIGINS",
+  "BETTER_AUTH_TELEMETRY",
+  "BETTER_AUTH_TELEMETRY_ENDPOINT",
+  "BETTER_AUTH_TELEMETRY_DEBUG",
 ] as const;
 
 /** SR-01: the pattern of a header name, and the headers that may never be named. */
@@ -143,7 +150,7 @@ export const ENV_RULES = {
   authSecretTooShort: `must be at least ${AUTH_SECRET_MIN_LENGTH} characters long`,
   authSecretPlaceholder: "must not be a placeholder from .env.example when NODE_ENV=production",
   authSecretWeak:
-    "must be a randomly generated value when NODE_ENV=production: too few distinct characters, a repeated pattern, or a published value",
+    "must be a randomly generated value when NODE_ENV=production: printable ASCII only, with enough distinct characters, no repeated or sequential pattern, and not a published value",
   authLibraryVariable: "must not be set; this application reads AUTH_SECRET and APP_URL only",
   trustedProxyHops: `must be an integer from 0 to ${MAX_TRUSTED_PROXY_HOPS}`,
   trustedProxyHopsExplicit: "must be set explicitly when NODE_ENV=production",
@@ -343,6 +350,9 @@ function checkAuthSecretForProduction(secret: string | undefined, issues: EnvIss
   }
 }
 
+/** SEC-047: the length of the windows of the repeated-substring and constant-step rules. */
+const PATTERN_WINDOW = 8;
+
 /** True when `text` is a shorter unit written twice or more ("abcabc"). */
 function isRepetition(text: string): boolean {
   // The classic test: a string is periodic exactly when it occurs inside itself doubled, at an
@@ -350,19 +360,71 @@ function isRepetition(text: string): boolean {
   return text.length > 1 && (text + text).indexOf(text, 1) < text.length;
 }
 
+/** SEC-047 (a): true when every code point is printable ASCII, U+0021 to U+007E. */
+function isPrintableAscii(text: string): boolean {
+  return /^[\u0021-\u007e]+$/.test(text);
+}
+
+/** SEC-047 (b): true when some run of PATTERN_WINDOW characters occurs twice or more. */
+function hasRepeatedWindow(text: string): boolean {
+  const seen = new Set<string>();
+  for (let start = 0; start + PATTERN_WINDOW <= text.length; start += 1) {
+    const window = text.slice(start, start + PATTERN_WINDOW);
+    if (seen.has(window)) return true;
+    seen.add(window);
+  }
+  return false;
+}
+
 /**
- * SEC-044: a production `AUTH_SECRET` that is long enough but plainly not random. Refused: fewer
- * than AUTH_SECRET_MIN_DISTINCT_CHARACTERS distinct characters (one repeated character, blanks),
- * a shorter unit repeated, or a published value (also with blanks around it). Distinct
- * characters are counted by code point. This is a floor against mistakes, not an entropy
- * measurement: a value that passes is not thereby random.
+ * SEC-047 (c): true when some run of PATTERN_WINDOW characters has a constant code-point step
+ * ("abcdefgh", "12345678", "hgfedcba", and the step 0 of "aaaaaaaa"). Text is printable ASCII
+ * here, so a code unit is a code point.
+ */
+function hasConstantStepRun(text: string): boolean {
+  let runLength = 1;
+  let step = 0;
+  for (let index = 1; index < text.length; index += 1) {
+    const nextStep = text.charCodeAt(index) - text.charCodeAt(index - 1);
+    if (runLength > 1 && nextStep === step) {
+      runLength += 1;
+    } else {
+      runLength = 2;
+      step = nextStep;
+    }
+    if (runLength >= PATTERN_WINDOW) return true;
+  }
+  return false;
+}
+
+/** SEC-047 (d): true when a published value is inside `secret`, whatever the case. */
+function containsPublishedSecret(secret: string): boolean {
+  const lower = secret.toLowerCase();
+  for (const published of PUBLISHED_AUTH_SECRETS) {
+    if (lower.includes(published.toLowerCase())) return true;
+  }
+  return false;
+}
+
+/**
+ * SEC-044, SEC-047: a production `AUTH_SECRET` that is long enough but plainly not random.
+ * Refused: a code point outside printable ASCII U+0021 to U+007E (blanks, invisible padding,
+ * look-alikes; every documented generator emits ASCII); fewer than
+ * AUTH_SECRET_MIN_DISTINCT_CHARACTERS distinct characters; a shorter unit repeated; a run of 8
+ * characters that occurs twice; a run of 8 characters with a constant code-point step; a
+ * published value inside it, in any case. This is a floor against mistakes, not an entropy
+ * measurement: a value that passes is not thereby random. A random value from the generation
+ * commands of docs/DEPLOYMENT.md is refused with a probability below one in 100,000 (measured
+ * in src/server/env.test.ts).
  */
 function isWeakAuthSecret(secret: string): boolean {
   return (
+    !isPrintableAscii(secret) ||
     new Set(secret).size < AUTH_SECRET_MIN_DISTINCT_CHARACTERS ||
     isRepetition(secret) ||
-    PUBLISHED_AUTH_SECRETS.has(secret) ||
-    PUBLISHED_AUTH_SECRETS.has(secret.trim())
+    hasRepeatedWindow(secret) ||
+    hasConstantStepRun(secret) ||
+    containsPublishedSecret(secret)
   );
 }
 

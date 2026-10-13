@@ -139,7 +139,7 @@ function production(candidate: Candidate): Record<string, string> {
   return {
     NODE_ENV: "production",
     APP_URL: "https://shop.example",
-    AUTH_SECRET: "Zq7canary-auth-secret-0123456789abcdef",
+    AUTH_SECRET: "Zq7canary-auth-secret-Kd2Xw9Lm4Rt6Pn3b",
     DATABASE_URL: candidate.url,
     TRUSTED_PROXY_HOPS: "0",
     ...(candidate.pgPassword === undefined ? {} : { PGPASSWORD: candidate.pgPassword }),

@@ -292,7 +292,7 @@ describe("CR-66 re-check: AUTH_SECRET is refused when missing, short, or the pub
 
   it("31 UTF-16 units are refused and 32 accepted, in parseEnv and readAuthSecret alike", () => {
     expect(AUTH_SECRET_MIN_LENGTH).toBe(32);
-    const short = `${CANARY}${"k".repeat(31 - CANARY.length)}`;
+    const short = `${CANARY}${"Kd2Xw9Lm4Rt6Pn3bYc5Hj8Vz7Qs1Gf0Ue".slice(0, 31 - CANARY.length)}`;
     expect(short).toHaveLength(31);
     for (const env of [source({ AUTH_SECRET: short }), production({ AUTH_SECRET: short })]) {
       expect(issuesOf(() => parseEnv(env))).toEqual([

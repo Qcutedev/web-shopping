@@ -22,7 +22,7 @@ import { createLogger, DEFAULT_LOG_LEVEL, setLogLevel } from "./logger";
 // Made-up values. Each is unmistakable, so a test can assert that none of it reaches a message.
 const DATABASE_URL = "postgresql://shop_app:Zq7canaryPw@db.example.test:5432/shop";
 const APP_URL = "https://shop.example.test";
-const AUTH_SECRET = "Zq7canary-auth-secret-0123456789abcdef";
+const AUTH_SECRET = "Zq7canary-auth-secret-Kd2Xw9Lm4Rt6Pn3b";
 
 /** A valid development environment; a case overrides or removes what it is about. */
 function source(overrides: Record<string, string | undefined> = {}): EnvSource {
@@ -807,6 +807,26 @@ describe("AUTH_SECRET in production: values that are plainly not random (SEC-044
     ["the library's built-in default", "better-auth-secret-12345678901234567890"],
     ["the library's default with blanks around it", " better-auth-secret-12345678901234567890 "],
     ["the integration-test secret", "integration-test-secret-0123456789-abcdefghij"],
+    // SEC-047: values that differ from the shapes above by one character or by case.
+    ["a word four times and a digit", `${"password".repeat(4)}1`],
+    ["a period-8 run plus one character", `${"abcdefgh".repeat(4)}i`],
+    ["a 16-character unit twice plus one", `${"0123456789abcdef".repeat(2)}X`],
+    ["one character 25 times, exactly 8 distinct", `${"a".repeat(25)}bcdefgh`],
+    ["the alphabet in order", "abcdefghijklmnopqrstuvwxyz012345"],
+    ["a descending run of 8", "Zq7!Kd2#hgfedcbaXw9$Lm4%Rt6^Pn3&"],
+    ["a run of digits", "Zq7!Kd2#12345678Xw9$Lm4%Rt6^Pn3&Yb5*"],
+    ["invisible padding with 8 distinct letters", `${"\u200b".repeat(25)}abcdefg`],
+    ["a non-ASCII letter in an otherwise random value", "Zq7!Kd2#Xw9$Lm4%Rt6^Pn3&Yb5*Vc8(\u00e9"],
+    ["a blank inside an otherwise random value", "Zq7!Kd2#Xw9$Lm4%Rt6^Pn3&Yb5*Vc8( Hj1)"],
+    ["the library default in upper case", "BETTER-AUTH-SECRET-12345678901234567890"],
+    ["the library default in mixed case", "Better-Auth-Secret-12345678901234567890"],
+    ["the library default with a character appended", "better-auth-secret-12345678901234567890!"],
+    ["the library default with one in front", "Zq7!Kd2#better-auth-secret-12345678901234567890"],
+    [
+      "the library default with an invisible character",
+      "better-auth-secret-12345678901234567890\u200b",
+    ],
+    ["the test secret in upper case", "INTEGRATION-TEST-SECRET-0123456789-ABCDEFGHIJ"],
   ] as const;
 
   it("refuses each, in parseEnv and readAuthSecret alike, naming the variable and the rule", () => {
@@ -845,15 +865,29 @@ describe("AUTH_SECRET in production: values that are plainly not random (SEC-044
 
   it("accepts random values of the documented forms in production", async () => {
     const { randomBytes } = await import("node:crypto");
-    for (let i = 0; i < 2_000; i += 1) {
-      for (const secret of [
-        randomBytes(32).toString("base64url"),
-        randomBytes(16).toString("hex"),
-        randomBytes(32).toString("hex"),
-        randomBytes(24).toString("base64"),
-      ]) {
-        expect(parseEnv(production({ AUTH_SECRET: secret })).authSecret).toBe(secret);
+    // The rule is a floor on pattern, not a proof, so a random value is refused with a tiny but
+    // non-zero probability (measured in SEC-047: 0 of 500,000 for base64url-43, base64-44, and
+    // hex-32; 1 of 500,000 for hex-64, about 2e-6). Asserting zero would make this case flaky at
+    // about 1 run in 250, so it allows 2 refusals per form in 2,000 values: the chance of more
+    // than 2 at that rate is below 1e-8.
+    const forms = {
+      "base64url-43": () => randomBytes(32).toString("base64url"),
+      "hex-32": () => randomBytes(16).toString("hex"),
+      "hex-64": () => randomBytes(32).toString("hex"),
+      "base64-44": () => randomBytes(32).toString("base64"),
+    };
+    for (const [form, generate] of Object.entries(forms)) {
+      let refused = 0;
+      for (let i = 0; i < 2_000; i += 1) {
+        const secret = generate();
+        try {
+          parseEnv(production({ AUTH_SECRET: secret }));
+        } catch (error) {
+          if (!(error instanceof EnvValidationError)) throw error;
+          refused += 1;
+        }
       }
+      expect(refused, form).toBeLessThanOrEqual(2);
     }
     // The secret the other production cases of this file use stays accepted.
     expect(parseEnv(production()).authSecret).toBe(AUTH_SECRET);
@@ -869,12 +903,15 @@ describe("AUTH_SECRET in production: values that are plainly not random (SEC-044
 describe("the auth library's own variables are refused (SEC-045)", () => {
   const CANARY_ENTRY = "Zq7canary-rotated-secret-without-version";
 
-  it("lists exactly the variables better-auth 1.7.7 reads for its secret, URL, and origins", () => {
+  it("lists exactly the variables better-auth 1.7.7 reads for its secret, URL, origins, and telemetry (SEC-046)", () => {
     expect([...AUTH_LIBRARY_VARIABLES]).toEqual([
       "BETTER_AUTH_SECRET",
       "BETTER_AUTH_SECRETS",
       "BETTER_AUTH_URL",
       "BETTER_AUTH_TRUSTED_ORIGINS",
+      "BETTER_AUTH_TELEMETRY",
+      "BETTER_AUTH_TELEMETRY_ENDPOINT",
+      "BETTER_AUTH_TELEMETRY_DEBUG",
     ]);
   });
 

@@ -49,7 +49,7 @@ function production(overrides: Record<string, string | undefined> = {}) {
   return {
     NODE_ENV: "production",
     APP_URL: "https://shop.example",
-    AUTH_SECRET: "Zq7canary-auth-secret-0123456789abcdef",
+    AUTH_SECRET: "Zq7canary-auth-secret-Kd2Xw9Lm4Rt6Pn3b",
     DATABASE_URL: url(REAL),
     TRUSTED_PROXY_HOPS: "0",
     ...overrides,
@@ -164,7 +164,7 @@ describe("SEC-009 re-check: production refuses the local set-up", () => {
       const env = parseEnv({
         NODE_ENV: nodeEnv,
         APP_URL: "http://localhost:3000",
-        AUTH_SECRET: "Zq7canary-auth-secret-0123456789abcdef",
+        AUTH_SECRET: "Zq7canary-auth-secret-Kd2Xw9Lm4Rt6Pn3b",
         DATABASE_URL: url(DEV_PLACEHOLDER),
         DATABASE_URL_TEST: url(TEST_PLACEHOLDER),
       });
@@ -177,7 +177,7 @@ describe("SEC-009 re-check: production refuses the local set-up", () => {
     const log = createLogger({ level: "debug", write: (line) => lines.push(line) });
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("APP_URL", "https://shop.example");
-    vi.stubEnv("AUTH_SECRET", "Zq7canary-auth-secret-0123456789abcdef");
+    vi.stubEnv("AUTH_SECRET", "Zq7canary-auth-secret-Kd2Xw9Lm4Rt6Pn3b");
     vi.stubEnv("TRUSTED_PROXY_HOPS", "0");
     vi.stubEnv("TRUSTED_CLIENT_IP_HEADER", "");
     vi.stubEnv("PAYMENT_TIMEOUT_MINUTES", "");
