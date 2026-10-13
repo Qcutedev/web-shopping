@@ -114,7 +114,11 @@ const probes = [
   ["src/modules/catalog/probe.ts", 'import { requireRole } from "@/server/auth/actor";', false],
   ["src/modules/catalog/probe.ts", 'import type { Actor } from "@/server/auth/actor";', false],
   ["src/modules/catalog/probe.ts", 'import { requireRole } from "../../server/auth/actor";', false],
-  ["src/modules/catalog/probe.ts", 'import { requireRole } from "../../server/auth/actor.js";', false],
+  [
+    "src/modules/catalog/probe.ts",
+    'import { requireRole } from "../../server/auth/actor.js";',
+    false,
+  ],
   ["src/modules/catalog/probe.ts", 'const m = await import("@/server/auth/actor");', false],
   ["src/modules/catalog/probe.test.ts", 'import { x } from "@/server/auth/session";', false],
   ["src/modules/catalog/probe.test.ts", 'import { x } from "@/server/auth/auth";', false],
