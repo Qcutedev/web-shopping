@@ -1,0 +1,152 @@
+# CI for pull requests and pushes to main (T-070).
+#
+# NOT YET RUN: this repository has no remote, so this file has been syntax-checked only
+# (docs/DEPLOYMENT.md, "CI pipeline"). The first real run is the acceptance check of T-070.
+#
+# Not in this workflow, on purpose:
+# - Playwright / end-to-end tests: the owner decision on how e2e reaches a production-mode
+#   database (CR-49) is open, and T-060 is not built.
+# - Secret scan: no scanner has been chosen (no paid service without approval).
+# - Deployment of any kind: needs human approval recorded in docs/DECISIONS.md.
+#
+# Secrets: nothing here reads a repository secret. The database password, the auth secret, and
+# the database URLs are generated per run, masked in the log, and exist only for that run's
+# job. Nothing is committed and nothing is available to a fork differently from the base.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Least privilege: the jobs only read the repository.
+permissions:
+  contents: read
+
+# One run per ref. A new push to a pull request cancels the older run; runs on main finish.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # D-020. Exact Node version; the pnpm version comes from "packageManager" in package.json
+  # (pnpm@12.11.2) through Corepack.
+  NODE_VERSION: "24.20.0"
+  CI: "true"
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  verify:
+    name: Format, lint, types, unit tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Enable pnpm (Corepack)
+        run: corepack enable
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `next build` runs with NODE_ENV=production, which refuses the committed local
+      # placeholders (SEC-009) and DATABASE_URL_TEST. These values are random per run and
+      # point at a port nothing listens on: the build must not need a database.
+      - name: Generate per-run configuration
+        run: |
+          db_password="$(openssl rand -hex 24)"
+          auth_secret="$(openssl rand -hex 32)"
+          echo "::add-mask::${db_password}"
+          echo "::add-mask::${auth_secret}"
+          {
+            echo "APP_URL=http://localhost:3000"
+            echo "TRUSTED_PROXY_HOPS=0"
+            echo "AUTH_SECRET=${auth_secret}"
+            echo "DATABASE_URL=postgresql://marketplace:${db_password}@127.0.0.1:5432/marketplace_ci?schema=public"
+          } >> "$GITHUB_ENV"
+
+      - name: Verify (format check, lint, type check, unit tests, build)
+        run: pnpm verify
+
+  integration:
+    name: Integration tests (PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Enable pnpm (Corepack)
+        run: corepack enable
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The test database is the `db-test` service of docker-compose.yml: the same image
+      # (pinned by digest) and settings as on a developer machine, on 127.0.0.1:5433. The
+      # password is generated here and handed to Compose through its documented override.
+      # DATABASE_URL names another server (port 5432, nothing listening) because the
+      # integration setup refuses a test database on the same host and port as DATABASE_URL
+      # (tests/helpers/test-database-url.ts). The migrations are applied by the suite's global
+      # setup (`prisma migrate deploy` on a template database).
+      - name: Start the test database
+        run: |
+          db_password="$(openssl rand -hex 24)"
+          dev_password="$(openssl rand -hex 24)"
+          auth_secret="$(openssl rand -hex 32)"
+          echo "::add-mask::${db_password}"
+          echo "::add-mask::${dev_password}"
+          echo "::add-mask::${auth_secret}"
+          {
+            echo "AUTH_SECRET=${auth_secret}"
+            echo "APP_URL=http://localhost:3000"
+            echo "TRUSTED_PROXY_HOPS=0"
+            echo "DATABASE_URL=postgresql://marketplace:${dev_password}@127.0.0.1:5432/marketplace_ci?schema=public"
+            echo "DATABASE_URL_TEST=postgresql://marketplace:${db_password}@127.0.0.1:5433/marketplace_test?schema=public"
+          } >> "$GITHUB_ENV"
+          POSTGRES_TEST_PASSWORD="${db_password}" docker compose up -d --wait db-test
+
+      - name: Integration tests
+        run: pnpm test:integration
+
+  audit:
+    name: Dependency audit (production)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Enable pnpm (Corepack)
+        run: corepack enable
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      # Unfiltered on purpose (D-034): no advisory is ignored. Needs network access to the
+      # registry audit endpoint; a registry outage fails the job instead of passing it.
+      - name: Audit production dependencies
+        run: pnpm audit --prod

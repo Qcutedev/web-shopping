@@ -354,9 +354,23 @@ Whichever option is chosen must be able to meet the owner's rules. None of the o
 | Are backups encrypted where they are stored and on the way there, and stored somewhere other than the database host? If that needs a paid plan, it is a paid addition and needs approval | "Database backups" (SECURITY.md SR-07; D-032 point 3) |
 | Does the server process keep running with no traffic, or can a scheduled command be run without a paid add-on? | "Scheduled work" (OQ-49) |
 
-## CI pipeline (Planned, T-070)
+## CI pipeline (Implemented, NOT RUN: T-070)
 
-Runs on pull requests and pushes to the default branch: install with frozen lockfile, format check, lint, type check, unit tests, integration tests against a PostgreSQL service container, production build, dependency audit, secret scan. End-to-end tests run as a separate job. Workflow rules are in `.claude/agents/devops.md`.
+**Status: the workflow file exists and its YAML parses. It has never run: the repository has no remote, so no GitHub Actions run, passing or failing, has been observed.** T-070 is acceptable only after a real run on a push or pull request (PROJECT_PLAN.md). Everything below describes what the file does, not what a run showed.
+
+`.github/workflows/ci.yml` runs on pull requests and on pushes to `main`, with `permissions: contents: read`, one concurrency group per ref (a newer push to a pull request cancels the older run), and actions pinned by major version only (`actions/checkout@v5`, `actions/setup-node@v5`; pinning to a full commit SHA is still to do and needs network access to look the SHAs up). Node is exactly 24.20.0 and pnpm is taken from `packageManager` through Corepack (D-020). Three jobs:
+
+| Job | Steps | Notes |
+| --- | --- | --- |
+| `verify` | `pnpm install --frozen-lockfile`, then `pnpm verify` (format check, lint, type check, unit tests, build) | The build runs with `NODE_ENV=production`, so it gets per-run random `AUTH_SECRET` and `DATABASE_URL` (port 5432, nothing listens; the build does not connect) and no `DATABASE_URL_TEST` (SEC-009) |
+| `integration` | `docker compose up -d --wait db-test`, then `pnpm test:integration` | Same digest-pinned image as local. The password is generated per run and handed to Compose as `POSTGRES_TEST_PASSWORD`; `DATABASE_URL_TEST` is `127.0.0.1:5433`, `DATABASE_URL` is another server (`127.0.0.1:5432`, nothing listening), as `tests/helpers/test-database-url.ts` requires. Migrations are applied by the suite's global setup |
+| `audit` | `pnpm audit --prod` | Unfiltered, no exception list (D-034) |
+
+Secrets: no repository secret is used. Generated values are masked with `::add-mask::` and exist only inside the run.
+
+Not in the workflow: Playwright end-to-end tests (T-060 is not built, and CR-49, how e2e reaches a production-mode database, is an open owner decision), a secret scan (no scanner chosen), dependency-update bot configuration, and any deployment. Workflow rules are in `.claude/agents/devops.md`.
+
+What was checked locally on 2026-10-13 (Windows, PowerShell): the YAML parses with `js-yaml`; `pnpm build` exits 0 with the per-run variables above and an unreachable `DATABASE_URL`; `pnpm audit --prod` reports "No known vulnerabilities found"; `pnpm format:check` and `pnpm lint` pass. Not checked: the `integration` job's commands (Docker was not running on the machine), the Linux runner, Corepack on the runner, or the cache.
 
 Dependency audit: `pnpm audit --prod` must exit 0 and is run without an exception list. The unused optional peer `mysql2` of `better-auth` is removed from the tree by an override in `pnpm-workspace.yaml` (SEC-036, D-034), so it no longer reports. `pnpm audit` over development dependencies still reports advisories (SEC-010); they are not in the production tree.
 
