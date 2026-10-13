@@ -27,6 +27,13 @@ describe("fill", () => {
     expect(() => fill(th.quantity.lowered, { available: Number.NaN })).toThrow(RangeError);
   });
 
+  it.each([1.5, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+    "throws for the number %s, which is not a whole number",
+    (value) => {
+      expect(() => fill(th.quantity.lowered, { available: value })).toThrow(RangeError);
+    },
+  );
+
   it("does not treat inherited object keys as values", () => {
     expect(() => fill("{toString}", {})).toThrow();
   });

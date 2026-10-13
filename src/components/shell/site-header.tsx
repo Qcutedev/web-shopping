@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { SearchField } from "@/components/ui/search-field";
+import { MAX_SEARCH_TEXT_LENGTH } from "@/modules/catalog/schema";
 import { th } from "@/i18n/th";
 import { ROUTES, SEARCH_QUERY_PARAM } from "@/lib/routes";
 import { CartLink } from "./cart-link";
@@ -20,20 +21,14 @@ export function SiteHeader() {
   return (
     <header className="border-border bg-background border-b">
       <div className="container-page flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
+        {/* DOM order is the visual order below 768 px: brand, nav, then the search row. From
+            768 px the search sits between brand and nav through `md:order-*`. */}
         <Link
           href={ROUTES.home}
-          className="type-panel-title text-foreground focus-ring order-1 rounded-sm"
+          className="type-panel-title text-foreground focus-ring order-1 inline-flex min-h-11 items-center rounded-sm"
         >
           {th.site.name}
         </Link>
-        <div className="order-3 w-full md:order-2 md:w-auto md:flex-1">
-          <SearchField
-            action={ROUTES.search}
-            name={SEARCH_QUERY_PARAM}
-            label={th.shell.header.search.label}
-            submitLabel={th.shell.header.search.submit}
-          />
-        </div>
         <nav
           aria-label={th.shell.header.navLabel}
           className="order-2 ml-auto flex items-center gap-1 md:order-3"
@@ -46,6 +41,15 @@ export function SiteHeader() {
           </Link>
           <CartLink />
         </nav>
+        <div className="order-3 w-full md:order-2 md:w-auto md:flex-1">
+          <SearchField
+            action={ROUTES.search}
+            name={SEARCH_QUERY_PARAM}
+            label={th.shell.header.search.label}
+            submitLabel={th.shell.header.search.submit}
+            inputProps={{ maxLength: MAX_SEARCH_TEXT_LENGTH }}
+          />
+        </div>
       </div>
     </header>
   );

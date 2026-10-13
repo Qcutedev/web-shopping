@@ -39,6 +39,12 @@ export const th = {
       copyright: "© {name}",
     },
   },
+  // Not-found page (CR-67). Proposal: wording written by the frontend agent, not yet approved.
+  notFound: {
+    title: "ไม่พบหน้าที่ต้องการ",
+    body: "หน้านี้อาจถูกย้ายหรือยังไม่เปิดให้บริการ",
+    backHome: "กลับไปหน้าแรก",
+  },
   // Approved texts of the notice pills (docs/DESIGN_SYSTEM.md, "Copy guidelines").
   notice: {
     sampleData: "ข้อมูลตัวอย่าง",

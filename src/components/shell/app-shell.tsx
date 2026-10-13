@@ -19,7 +19,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         {th.shell.skipToContent}
       </a>
       <SiteHeader />
-      <main id={MAIN_CONTENT_ID} className="flex flex-1 flex-col">
+      {/* tabIndex -1 lets the skip link move focus here, not only scroll. The element is not
+          interactive, so the focus outline is removed. */}
+      <main id={MAIN_CONTENT_ID} tabIndex={-1} className="flex flex-1 flex-col outline-none">
         {children}
       </main>
       <SiteFooter />

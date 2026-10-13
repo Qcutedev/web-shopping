@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { th } from "@/i18n/th";
 import { ROUTES } from "@/lib/routes";
 import { AppShell } from "./app-shell";
+import { MAX_SEARCH_TEXT_LENGTH } from "@/modules/catalog/schema";
 import { CartLink } from "./cart-link";
 
 describe("AppShell", () => {
@@ -56,6 +57,36 @@ describe("AppShell", () => {
     expect(
       within(nav).getByRole("link", { name: th.shell.header.cart.label }).getAttribute("href"),
     ).toBe(ROUTES.cart);
+  });
+
+  it("makes main focusable so the skip link moves focus", () => {
+    render(<AppShell>x</AppShell>);
+    expect(screen.getByRole("main").getAttribute("tabindex")).toBe("-1");
+  });
+
+  it("caps the search input at the length the API accepts", () => {
+    render(<AppShell>x</AppShell>);
+    const input = screen.getByLabelText(th.shell.header.search.label);
+    expect(input.getAttribute("maxlength")).toBe(String(MAX_SEARCH_TEXT_LENGTH));
+    expect(MAX_SEARCH_TEXT_LENGTH).toBe(100);
+  });
+
+  it("keeps the header DOM order brand, navigation, search (the order on a narrow screen)", () => {
+    render(<AppShell>x</AppShell>);
+    const header = screen.getByRole("banner");
+    const brand = within(header).getByRole("link", { name: th.site.name });
+    const nav = within(header).getByRole("navigation");
+    const search = within(header).getByRole("search");
+    const follows = (a: Element, b: Element) =>
+      Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(follows(brand, nav)).toBe(true);
+    expect(follows(nav, search)).toBe(true);
+  });
+
+  it("gives the brand link a 44 px target", () => {
+    render(<AppShell>x</AppShell>);
+    const brand = within(screen.getByRole("banner")).getByRole("link", { name: th.site.name });
+    expect(brand.className).toContain("min-h-11");
   });
 
   it("labels mock payment and simulated shipping in the footer", () => {
