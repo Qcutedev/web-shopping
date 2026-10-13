@@ -18,7 +18,7 @@
  */
 import { db, type Prisma } from "@/server/db";
 
-import type { ProductSort } from "./schema";
+import { MAX_PRODUCT_IMAGES, type ProductSort } from "./schema";
 import { PUBLIC_STORE_WHERE, VISIBLE_PRODUCT_WHERE } from "./visibility";
 
 export interface PageRequest {
@@ -173,7 +173,11 @@ const PRODUCT_DETAIL_SELECT = {
   isSample: true,
   category: { select: { name: true, slug: true } },
   store: { select: STORE_SUMMARY_SELECT },
-  images: { select: IMAGE_SELECT, orderBy: [{ sortOrder: "asc" }, { id: "asc" }] },
+  images: {
+    select: IMAGE_SELECT,
+    orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
+    take: MAX_PRODUCT_IMAGES,
+  },
 } as const satisfies Prisma.ProductSelect;
 
 export type ProductDetailRow = Prisma.ProductGetPayload<{ select: typeof PRODUCT_DETAIL_SELECT }>;

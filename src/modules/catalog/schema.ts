@@ -30,6 +30,13 @@ export const MAX_PAGE_SIZE = 50;
  */
 export const MAX_PAGE_DIGITS = 14;
 
+/**
+ * Most pictures a product has (DATA_MODEL.md section 12, `CHECK` on `sortOrder` 0 to 7;
+ * SECURITY.md, uploads). The product detail reads at most this many (code-review finding
+ * CR-87); the seller's product writes (T-042) take the same constant.
+ */
+export const MAX_PRODUCT_IMAGES = 8;
+
 /** Bounds of the price filter, in satang (section 5.2; BR-02 upper bound). */
 export const MIN_PRICE_FILTER_SATANG = 0;
 export const MAX_PRICE_FILTER_SATANG = 100_000_000;

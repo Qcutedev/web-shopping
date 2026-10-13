@@ -558,7 +558,7 @@ Implemented in `src/modules/catalog` (service, repository, the visibility rule i
 **Shapes**, beyond the catalogue above:
 
 - `averageRating` is the mean of the integer ratings rounded to **one decimal place**, half away from zero (ratings 5, 4, 5 give `4.7`).
-- `image` of a list item is the picture with the lowest `sortOrder`, or `null`. `images` of the detail is every picture in `sortOrder` order, `[]` when there is none.
+- `image` of a list item is the picture with the lowest `sortOrder`, or `null`. `images` of the detail is every picture in `sortOrder` order, at most **8** (`MAX_PRODUCT_IMAGES`, the per-product limit; the query takes no more even if more were stored), `[]` when there is none.
 - `url` is `/api/files/` followed by the key percent-encoded as one path segment. **The file endpoint does not exist yet** (T-041), so such a URL answers `404` until it does.
 - `store.description` is `null` when the seller wrote none; `logo` is `null` without a logo.
 - The review shape carries no reviewer name or id.
