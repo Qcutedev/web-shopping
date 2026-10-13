@@ -630,19 +630,39 @@ function posix(path: string): string {
 }
 
 describe("T-020 review: the catalog route files are thin", () => {
-  const catalogRoutes = filesUnder(join(ROOT, "src", "app", "api", "v1"), (path) =>
+  // The six public catalog routes, named one by one. Every other route file under
+  // src/app/api/v1 outside auth/ must be listed in REVIEWED_NON_CATALOG_ROUTES, so a new route
+  // still fails here until a review has looked at it (T-030 added the three /me routes; their
+  // static checks are in tests/security/t030-me-routes.test.ts).
+  const CATALOG_ROUTE_PATHS = [
+    "src/app/api/v1/categories/route.ts",
+    "src/app/api/v1/products/[slug]/reviews/route.ts",
+    "src/app/api/v1/products/[slug]/route.ts",
+    "src/app/api/v1/products/route.ts",
+    "src/app/api/v1/stores/[slug]/products/route.ts",
+    "src/app/api/v1/stores/[slug]/route.ts",
+  ];
+  const REVIEWED_NON_CATALOG_ROUTES = [
+    "src/app/api/v1/me/addresses/[id]/route.ts",
+    "src/app/api/v1/me/addresses/route.ts",
+    "src/app/api/v1/me/route.ts",
+  ];
+  const nonAuthRoutes = filesUnder(join(ROOT, "src", "app", "api", "v1"), (path) =>
     path.endsWith("route.ts"),
   ).filter((path) => !posix(path).startsWith("src/app/api/v1/auth/"));
+  const catalogRoutes = nonAuthRoutes.filter((path) => CATALOG_ROUTE_PATHS.includes(posix(path)));
 
   it("there are exactly the six catalog route files", () => {
-    expect(catalogRoutes.map(posix).sort()).toEqual([
-      "src/app/api/v1/categories/route.ts",
-      "src/app/api/v1/products/[slug]/reviews/route.ts",
-      "src/app/api/v1/products/[slug]/route.ts",
-      "src/app/api/v1/products/route.ts",
-      "src/app/api/v1/stores/[slug]/products/route.ts",
-      "src/app/api/v1/stores/[slug]/route.ts",
-    ]);
+    expect(catalogRoutes.map(posix).sort()).toEqual([...CATALOG_ROUTE_PATHS].sort());
+  });
+
+  it("every other non-auth route file is one that a review has listed", () => {
+    expect(
+      nonAuthRoutes
+        .map(posix)
+        .filter((path) => !CATALOG_ROUTE_PATHS.includes(path))
+        .sort(),
+    ).toEqual([...REVIEWED_NON_CATALOG_ROUTES].sort());
   });
 
   for (const path of catalogRoutes) {
