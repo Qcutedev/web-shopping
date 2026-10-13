@@ -18,36 +18,34 @@ export const NAME_MAX = 100;
 export const EMAIL_MAX = 254;
 
 /**
- * Inclusive code point ranges a display name may not contain:
+ * Characters a display name may not contain anywhere (Unicode General_Category):
  *
- *   - C0 and C1 controls and DEL, and so U+0000, which a PostgreSQL text column cannot hold;
- *   - the bidirectional formatting characters (SEC-033): U+061C Arabic letter mark, U+200E and
- *     U+200F direction marks, U+202A to U+202E embeddings and overrides, U+2066 to U+2069
- *     isolates. With them a name is displayed in another order than it is stored, which can
- *     impersonate another name in admin and seller screens.
- *
- * U+200B (zero-width space) and U+200C (zero-width non-joiner) stay allowed: Thai text uses them.
- * Every later free-text name field (store name, address name) uses the same rule.
- *
- * The pattern is built from numbers so that this source file never contains one of these
- * characters itself (the same approach as src/server/logger.ts).
+ *   - `Cc` controls: C0, DEL, and C1, and so U+0000, which a PostgreSQL text column cannot hold;
+ *   - `Cf` format characters, except U+200B zero-width space, U+200C zero-width non-joiner (Thai
+ *     text uses both, SEC-033), and U+200D zero-width joiner (emoji sequences). `Cf` holds the
+ *     twelve bidirectional formatting characters of SEC-033 (with them a name is displayed in
+ *     another order than it is stored) and the invisible characters of SEC-037: U+00AD soft
+ *     hyphen, U+180E, U+FEFF, U+2060 to U+2064, U+206A to U+206F, U+FFF9 to U+FFFB, and the tag
+ *     characters U+E0001 and U+E0020 to U+E007F (hidden ASCII text);
+ *   - `Zl` U+2028 and `Zp` U+2029, mandatory line breaks (SEC-037: "Admin" over "Verified seller");
+ *   - `Cs` lone surrogates, which are not text.
  */
-export const NAME_FORBIDDEN_RANGES: readonly (readonly [number, number])[] = [
-  [0x00, 0x1f],
-  [0x7f, 0x9f],
-  [0x061c, 0x061c],
-  [0x200e, 0x200f],
-  [0x202a, 0x202e],
-  [0x2066, 0x2069],
-];
+const NAME_FORBIDDEN_CHAR = String.raw`(?![​-‍])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}]`;
 
-function unicodeEscape(code: number): string {
-  return `${"\\"}u${code.toString(16).padStart(4, "0")}`;
-}
+/**
+ * A character that is visibly drawn: a letter, number, punctuation, or symbol, but not one of the
+ * blank-looking fillers U+115F, U+1160, U+3164, U+FFA0 (Hangul fillers) and U+2800 (braille
+ * blank). A name needs at least one (SEC-037: no name that looks blank, such as U+200B alone).
+ */
+const NAME_VISIBLE_CHAR = String.raw`(?![ᅟᅠㅤﾠ⠀])[\p{L}\p{N}\p{P}\p{S}]`;
 
-/** Matches a whole name that contains no character of `NAME_FORBIDDEN_RANGES`. */
+/**
+ * Matches a whole name that contains no forbidden character and at least one visible one. Every
+ * later free-text name field (store name, address name) uses the same rule. The source is
+ * written with escapes only, so this file never contains one of these characters itself.
+ */
 export const NAME_ALLOWED_TEXT = new RegExp(
-  `^[^${NAME_FORBIDDEN_RANGES.map(([from, to]) => `${unicodeEscape(from)}-${unicodeEscape(to)}`).join("")}]*$`,
+  String.raw`^(?=[\s\S]*?${NAME_VISIBLE_CHAR})(?:(?!${NAME_FORBIDDEN_CHAR})[\s\S])*$`,
   "u",
 );
 

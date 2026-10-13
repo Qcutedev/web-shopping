@@ -9,8 +9,8 @@
  * Every character outside ASCII, except the visible Thai, Arabic, and Hebrew sample text, is
  * written as an escape, so the source holds no invisible or format character.
  *
- * An `it.fails` case states the secure behaviour of an open finding (SEC-037): it is reported as
- * an expected failure while the flaw exists and turns red when the code is fixed.
+ * The SEC-037 cases were `it.fails` reproductions while the finding was open; they are plain `it`
+ * cases with unchanged bodies since the fix (auth, 2026-10-13).
  */
 import { describe, expect, it } from "vitest";
 
@@ -145,8 +145,8 @@ describe("SEC-033 re-check: the refused set is the whole Bidi_Control property",
 });
 
 /**
- * SEC-037 (new, Low): characters outside the Bidi_Control set that still change how a name is
- * laid out or make it look blank. Not part of SEC-033's remediation; registered separately.
+ * SEC-037 (Low): characters outside the Bidi_Control set that still change how a name is laid
+ * out or make it look blank. Not part of SEC-033's remediation; registered separately.
  */
 describe("SEC-037 names accept line separators, invisible format characters, and blank-looking names", () => {
   const cases: readonly (readonly [string, string])[] = [
@@ -173,7 +173,7 @@ describe("SEC-037 names accept line separators, invisible format characters, and
   ];
 
   for (const [label, name] of cases) {
-    it.fails(`${label} is refused`, () => {
+    it(`${label} is refused`, () => {
       expect(accepted(name)).toBe(false);
     });
   }

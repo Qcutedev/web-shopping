@@ -85,6 +85,42 @@ describe("signUpBodySchema", () => {
       expect(signUpBodySchema.safeParse({ ...valid, name }).success).toBe(true);
     }
   });
+
+  it("refuses every format character except U+200B to U+200D, and U+2028, U+2029 (SEC-037)", () => {
+    const allowed = new Set([0x200b, 0x200c, 0x200d]);
+    const passed: string[] = [];
+    for (let code = 0; code <= 0x10ffff; code += 1) {
+      if (code >= 0xd800 && code <= 0xdfff) continue;
+      const char = String.fromCodePoint(code);
+      if (!/^[\p{Cf}\p{Zl}\p{Zp}]$/u.test(char) || allowed.has(code)) continue;
+      if (signUpBodySchema.safeParse({ ...valid, name: `สม${char}ชาย` }).success) {
+        passed.push(code.toString(16));
+      }
+    }
+    expect(passed).toEqual([]);
+  });
+
+  it("refuses a lone surrogate in the name", () => {
+    for (const name of ["a\ud800b", "a\udc00b"]) {
+      expect(signUpBodySchema.safeParse({ ...valid, name }).success).toBe(false);
+    }
+  });
+
+  it("refuses a name with nothing visible in it (SEC-037)", () => {
+    for (const name of ["​", "​‌‍", "ㅤ", "ᅟᅠ", "ﾠ", "⠀", "⠀ ㅤ", "ั", "́́"]) {
+      expect(signUpBodySchema.safeParse({ ...valid, name }).success, JSON.stringify(name)).toBe(
+        false,
+      );
+    }
+  });
+
+  it("accepts short and decorated names that have one visible character", () => {
+    for (const name of ["ก", "A", "1", "-", "❤️", "\u{1f469}‍\u{1f4bb}", "ㅤA"]) {
+      expect(signUpBodySchema.safeParse({ ...valid, name }).success, JSON.stringify(name)).toBe(
+        true,
+      );
+    }
+  });
 });
 
 describe("signInBodySchema", () => {
