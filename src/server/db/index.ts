@@ -13,6 +13,17 @@ import type { Prisma } from "../../../prisma/generated/prisma/client";
 export { db, type Db } from "./client";
 
 /**
+ * What the installed driver would connect to for a connection string, without connecting
+ * (CR-42). Exported for prisma/seed.ts, which refuses any database that is not on this machine
+ * (T-014) and may import nothing below this file. Opens no connection and returns no password.
+ */
+export {
+  ConnectionTargetError,
+  describeConnectionTarget,
+  type ConnectionTarget,
+} from "./connection-target";
+
+/**
  * `Prisma` carries the raw-query helpers (`Prisma.sql`, `Prisma.join`), the error classes
  * (`Prisma.PrismaClientKnownRequestError`), and every generated input and result type.
  */
