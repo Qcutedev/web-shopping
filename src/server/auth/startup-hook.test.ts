@@ -16,6 +16,7 @@ function stubEnvironment(overrides: Record<string, string | undefined> = {}): vo
     NEXT_PHASE: undefined,
     NODE_ENV: "development",
     APP_URL: "http://localhost:3000",
+    AUTH_SECRET: "Zq7canary-auth-secret-0123456789abcdef",
     DATABASE_URL: "postgresql://u:Zq7canaryPw@db.example.test:5432/shop",
     DATABASE_URL_TEST: undefined,
     PGPASSWORD: undefined,
