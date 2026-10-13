@@ -177,8 +177,8 @@ describe("the rule is part of the key (SEC-005)", () => {
     await limiter.consume("user:u1", RATE_LIMITS.CHECKOUT);
     await limiter.consume("user:u1", RATE_LIMITS.UPLOADS);
     expect(calls).toEqual([
-      { rule: "checkout", subject: "user:u1", windowMs: 60_000, maxKeys: 20_000, now: START },
-      { rule: "uploads", subject: "user:u1", windowMs: 3_600_000, maxKeys: 20_000, now: START },
+      { rule: "checkout", subject: "user:u1", windowMs: 60_000, maxKeys: 10_000, now: START },
+      { rule: "uploads", subject: "user:u1", windowMs: 3_600_000, maxKeys: 10_000, now: START },
     ]);
   });
 
@@ -486,21 +486,79 @@ describe("isolated capacity per rule (SEC-004)", () => {
     expect(total).toBeLessThanOrEqual(MAX_TOTAL_WINDOWS);
   });
 
-  it("the capacity split is the one recorded in SR-02 (SEC-032 split; security ruling pending)", () => {
+  it("the capacity split is the SEC-050 split of D-038 (option (a))", () => {
     const split = Object.fromEntries(
       Object.values(RATE_LIMITS).map((rule) => [rule.name, rule.maxKeys]),
     );
     expect(split).toEqual({
       "sign-in-address": 40_000,
       "sign-in-email": 30_000,
-      "sign-in-account": 10_000,
+      "sign-in-account": 50_000,
       "sign-up": 40_000,
-      checkout: 20_000,
-      uploads: 20_000,
-      "seller-application": 20_000,
-      "review-create": 20_000,
+      checkout: 10_000,
+      uploads: 10_000,
+      "seller-application": 10_000,
+      "review-create": 10_000,
     });
     expect(Object.values(split).reduce((sum, keys) => sum + keys, 0)).toBe(MAX_TOTAL_WINDOWS);
+  });
+
+  it("SEC-050: keeping sign-in-account full costs clearly more than 33 new emails a second", () => {
+    // New subjects per second needed to keep a full rule full: capacity / window in seconds.
+    const perSecond = (rule: RateLimitRule): number => rule.maxKeys / (rule.windowMs / 1000);
+    const account = perSecond(RATE_LIMITS.SIGN_IN_ACCOUNT);
+    expect(account).toBeGreaterThan(166);
+    // Five times the cost before D-038 (10,000 windows of 300 s, about 33 a second).
+    expect(RATE_LIMITS.SIGN_IN_ACCOUNT.maxKeys).toBeGreaterThanOrEqual(5 * 10_000);
+    expect(RATE_LIMITS.SIGN_IN_ACCOUNT.windowMs).toBe(300_000);
+    // The total budget did not grow; the share came from the signed-in rules only.
+    expect(MAX_TOTAL_WINDOWS).toBe(200_000);
+    expect(RATE_LIMITS.SIGN_IN_ADDRESS.maxKeys).toBe(40_000);
+    expect(RATE_LIMITS.SIGN_IN_EMAIL.maxKeys).toBe(30_000);
+    expect(RATE_LIMITS.SIGN_UP.maxKeys).toBe(40_000);
+  });
+
+  it("SEC-050: sign-in-account holds 50,000 emails, then refuses new ones and keeps live counters", async () => {
+    const { limiter, store, advance } = setup({}, BUILT_IN);
+    const rule = RATE_LIMITS.SIGN_IN_ACCOUNT;
+    for (let i = 0; i < 59; i += 1) await limiter.consume("owner@example.test", rule);
+    for (let i = 1; i < rule.maxKeys; i += 1) await limiter.consume(`f${String(i)}@x.test`, rule);
+    expect(store.sizeOf(rule.name)).toBe(50_000);
+
+    advance(61_000);
+    const fresh = await limiter.consume("new@example.test", rule);
+    expect(fresh).toMatchObject({ allowed: false, saturated: true });
+    expect(fresh.retryAfterSeconds).toBeLessThanOrEqual(60);
+    // The owner's live counter is neither evicted nor reset: the 60th hit is allowed, the 61st not.
+    expect(await limiter.consume("owner@example.test", rule)).toMatchObject({
+      allowed: true,
+      remaining: 0,
+      saturated: false,
+    });
+    expect((await limiter.consume("owner@example.test", rule)).allowed).toBe(false);
+  });
+
+  it("SEC-050: each signed-in rule still holds its own per-user limit and 10,000 users", async () => {
+    for (const rule of [
+      RATE_LIMITS.CHECKOUT,
+      RATE_LIMITS.UPLOADS,
+      RATE_LIMITS.SELLER_APPLICATION,
+      RATE_LIMITS.REVIEW_CREATE,
+    ]) {
+      const { limiter, store } = setup({}, BUILT_IN);
+      for (let i = 0; i < rule.limit; i += 1) {
+        expect((await limiter.consume("user:u1", rule)).allowed).toBe(true);
+      }
+      expect(await limiter.consume("user:u1", rule)).toMatchObject({
+        allowed: false,
+        saturated: false,
+      });
+      for (let i = 1; i < 10_000; i += 1) await limiter.consume(`user:${String(i)}x`, rule);
+      expect(store.sizeOf(rule.name)).toBe(10_000);
+      expect((await limiter.consume("user:new", rule)).saturated).toBe(true);
+      // A full rule never resets the user who is over the limit.
+      expect((await limiter.consume("user:u1", rule)).allowed).toBe(false);
+    }
   });
 
   it("refuses a store whose total bound is above the documented maximum", () => {

@@ -156,18 +156,28 @@ export const RATE_LIMITS = {
    * Subject the normalised email, over all addresses (SEC-032). Consumed only after
    * `sign-in-address` and `sign-in-email` allowed the request. One address reaches it at most 5
    * times per 60 s, so it can add at most 29 hits to one 300 s window and never exhaust it.
+   *
+   * Capacity (SEC-050, D-038 option (a)): 50,000 windows, 40,000 of them taken from the four
+   * signed-in rules below. A full rule refuses new emails, so keeping it full takes
+   * 50,000 / 300 s, about 167 new emails a second (it was 10,000 / 300 s, about 33), each from an
+   * address that passed `sign-in-address`.
    */
-  SIGN_IN_ACCOUNT: { name: "sign-in-account", limit: 60, windowMs: 300_000, maxKeys: 10_000 },
+  SIGN_IN_ACCOUNT: { name: "sign-in-account", limit: 60, windowMs: 300_000, maxKeys: 50_000 },
   SIGN_UP: { name: "sign-up", limit: 5, windowMs: 3_600_000, maxKeys: 40_000 },
-  CHECKOUT: { name: "checkout", limit: 10, windowMs: 60_000, maxKeys: 20_000 },
-  UPLOADS: { name: "uploads", limit: 30, windowMs: 3_600_000, maxKeys: 20_000 },
+  /*
+   * The signed-in rules hold 10,000 windows each (20,000 before SEC-050). Their subject is the
+   * user id, so only 10,000 distinct accounts active inside one window can fill one of them, and
+   * accounts are themselves limited by `sign-up`. Each user's own limit is unchanged.
+   */
+  CHECKOUT: { name: "checkout", limit: 10, windowMs: 60_000, maxKeys: 10_000 },
+  UPLOADS: { name: "uploads", limit: 30, windowMs: 3_600_000, maxKeys: 10_000 },
   SELLER_APPLICATION: {
     name: "seller-application",
     limit: 3,
     windowMs: 86_400_000,
-    maxKeys: 20_000,
+    maxKeys: 10_000,
   },
-  REVIEW_CREATE: { name: "review-create", limit: 10, windowMs: 3_600_000, maxKeys: 20_000 },
+  REVIEW_CREATE: { name: "review-create", limit: 10, windowMs: 3_600_000, maxKeys: 10_000 },
 } as const satisfies Record<string, RateLimitRule>;
 
 export interface MemoryRateLimitStoreOptions {

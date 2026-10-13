@@ -505,8 +505,8 @@ describe("SEC-004 one flood of new keys refuses every other rate-limited action"
       now: () => now,
       logger: { warn: (message, fields) => warnings.push(`${message} ${JSON.stringify(fields)}`) },
     });
-    // SEC-032 split (2026-10-13): sign-in-email 30,000 and sign-in-account 10,000 (was
-    // sign-in-email 40,000), so the anonymous rules still hold 120,000 windows together.
+    // SEC-050 split (D-038): sign-in-address 40,000, sign-in-email 30,000, sign-in-account
+    // 50,000, and sign-up 40,000, so the anonymous rules hold 160,000 windows together.
     const anonymous = [
       RATE_LIMITS.SIGN_UP,
       RATE_LIMITS.SIGN_IN_ADDRESS,
@@ -518,7 +518,7 @@ describe("SEC-004 one flood of new keys refuses every other rate-limited action"
         await limiter.consume(`flood-subject-${i}`, rule);
       }
     }
-    expect(store.size).toBe(120_000);
+    expect(store.size).toBe(160_000);
 
     for (const rule of anonymous) {
       const refused = await limiter.consume("203.0.113.200", rule);
