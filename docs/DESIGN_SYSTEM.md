@@ -314,7 +314,7 @@ Each component defines default, hover, focus-visible, active, disabled, and wher
 | Card | Border `--border`, radius 16, padding 16 (24 for panels from `md`). |
 | ProductCard | Square image area with radius 16, filled with a placeholder tint until a real photo exists. Optional low-stock pill at the top-left of the image. Then a two-line title clamp, store name (`--text-muted`), and price (18 / 700, tabular numerals, `--text`). Rating row only when review count is above zero; no sales counts. Whole card is one link; no nested interactive elements. The low-stock pill uses the warning badge colours (derived, not yet shown to the owner). |
 | Price | Formats satang to THB. Tabular numerals. |
-| CartButton | Pill-shaped header button with a count badge (`--primary` fill, `--on-primary` text). The badge is hidden when the cart is empty. The accessible name includes the count. |
+| CartButton | Pill-shaped header button with a count badge (`--primary` fill, `--on-primary` text). The badge is hidden when the cart is empty. The accessible name includes the count. Implemented as `CartLink` in `src/components/shell/cart-link.tsx` (CR-77): it is a link to the cart, not a `button`, and it reads Thai copy and the route from `src/i18n/th.ts` and `src/lib/routes.ts`, so it lives in the shell and not in `src/components/ui` (primitives there hold no Thai text). It composes `buttonVariants({ variant: "secondary" })` plus `rounded-full`. |
 | Table | Sticky header, zebra off, row hover, sortable headers as buttons. |
 | Pagination | Previous, next, page numbers; current page marked with `aria-current` and filled with `--selected` (dark ink) with `--on-selected` text. |
 | Tabs | Arrow-key navigation. The selected tab is shown in dark ink (`--selected`), not in `--primary`, and is marked with `aria-selected`; colour is not the only signal. |
@@ -336,7 +336,7 @@ Focus-visible on every interactive component: a 2px `--focus-ring` ring with a 2
 
 Files are in `src/components/ui/`. Import each primitive from its own file, for example `import { Button } from "@/components/ui/button"`. No primitive contains Thai text: every string, including accessible names, is a prop that the caller fills from `src/i18n/th.ts`.
 
-Not implemented yet: Dialog, Drawer, Tabs, Toast, Table, FileUpload, StatCard, Switch, ProductCard, CartButton. Their rows in the table above remain the specification.
+Not implemented yet: Dialog, Drawer, Tabs, Toast, Table, FileUpload, StatCard, Switch, ProductCard. Their rows in the table above remain the specification. CartButton is built as `CartLink` in `src/components/shell/` (see its row above).
 
 Shared rules for every primitive below:
 

@@ -33,7 +33,8 @@ function CartIcon() {
 }
 
 /**
- * The header's cart button: a pill link with a count badge (docs/DESIGN_SYSTEM.md, CartButton).
+ * The header's cart button: a pill link with a count badge. This is the CartButton of
+ * docs/DESIGN_SYSTEM.md; it lives in the shell because it reads Thai copy and routes.
  * The accessible name includes the count when there is one.
  */
 export function CartLink({ count = 0, className }: CartLinkProps) {
