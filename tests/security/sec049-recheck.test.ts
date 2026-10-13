@@ -6,9 +6,9 @@
  * This file holds no character outside printable ASCII and no backslash-u escape (SEC-040,
  * SEC-043).
  *
- * A case written `it.fails` states the secure behaviour of an open finding (SEC-051): it is
- * reported as an expected failure while the flaw exists and turns red when the code is fixed; the
- * fix then changes `it.fails` to `it` without touching the body.
+ * A case written `it.fails` states the secure behaviour of an open finding: it is reported as an
+ * expected failure while the flaw exists and turns red when the code is fixed; the fix then
+ * changes `it.fails` to `it` without touching the body. SEC-051 is fixed; its case is an `it`.
  *
  * Pure: no database, no network. One case reads src/server/auth/auth.ts.
  */
@@ -65,6 +65,7 @@ function textOf(error: unknown): string {
     JSON.stringify((error as EnvValidationError).issues ?? []),
   ].join("\n");
 }
+const capitalise = (word: string) => `${word[0]?.toUpperCase()}${word.slice(1)}`;
 const WEAK = [{ variable: "AUTH_SECRET", rule: ENV_RULES.authSecretWeak }];
 const PLACEHOLDER = [{ variable: "AUTH_SECRET", rule: ENV_RULES.authSecretPlaceholder }];
 
@@ -277,24 +278,70 @@ describe("SEC-049 re-check: legitimate random values are not refused", () => {
 // SEC-051
 
 describe("SEC-051 the published-prefix rule matches only the hyphenated spelling", () => {
-  it.fails(
-    "production refuses the published values with their separators changed and a few characters edited",
-    () => {
-      for (const weak of [
-        // the integration secret with `_` for `-` and two characters changed: a guessable edit of a
-        // published value; the hyphenated spelling of the same edit is refused by the prefix rule
-        "integration_test_secret_0123X56789_abcdeXghij",
-        "integration.test.secret.0123X56789.abcdeXghij",
-        "IntegrationTestSecret0123X56789abcdeXghij",
-        // the library default spelled without hyphens, its digits edited out of every 8-step run
-        "BetterAuthSecret1234X678901X34567890",
-        "better_auth_secret_1234X678901X34567890",
-      ]) {
-        expect(
-          issuesOf(() => parseEnv(production({ AUTH_SECRET: weak }))),
-          JSON.stringify(weak),
-        ).toEqual(WEAK);
+  it("production refuses the published values with their separators changed and a few characters edited", () => {
+    for (const weak of [
+      // the integration secret with `_` for `-` and two characters changed: a guessable edit of a
+      // published value; the hyphenated spelling of the same edit is refused by the prefix rule
+      "integration_test_secret_0123X56789_abcdeXghij",
+      "integration.test.secret.0123X56789.abcdeXghij",
+      "IntegrationTestSecret0123X56789abcdeXghij",
+      // the library default spelled without hyphens, its digits edited out of every 8-step run
+      "BetterAuthSecret1234X678901X34567890",
+      "better_auth_secret_1234X678901X34567890",
+    ]) {
+      expect(
+        issuesOf(() => parseEnv(production({ AUTH_SECRET: weak }))),
+        JSON.stringify(weak),
+      ).toEqual(WEAK);
+    }
+  });
+
+  it("every separator spelling of both prefixes is refused, in both readers", () => {
+    const tail = `${FILLER}Yc5Hj8Vz`;
+    for (const words of [
+      ["better", "auth", "secret"],
+      ["integration", "test", "secret"],
+    ]) {
+      for (const separator of ["", "-", "_", ".", " ", "--", "_-", "/", "+", "~"]) {
+        const base = words.join(separator);
+        for (const spelled of [base, base.toUpperCase(), words.map(capitalise).join(separator)]) {
+          for (const value of [
+            `${spelled}${tail}`,
+            `${spelled}-${tail}`,
+            `${separator}${spelled}${tail}`,
+          ]) {
+            // a blank is outside printable ASCII and is refused by an older rule: still refused
+            for (const issues of bothReaders(value))
+              expect(issues, JSON.stringify(value)).toEqual(WEAK);
+          }
+        }
       }
-    },
-  );
+    }
+  });
+
+  it("random values are not refused by the squeezed-prefix rule: at most 1 refusal in 20,000 per form", () => {
+    const ALNUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    const PRINTABLE = Array.from({ length: 94 }, (_, i) => String.fromCharCode(0x21 + i)).join("");
+    const pick = (alphabet: string, n: number) =>
+      Array.from({ length: n }, () => alphabet[randomInt(alphabet.length)]).join("");
+    // Old rules refuse about 2 in 1,000,000 of these. A random value squeezes to one of the two
+    // prefixes with a probability of about 36^-16, so any refusal here is another rule's. The
+    // last form is the most exposed one: separators between letters are removed by the squeeze.
+    const forms: Record<string, () => string> = {
+      hex32: () => randomBytes(32).toString("hex"),
+      base64: () => randomBytes(32).toString("base64"),
+      base64url: () => randomBytes(32).toString("base64url"),
+      alnum32: () => pick(ALNUM, 32),
+      printable32: () => pick(PRINTABLE, 32),
+      lettersAndSeparators: () => pick("abcdefghijklmnopqrstuvwxyz-_.", 32),
+    };
+    for (const [form, generate] of Object.entries(forms)) {
+      let refused = 0;
+      for (let i = 0; i < 20_000; i += 1) {
+        const issues = issuesOf(() => readAuthSecret(production({ AUTH_SECRET: generate() })));
+        if (issues.length > 0) refused += 1;
+      }
+      expect(refused, form).toBeLessThanOrEqual(1);
+    }
+  }, 30_000);
 });

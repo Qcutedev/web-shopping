@@ -407,14 +407,17 @@ function containsPublishedSecret(secret: string): boolean {
 }
 
 /**
- * SEC-049: the prefixes of the two published values (D-036 item 6). A value that starts with one
- * is refused in any case, so the published value with its tail changed is refused as well.
+ * SEC-049, SEC-051: the prefixes of the two published values (D-036 item 6), written without
+ * separators. A value is compared after it is lower-cased and every character that is not a
+ * letter or a digit is removed, so `better-auth-secret`, `better_auth_secret`, `Better.Auth.Secret`,
+ * and `BetterAuthSecret` all match. A value that starts with one is refused, so the published
+ * value with its tail or its separators changed is refused as well.
  */
-const PUBLISHED_PREFIXES: readonly string[] = ["better-auth-secret", "integration-test-secret"];
+const PUBLISHED_PREFIXES: readonly string[] = ["betterauthsecret", "integrationtestsecret"];
 
 function hasPublishedPrefix(secret: string): boolean {
-  const lower = secret.toLowerCase();
-  return PUBLISHED_PREFIXES.some((prefix) => lower.startsWith(prefix));
+  const squeezed = secret.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return PUBLISHED_PREFIXES.some((prefix) => squeezed.startsWith(prefix));
 }
 
 /**
@@ -457,7 +460,7 @@ function hasLagPattern(text: string): boolean {
  * AUTH_SECRET_MIN_DISTINCT_CHARACTERS distinct characters; a shorter unit repeated; a run of 8
  * characters that occurs twice; a run of 8 characters with a constant code-point step; a
  * published value inside it, in any case; a start with `better-auth-secret` or
- * `integration-test-secret`, in any case; a single code-point difference at one lag from 1 to 8
+ * `integration-test-secret`, in any case and with any separators or none (SEC-051); a single code-point difference at one lag from 1 to 8
  * that covers at least half of the positions (SEC-049). This is a floor against mistakes, not an entropy
  * measurement: a value that passes is not thereby random. A random value from the generation
  * commands of docs/DEPLOYMENT.md is refused with a probability below one in 100,000 (measured
