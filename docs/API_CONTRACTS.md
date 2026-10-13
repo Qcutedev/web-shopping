@@ -1,6 +1,6 @@
 # API Contracts
 
-Owner: backend-api agent. This is the **planned** contract, corrected on 2026-10-11 after the T-004 planning review ([reviews/T-004-findings.md](reviews/T-004-findings.md)) the owner answers in [DECISIONS.md](DECISIONS.md) D-025, D-026, and D-028, and the technical rulings in D-029, and corrected again the same day after the cross-document check, for the technical rulings in D-031, and on 2026-10-12 for D-032 (the store status is judged before the body is read; SECURITY.md SR-05 item 5). **Implemented so far: the six catalog endpoints of [section 5.2](#52-catalog) (T-020, 2026-10-13) and `GET /api/health` ([section 5.10](#510-platform)); every other endpoint is planned.** Once an endpoint is built, the Zod schemas in `src/modules/<domain>/schema.ts` are authoritative for it and this document must match them.
+Owner: backend-api agent. This is the **planned** contract, corrected on 2026-10-11 after the T-004 planning review ([reviews/T-004-findings.md](reviews/T-004-findings.md)) the owner answers in [DECISIONS.md](DECISIONS.md) D-025, D-026, and D-028, and the technical rulings in D-029, and corrected again the same day after the cross-document check, for the technical rulings in D-031, and on 2026-10-12 for D-032 (the store status is judged before the body is read; SECURITY.md SR-05 item 5). **Implemented so far: the six catalog endpoints of [section 5.2](#52-catalog) (T-020, 2026-10-13), the six profile and address endpoints of [section 5.3](#53-account) (T-030 backend, 2026-10-13; integration tests not yet run, [section 5.3.1](#531-as-built-t-030-backend-2026-10-13)), and `GET /api/health` ([section 5.10](#510-platform)); every other endpoint is planned.** Once an endpoint is built, the Zod schemas in `src/modules/<domain>/schema.ts` are authoritative for it and this document must match them.
 
 What this document must agree with, and which one wins when a name or value is in question:
 
@@ -596,6 +596,50 @@ Implemented in `src/modules/catalog` (service, repository, the visibility rule i
 Address fields, as named in DATA_MODEL.md section 6.2: `recipientName`, `phone`, `line1`, `subdistrict`, `district`, `province`, `postalCode` (exactly five digits), `isDefault` (boolean, default `false`).
 
 **Setting the default address** (finding M11). There is no separate endpoint: send `"isDefault": true` in `POST /me/addresses` or `PATCH /me/addresses/{id}`. In the same transaction the user's previous default, if any, becomes `isDefault: false`, so there is at most one default per user (REQ-C-04). `"isDefault": false` clears it. Nothing makes an address the default automatically, and deleting the default leaves the user with none.
+
+#### 5.3.1 As built (T-030 backend, 2026-10-13)
+
+Implemented in `src/modules/profile` (schema, service, repository) and the handlers `src/app/api/v1/me/route.ts` (`GET`, `PATCH`), `src/app/api/v1/me/addresses/route.ts` (`GET`, `POST`), and `src/app/api/v1/me/addresses/[id]/route.ts` (`PATCH`, `DELETE`). The schemas in `src/modules/profile/schema.ts` are authoritative; this subsection states what they decide beyond the table above. **Status: the handlers and the unit tests exist; the integration tests in `tests/integration/profile/endpoints.test.ts` are written and have not been run** (no database was available).
+
+**Access and order of checks** ([section 1.8](#18-access-levels-and-404-against-403)). All six are access `user`: every role (`CUSTOMER`, `SELLER` whatever its store status, `ADMIN`) reads and edits its own profile and holds its own addresses; no role is refused, so there is no `403` other than the origin check. Mutations: 1 `Origin` (`403`), 2 `Content-Type` (`415`, also for `DELETE`, which has no body), 3 the session (`401`), 6 the body (`413`; not for `DELETE`), 7 the path parameter and the body (`400`), then the service (`404`). `GET`: 3, then 7 for the query, then the service. Nothing is rate-limited ([section 6](#6-rate-limits-initial-values-tune-after-testing) lists none of these endpoints). Every response is `Cache-Control: no-store`. A `userId`, `storeId`, or `role` in the query string is ignored.
+
+**Responses.**
+
+| Endpoint | Success |
+| --- | --- |
+| `GET /me` | `200`, the profile shape above. `sellerApplication` is the application with the latest `createdAt` (then the highest `id`) |
+| `PATCH /me` | `200`, the profile shape after the change |
+| `GET /me/addresses` | `200`, the list envelope of address shapes. Ordered by `isDefault` (the default first), then `createdAt` descending, then `id` descending. Pagination as [section 1.7](#17-pagination) |
+| `POST /me/addresses` | `201`, the new address |
+| `PATCH /me/addresses/{id}` | `200`, the address after the change |
+| `DELETE /me/addresses/{id}` | `200 { "data": { "deleted": true } }` |
+
+The address shape is exactly `{ "id", "recipientName", "phone", "line1", "subdistrict", "district", "province", "postalCode", "isDefault" }`: no `userId` and no timestamps.
+
+**Refusals.**
+
+- `401 UNAUTHENTICATED`: no valid session, or a user deactivated between the guard and the query of `GET /me` or `PATCH /me`.
+- `404 NOT_FOUND`, default message, `details` `{}`: `PATCH` or `DELETE` of an address the caller does not own. Ownership is part of the statement (`WHERE id = :id AND "userId" = :actor`), so an id of another user and an id that does not exist get the same answer and nothing is changed (REQ-C-04). A second `DELETE` of the same address is also `404`.
+- `400 VALIDATION_ERROR`: the rules below; and, on every body, an unknown key (`unrecognized_keys`, path `""`). Unknown keys include `id`, `userId`, `email`, `role`, `isActive`, `storeId`, and the timestamps: `PATCH /me` never changes the email, the role, or the active flag (REQ-C-03), and an address cannot be created for, or moved to, another user.
+
+**Fields** (item 8.2-7 settled for these endpoints).
+
+| Field | Rule |
+| --- | --- |
+| `name` (`PATCH /me`) | Trimmed, 1 to 100 characters, the display-name rule of sign-up (`NAME_ALLOWED_TEXT` in `src/modules/auth/schema.ts`: no control, format, bidirectional, line-separator, private-use, unassigned, or default-ignorable character except U+200B to U+200D and the emoji variation selectors; at least one visible character; SEC-033, SEC-037, SEC-039) |
+| `phone` (`PATCH /me`, address) | A string of at most 32 characters. Surrounding white space, inner spaces, and hyphens are removed; what is left must be a Thai number: `0`, a digit 1 to 9, and 7 or 8 more digits (`021234567`, `0812345678`), or `+66`, a digit 1 to 9, and 7 or 8 more digits (`+66812345678`). ASCII digits only. **The stored and returned value is the form without separators**: `081-234-5678` is stored as `0812345678`. On `PATCH /me`, `null` clears the phone; on an address the phone is required and `null` is `400` |
+| `recipientName` | Trimmed, 1 to 100 characters, the display-name rule |
+| `line1` | Trimmed, 1 to 200 characters, the display-name rule (so no line break) |
+| `subdistrict`, `district`, `province` | Trimmed, 1 to 100 characters each, the display-name rule |
+| `postalCode` | Surrounding white space removed, then exactly five ASCII digits (REQ-C-04; the database check `Address_postalCode_check` is the backstop). Four or six digits, a letter, an inner space, Thai or full-width digits, and a JSON number are `400` |
+| `isDefault` | Boolean. `POST`: optional, default `false`. `PATCH`: optional |
+| `{id}` path parameter | An opaque id ([section 1.4](#14-identifiers-slugs-and-order-numbers)): 1 to 200 characters, no U+0000, no lone surrogate. Form only; whether it exists is the service's `404` |
+
+`POST /me/addresses` requires every field except `isDefault`. `PATCH /me` and `PATCH /me/addresses/{id}` take any of their fields but **at least one**: an empty object is `400` with one field error at path `""`, code `custom`. A field that is not sent is not changed.
+
+**Default address, as built.** Every address write is one transaction. A write that makes an address the default first locks the caller's `User` row (`SELECT ... FOR NO KEY UPDATE`), then sets the caller's other default to `false`, then writes. Two concurrent default switches of one user therefore run one after the other; both answer `200`, and the user ends with exactly one default, the one written last (DATA_MODEL.md section 6.2; code-review finding CR-22 a). `NO KEY UPDATE` does not wait for, or block, a foreign-key check that references the user elsewhere. A write with `isDefault: false`, or without `isDefault`, takes no lock.
+
+**Not limited.** No rule bounds how many addresses one user may hold, and no rate limit applies; neither is in a requirement.
 
 ### 5.4 Cart
 
