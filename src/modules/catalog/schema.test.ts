@@ -183,6 +183,13 @@ describe("slugs", () => {
     expect(slug("é-abc")).toBe("é-abc");
   });
 
+  it("decodes a % left by the framework once more, as accepted in CR-90", () => {
+    // `/products/%2541` reaches the schema as `%41` once the framework has decoded it.
+    expect(slug("%41")).toBe("A");
+    // Given still encoded, `%2541` is decoded once only, to a slug that matches nothing.
+    expect(slug("%2541")).toBe("%41");
+  });
+
   it("refuses a broken escape, an empty slug, U+0000, and an absurd length", () => {
     expect(() => slug("%E0%B8")).toThrow(AppError);
     expect(() => slug("")).toThrow(AppError);

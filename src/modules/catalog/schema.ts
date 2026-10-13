@@ -99,6 +99,12 @@ export type PaginationQuery = z.infer<typeof paginationQuerySchema>;
  * over still percent-encoded; a generated slug never contains `%`, so a value with `%` is
  * decoded once. A broken escape cannot name any slug and is refused. The result is normalised
  * to Unicode NFC (section 1.4; DATA_MODEL.md section 9), then matched exactly.
+ *
+ * Accepted (code-review finding CR-90): when the framework has already decoded the segment, a
+ * `%` left in it is decoded a second time here, so a request for `/products/%2541` looks up the
+ * slug `A`. This is harmless: the lookup is an exact match against stored slugs, it only ever
+ * answers 200 for a slug that exists and is visible, and the same row is reachable by its plain
+ * slug anyway. Nothing is decoded more than twice in total.
  */
 export const slugSchema = z
   .string()
