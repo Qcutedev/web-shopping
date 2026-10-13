@@ -32,27 +32,13 @@ export const VISIBLE_PRODUCT_WHERE = {
   category: { isActive: true },
 } as const satisfies Prisma.ProductWhereInput;
 
-/** The same five conditions as a pure check, for unit tests and for rows already loaded. */
-export interface VisibilityFacts {
-  status: string;
-  moderationStatus: string;
-  storeStatus: string;
-  ownerIsActive: boolean;
-  categoryIsActive: boolean;
-}
-
-export function isPublicStore(facts: Pick<VisibilityFacts, "storeStatus" | "ownerIsActive">) {
-  return facts.storeStatus === StoreStatus.APPROVED && facts.ownerIsActive;
-}
-
-export function isVisibleProduct(facts: VisibilityFacts): boolean {
-  return (
-    facts.status === ProductStatus.PUBLISHED &&
-    facts.moderationStatus === ModerationStatus.APPROVED &&
-    isPublicStore(facts) &&
-    facts.categoryIsActive
-  );
-}
+/*
+ * No pure restatement of the five conditions (a check on rows already loaded) exists: it would
+ * be a second definition with no production caller (code-review finding CR-86). Code that needs
+ * the answer for a row reads it with these conditions in its query. A caller that truly needs a
+ * pure check adds one here, typed with the Prisma enums, with an integration test that compares
+ * it to membership in the query's result.
+ */
 
 /** "สินค้าหมด" (BR-24): a visible product with no stock. */
 export function isSoldOut(stock: number): boolean {

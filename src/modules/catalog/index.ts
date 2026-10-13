@@ -10,11 +10,4 @@ export {
   listStoreProducts,
 } from "./service";
 export * from "./schema";
-export {
-  isPublicStore,
-  isSoldOut,
-  isVisibleProduct,
-  PUBLIC_STORE_WHERE,
-  VISIBLE_PRODUCT_WHERE,
-  type VisibilityFacts,
-} from "./visibility";
+export { isSoldOut, PUBLIC_STORE_WHERE, VISIBLE_PRODUCT_WHERE } from "./visibility";
