@@ -41,6 +41,7 @@ Decisions marked `PROPOSED` are not yet validated against the installed stack; e
 | D-031 | 2026-10-11 | Technical rulings after the cross-document check: Prisma and Better Auth versions, `contentRevision` on a price correction, amounts in a request body, order of refusals, refused-checkout mechanism | ACCEPTED |
 | D-032 | 2026-10-11 | After the security review: store status is judged before the body is read (amends D-031 point 4); every restore deletes all sessions and re-applies restrictions | ACCEPTED |
 | D-033 | 2026-10-12 | Owner answers to the parked questions: CR-15, REQUIREMENTS Q38 to Q41, filter chips, DEPLOYMENT DEP-Q1 to DEP-Q3, DEP-Q5, DEP-Q6, DEP-Q8, DEP-Q9 | ACCEPTED |
+| D-034 | 2026-10-13 | SEC-036: the unused optional peer `mysql2` is removed from the dependency tree with a pnpm override; no audit exception list | ACCEPTED |
 
 ## Details
 
@@ -262,6 +263,14 @@ Answered by the owner on 2026-10-12, one question at a time, in chat. In every c
 11. **DEP-Q6: 30 days is both the longest and the shortest time a database backup is kept**: one backup a day, each kept 30 days and then deleted. A provider plan that costs money is a separate approval.
 12. **DEP-Q8: the payment-timeout sweep runs every minute.** An unpaid order is failed within about 16 minutes; the check query allows 20.
 13. **DEP-Q9: logs are kept at least 30 days where the chosen host offers it without extra cost.** Anything paid is a separate approval. The 90-day maximum (OQ-48) stands.
+
+### D-034 mysql2 is removed from the dependency tree (SEC-036)
+Made by devops on 2026-10-13, following the security review of T-015 and T-016. Technical only.
+
+1. **Cause.** `better-auth` 1.7.7 declares `mysql2` as an optional peer. pnpm installed it (3.15.3), and `pnpm audit --prod` then reported two advisories (GHSA-3f6p-5ww8-9rcr high, GHSA-rgwj-5xj2-c3m3 moderate). The application uses PostgreSQL; in `better-auth`'s `dist` only `test-utils` imports `mysql2`, so the code was not reachable.
+2. **Choice.** `overrides: { mysql2: "-" }` in `pnpm-workspace.yaml` removes the package from the resolution. Observed: the lockfile loses `mysql2` and its `denque`, `seq-queue`, and `sqlstring` dependencies, `pnpm audit --prod` exits 0 with "No known vulnerabilities found", and `pnpm install --frozen-lockfile` is clean.
+3. **Why not an exception list.** A list of ignored advisories would stay in force for a package that could come back with a new advisory. Removing the package leaves the audit unfiltered: every real advisory still fails it. Raising `mysql2` to a patched version (tried: `>=3.23.1` resolved to 3.24.5) fixes the advisories too but keeps an unused database driver installed and adds `@types/node` to the Prisma peer set.
+4. **Reversal.** If the project ever uses MySQL, delete the override in the same change that adds the use.
 
 ## Pending decisions for the user
 

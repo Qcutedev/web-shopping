@@ -3,3 +3,10 @@ allowBuilds:
   prisma: false
   sharp: false
   unrs-resolver: false
+
+# SEC-036 (D-040): better-auth lists mysql2 as an optional peer and pnpm installed it. The
+# application uses PostgreSQL and nothing reachable imports mysql2, but it carried two advisories.
+# "-" removes the package from the tree instead of silencing the audit. Remove this entry if the
+# project ever uses MySQL.
+overrides:
+  mysql2: "-"

@@ -322,6 +322,8 @@ Whichever option is chosen must be able to meet the owner's rules. None of the o
 
 Runs on pull requests and pushes to the default branch: install with frozen lockfile, format check, lint, type check, unit tests, integration tests against a PostgreSQL service container, production build, dependency audit, secret scan. End-to-end tests run as a separate job. Workflow rules are in `.claude/agents/devops.md`.
 
+Dependency audit: `pnpm audit --prod` must exit 0 and is run without an exception list. The unused optional peer `mysql2` of `better-auth` is removed from the tree by an override in `pnpm-workspace.yaml` (SEC-036, D-034), so it no longer reports. `pnpm audit` over development dependencies still reports advisories (SEC-010); they are not in the production tree.
+
 No workflow file exists, and no CI job has ever run. Two things are missing: the tooling behind `pnpm test:integration` and `pnpm test:e2e` is not installed yet (see the task table in [STATUS.md](STATUS.md)), and there is no remote repository to run a workflow on (blocker B-04). A workflow can be written before the remote exists, but it cannot be reported as working until it has run there.
 
 The checks the workflow will run can be run locally today:
@@ -383,11 +385,14 @@ Checks for T-071 (**Planned**; none runnable today, because no Dockerfile exists
 
 There is no default admin and no web endpoint that grants admin; in the MVP admins are created only by `pnpm admin:bootstrap` (`scripts/bootstrap-admin.ts`; owner answers OQ-13, OQ-37; BR-26). **Not runnable yet:** the script entry uses `tsx`, which is not installed (`'tsx' is not recognized`); devops adds and pins the runner. The logic (`src/modules/auth/bootstrap-admin.ts`) is tested against the test database.
 
-Input is read from the environment only, never from command-line arguments, so the password stays out of shell history and the process list. Supply the variables for one invocation and remove them afterwards (PowerShell 7; `-MaskInput` keeps the typed password off the screen and out of history):
+Input is read from the environment only, never from command-line arguments, so the password stays out of shell history and the process list. Supply the variables for one invocation and remove them afterwards. The form below runs in Windows PowerShell 5.1, the project shell, and in PowerShell 7. `Read-Host -AsSecureString` keeps the typed password off the screen and out of history; the conversion back to text is needed because an environment variable holds text. (`Read-Host -MaskInput` is not used: it exists only from PowerShell 7.1.)
 
 ```powershell
 $env:ADMIN_BOOTSTRAP_EMAIL = "admin@example.com"
-$env:ADMIN_BOOTSTRAP_PASSWORD = Read-Host -MaskInput "Admin password"
+$secure = Read-Host -AsSecureString "Admin password"
+$bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+try { $env:ADMIN_BOOTSTRAP_PASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
+finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
 pnpm admin:bootstrap
 Remove-Item Env:ADMIN_BOOTSTRAP_EMAIL, Env:ADMIN_BOOTSTRAP_PASSWORD
 ```
