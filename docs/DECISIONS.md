@@ -283,15 +283,19 @@ Recorded by the database agent on 2026-10-13, from the code review of T-015 and 
 5. **Documents.** DATA_MODEL.md sections 4.1 and 6.1 say the rows are inserted directly, not "through the auth library".
 
 ### D-036 Owner answers: tooling, sign-up, sign-in route, account lock
-Answered by the owner on 2026-10-13 (interactive session, thirty-seventh). Items 1 and 2 are done; 3 and 4 are recorded here and wait for an owner agent; 5 is unclear.
+Answered by the owner on 2026-10-13 (interactive session, thirty-seventh). Items 1 and 2 are done; 3 to 7 are recorded here and wait for an owner agent; 8 and 9 are settled without code change beyond CR-70.
 
 1. **`tsx` added** (`tsx` 4.23.15, exact pin, devDependency). `pnpm admin:bootstrap` can now start (`pnpm exec tsx -e` ran; the script itself has not been run against a database). Its `esbuild` install script is refused with `allowBuilds: esbuild: false` in `pnpm-workspace.yaml`, like the other build scripts; without that line `pnpm install --frozen-lockfile` exits 1 with `ERR_PNPM_IGNORED_BUILDS`. T-014 seed may use `tsx` as its runner.
 2. **Playwright added** (`@playwright/test` 1.64.0, exact pin, devDependency) for T-060. The Chromium download (`playwright install chromium`) is not done yet. CR-49 (how e2e reaches a production build) is still to be ruled.
 3. **CR-57: sign-up signs the new user in.** After a successful sign-up the response carries the session cookie. Open technical conflict, to be settled by auth and security before it is built: a duplicate email must not be distinguishable from a new one (current behaviour, SEC-035 floor), and a session cookie on one and not the other would reveal it. The owner's wish stands; the likely shape is that a duplicate email also gets a response of the same form and the user signs in normally. Not decided here.
 4. **Sign-in route is `/sign-in`.** `src/server/auth/redirect.ts` and `src/proxy.ts` change from `/login` to `/sign-in`; `ROUTES.signIn` is unchanged.
-5. **SEC-032 and SEC-049: not settled.** The owner wrote "5 use it" ("5 ใช้เลย"). That fits the recommendation for SEC-049 (use the proposed rule) better than SEC-032 (fix or accept; recommended: fix), and the numbers in the question list do not line up. Asked again; nothing is built for either until answered.
+5. **SEC-032 is fixed, not accepted** (owner: "5 fix"). An address that is not the account holder must not be able to lock an account, admins included, out of sign-in. Auth and security propose the mechanism.
+6. **SEC-049: the proposed rule is used** (owner: "6 use the proposed rule"). Repeated-word rule plus refusing the prefixes `better-auth-secret` and `integration-test-secret`; devops builds it and flips the `it.fails`.
+7. **SEC-041: limit of 3** (owner: "limit it to about 3"). Read as: at most 3 combining marks or kept invisible characters in a row in a name. Natural Thai needs up to 3 (vowel above, tone mark, vowel below), so 3 refuses stacks and keeps real words. Auth confirms the exact scope against the Thai test words before building.
+8. **CR-70: the owner takes the orchestrator's recommendation, which is to show the "open store" link at every width** (it is `hidden sm:inline-flex` today). That matches DESIGN_SYSTEM.md and needs no new approval.
+9. **Years are shown in the Buddhist era** (2569). This is what `src/lib/format.ts` already does; no change.
 
-Still open for the owner: SEC-032, SEC-049, SEC-041 (Thai combining characters), CR-70, the T-018 questions (Buddhist year, proposal strings, footer labels), and the address cap (STATUS.md lines disagree).
+Still open for the owner: the proposal strings in `src/i18n/th.ts` (owner asked for a plain explanation first), the footer labels for mock payment and simulated shipping (same), and the address cap (STATUS.md lines disagree).
 
 ## Pending decisions for the user
 
