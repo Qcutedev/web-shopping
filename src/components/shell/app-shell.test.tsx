@@ -59,6 +59,13 @@ describe("AppShell", () => {
     ).toBe(ROUTES.cart);
   });
 
+  it("shows the open-store header link at every width (CR-70)", () => {
+    render(<AppShell>x</AppShell>);
+    const nav = screen.getByRole("navigation", { name: th.shell.header.navLabel });
+    const link = within(nav).getByRole("link", { name: th.shell.header.openStore });
+    expect(link.className).not.toMatch(/(^|\s)(\w+:)?hidden(\s|$)/);
+  });
+
   it("makes main focusable so the skip link moves focus", () => {
     render(<AppShell>x</AppShell>);
     expect(screen.getByRole("main").getAttribute("tabindex")).toBe("-1");

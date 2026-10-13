@@ -11,8 +11,8 @@ const NAV_LINK =
 /**
  * Storefront header: brand, pill search, "เปิดร้านค้า", "เข้าสู่ระบบ", and the cart button
  * (docs/DESIGN_SYSTEM.md, "Storefront header"). It renders no request data, so it stays in the
- * static shell. Below 640 px the search field takes its own row and "เปิดร้านค้า" moves to the
- * footer, where it is always present.
+ * static shell. Below 768 px the search field takes its own row. "เปิดร้านค้า" shows at every
+ * width (D-036 item 8, CR-70); the footer keeps its own link too.
  *
  * Not in this task: the second row of category links (needs the category pages of T-021) and a
  * signed-in state (needs the sign-in page and an account menu).
@@ -33,7 +33,7 @@ export function SiteHeader() {
           aria-label={th.shell.header.navLabel}
           className="order-2 ml-auto flex items-center gap-1 md:order-3"
         >
-          <Link href={ROUTES.openStore} className={`${NAV_LINK} hidden sm:inline-flex`}>
+          <Link href={ROUTES.openStore} className={NAV_LINK}>
             {th.shell.header.openStore}
           </Link>
           <Link href={ROUTES.signIn} className={NAV_LINK}>
