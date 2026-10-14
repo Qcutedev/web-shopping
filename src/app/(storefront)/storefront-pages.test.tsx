@@ -15,6 +15,7 @@ import { AppError } from "@/server/errors";
 // boundary, so no Prisma client and no database. Async Server Components cannot render in jsdom,
 // so `resolve` expands them into plain elements first.
 const catalog = vi.hoisted(() => ({
+  getCategory: vi.fn(),
   getProduct: vi.fn(),
   getStore: vi.fn(),
   listCategories: vi.fn(),
@@ -278,6 +279,35 @@ describe("category page", () => {
     const page = <CategoryPage params={slugParams("nope")} searchParams={searchParams()} />;
     expect(isValidElement(page)).toBe(true);
     await expect(resolve(page)).rejects.toBe(NOT_FOUND_SIGNAL);
+  });
+
+  it("heading: h1 is the category name from getCategory", async () => {
+    catalog.getCategory.mockResolvedValue(categories[0]);
+    catalog.listProducts.mockResolvedValue(pageOf([item(1)], 1));
+    const { container } = await renderPage(
+      <CategoryPage params={slugParams("tea")} searchParams={searchParams()} />,
+    );
+    expect(catalog.getCategory).toHaveBeenCalledWith("tea");
+    expect(container.querySelector("h1")?.textContent).toBe("ชา");
+  });
+
+  it("heading: unknown category is the not-found signal", async () => {
+    catalog.getCategory.mockRejectedValue(notFound());
+    catalog.listProducts.mockResolvedValue(pageOf([item(1)], 1));
+    await expect(
+      resolve(<CategoryPage params={slugParams("nope")} searchParams={searchParams()} />),
+    ).rejects.toBe(NOT_FOUND_SIGNAL);
+  });
+
+  it("heading: read failure keeps the list and the generic h1", async () => {
+    catalog.getCategory.mockRejectedValue(internal());
+    catalog.listProducts.mockResolvedValue(pageOf([item(1)], 1));
+    const { container } = await renderPage(
+      <CategoryPage params={slugParams("tea")} searchParams={searchParams()} />,
+    );
+    expect(container.querySelector("h1")?.textContent).toBe(th.catalog.categories.label);
+    expect(screen.getByText("สินค้า 1")).toBeTruthy();
+    expect(container.textContent).not.toContain("password");
   });
 
   it("malformed slug: not-found without calling the service", async () => {

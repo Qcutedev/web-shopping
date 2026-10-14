@@ -45,12 +45,25 @@ export function FilterForm({
   categories?: readonly CategoryDto[] | undefined;
   category?: string | undefined;
 }) {
-  const minError = errors.includes("min-invalid") ? ERROR_TEXT["min-invalid"] : undefined;
+  // A range error concerns both fields, so both are marked invalid.
+  const minError = errors.includes("min-invalid")
+    ? ERROR_TEXT["min-invalid"]
+    : errors.includes("range")
+      ? ERROR_TEXT.range
+      : undefined;
   const maxError = errors.includes("max-invalid")
     ? ERROR_TEXT["max-invalid"]
     : errors.includes("range")
       ? ERROR_TEXT.range
       : undefined;
+  const summary = [...new Set(errors.map((error) => ERROR_TEXT[error]))];
+  const hasCategories = categories !== undefined && categories.length > 0;
+  const hasCategory = category !== undefined && category !== "";
+  // Keep the filter when no select can carry it (categories failed to load, or a store/category
+  // page fixes it), so submitting never widens the result set (CR-T021-11).
+  const hiddenCategory = !hasCategories && hasCategory;
+  const categoryMissing =
+    hasCategories && hasCategory && !categories.some((item) => item.slug === category);
   return (
     <form
       method="get"
@@ -59,12 +72,20 @@ export function FilterForm({
       className="border-border bg-surface flex flex-col gap-4 rounded-md border p-4"
     >
       {q !== undefined && q !== "" ? <input type="hidden" name="q" value={q} /> : null}
-      {categories === undefined && category !== undefined && category !== "" ? (
-        <input type="hidden" name="category" value={category} />
-      ) : null}
+      {hiddenCategory ? <input type="hidden" name="category" value={category ?? ""} /> : null}
       {sort !== DEFAULT_PRODUCT_SORT ? <input type="hidden" name="sort" value={sort} /> : null}
+      {summary.length > 0 ? (
+        <div role="alert" className="text-danger type-body-sm">
+          <p className="font-medium">{th.catalog.filter.errorSummary}</p>
+          <ul className="list-disc ps-5">
+            {summary.map((text) => (
+              <li key={text}>{text}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {categories !== undefined && categories.length > 0 ? (
+        {hasCategories ? (
           <SelectField
             id="filter-category"
             name="category"
@@ -72,6 +93,7 @@ export function FilterForm({
             defaultValue={category ?? ""}
           >
             <option value="">{th.catalog.filter.categoryAll}</option>
+            {categoryMissing ? <option value={category}>{category}</option> : null}
             {categories.map((item) => (
               <option key={item.id} value={item.slug}>
                 {item.name}
