@@ -309,6 +309,29 @@ describe("addCartItem", () => {
     });
     expect(repo.setLineQuantity).not.toHaveBeenCalled();
   });
+
+  it("answers 404 product when the product is deleted before the insert (CR-T031-02)", async () => {
+    repo.insertLine.mockResolvedValue(null);
+    const error = await refusal(addCartItem(CUSTOMER, { productId: "product_1", quantity: 1 }));
+    expect(error.toPublic()).toEqual({
+      code: "NOT_FOUND",
+      message: "The resource was not found.",
+      details: { resource: "product" },
+    });
+    expect(repo.findFirstImageKey).not.toHaveBeenCalled();
+  });
+
+  it("answers 404 product when a product delete removed the existing line (CR-T031-02)", async () => {
+    repo.findLineForProduct.mockResolvedValue({
+      id: "line_1",
+      productId: "product_1",
+      quantity: 2,
+    });
+    repo.setLineQuantity.mockResolvedValue(null);
+    const error = await refusal(addCartItem(CUSTOMER, { productId: "product_1", quantity: 1 }));
+    expect(error.status).toBe(404);
+    expect(error.toPublic().details).toEqual({ resource: "product" });
+  });
 });
 
 describe("updateCartItem", () => {
@@ -386,6 +409,16 @@ describe("updateCartItem", () => {
     const error = await refusal(updateCartItem(SELLER, "line_1", { quantity: 1 }));
     expect(error.details).toMatchObject({ items: [{ reason: "OWN_STORE", cartItemId: "line_1" }] });
     expect(repo.setLineQuantity).not.toHaveBeenCalled();
+  });
+
+  it("answers 404 when a product delete removed the line after it was read (CR-T031-02)", async () => {
+    repo.setLineQuantity.mockResolvedValue(null);
+    const error = await refusal(updateCartItem(CUSTOMER, "line_1", { quantity: 3 }));
+    expect(error.toPublic()).toEqual({
+      code: "NOT_FOUND",
+      message: "The resource was not found.",
+      details: {},
+    });
   });
 });
 

@@ -28,7 +28,7 @@
  * takes or reserves stock (REQ-C-10; checkout does, T-032).
  */
 import { VISIBLE_PRODUCT_WHERE } from "@/modules/catalog/visibility";
-import { db, type DbTransaction, type Prisma } from "@/server/db";
+import { db, type DbTransaction, Prisma } from "@/server/db";
 
 /** The id of the single settings row (`MarketplaceSettings_id_check`). */
 const SETTINGS_ID = 1;
@@ -185,27 +185,59 @@ export async function findLineForProduct(
   return tx.cartItem.findFirst({ where: { cartId, productId }, select: LINE_SELECT });
 }
 
+/** A foreign key of the inserted row points at no row (P2003). */
+function isForeignKeyViolation(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003";
+}
+
+/**
+ * Inserts a line, or returns null when its product no longer exists (CR-T031-02).
+ *
+ * The product was read as visible earlier in this transaction, but a product hard delete does not
+ * take the Cart lock, so it can commit in between (READ COMMITTED). The insert then fails on the
+ * `productId` foreign key (P2003). The `cartId` foreign key cannot fail: the cart row is locked by
+ * this transaction (`FOR UPDATE` blocks its delete). The failed statement has aborted the
+ * transaction, so the caller must throw at once and let it roll back; null carries no other
+ * meaning and no further statement may run (DATA_MODEL.md section 21.5).
+ */
 export async function insertLine(
   tx: DbTransaction,
   cartId: string,
   productId: string,
   quantity: number,
-): Promise<LineRow> {
-  return tx.cartItem.create({ data: { cartId, productId, quantity }, select: LINE_SELECT });
+): Promise<LineRow | null> {
+  try {
+    return await tx.cartItem.create({
+      data: { cartId, productId, quantity },
+      select: LINE_SELECT,
+    });
+  } catch (error) {
+    if (isForeignKeyViolation(error)) return null;
+    throw error;
+  }
 }
 
-/** Sets the quantity of a line of this cart. The cart lock is held, so the line still exists. */
+/**
+ * Sets the quantity of a line of this cart and returns it, or null when the cart has no line with
+ * this id (CR-T031-02).
+ *
+ * The cart lock stops every other cart write and checkout, but not a product hard delete:
+ * `CartItem.product` is `onDelete: Cascade`, so deleting the product removes the line without
+ * touching the Cart row. A line read earlier in this transaction can therefore be gone here. The
+ * conditional `updateManyAndReturn` answers that with no row instead of a P2025 error.
+ */
 export async function setLineQuantity(
   tx: DbTransaction,
   cartId: string,
   lineId: string,
   quantity: number,
-): Promise<LineRow> {
-  return tx.cartItem.update({
+): Promise<LineRow | null> {
+  const rows = await tx.cartItem.updateManyAndReturn({
     where: { id: lineId, cartId },
     data: { quantity },
     select: LINE_SELECT,
   });
+  return rows[0] ?? null;
 }
 
 /** Deletes a line of this cart. False when the cart has no line with this id. */

@@ -172,6 +172,9 @@ export async function addCartItem(
         existing === null
           ? await insertLine(tx, cartId, product.id, quantity)
           : await setLineQuantity(tx, cartId, existing.id, quantity);
+      // Null: the product was hard-deleted after it was read (its delete does not take the cart
+      // lock, and cascades to the line). It is gone, so the answer is the missing product's 404.
+      if (line === null) throw productNotFound();
       return {
         lineId: line.id,
         storedQuantity: line.quantity,
@@ -227,6 +230,9 @@ async function setOwnedLine(
   }
   const { quantity } = resolveWriteQuantity(requestedQuantity, product.stock);
   const stored = await setLineQuantity(tx, cartId, line.id, quantity);
+  // Null: a product hard delete removed the line after it was read (CR-T031-02). The line no
+  // longer exists, so it is answered like any line the actor does not have.
+  if (stored === null) throw cartLineNotFound();
   return {
     lineId: stored.id,
     storedQuantity: stored.quantity,
