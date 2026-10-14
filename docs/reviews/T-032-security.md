@@ -83,3 +83,41 @@ Observations, not findings:
 - Load or timing measurements of the transaction limits and of lock hold time under a long cart (T-033).
 - A secret scanner: none is installed.
 - Seller and admin order views, and the UI labelling of simulated payment: they do not exist yet.
+
+## Re-check of SEC-055 item 2 (2026-10-14)
+
+Scope: item 2 of SEC-055 only (a payment transaction that fails after the order committed gave a 500 for an order that exists). Commits `fd9a82c`, `f3cc48f`, `404f1f9`. Item 1 (the sweep wiring in `src/instrumentation.ts`, devops commit `35903a1`, landed during this re-check) was not re-checked. The SEC-055 `it.fails` in `tests/security/t032-checkout.test.ts` belongs to that item and was not touched.
+
+Verdict: **item 2 FIXED.** SEC-055 stays OPEN until item 1 is re-checked.
+
+What was read:
+
+- `src/modules/checkout/service.ts:221-253` (`pay`). The provider call and the recording of its outcome sit in two separate `try` blocks. A throw from `completeOrderPayment` or `failOrderPayment` is caught, logged once at `error` with `{ component, provider, outcome, errorClass }`, and not rethrown. `checkout` then reads the order and answers `created: true`. The route maps that to `201` (`src/app/api/v1/checkout/route.ts:58`).
+- `errorClass` comes from `describeErrorForLog` (`src/server/errors.ts:424`): a class name only, never the message. No order id, user id, or amount is logged.
+- `src/modules/orders/repository.ts`: `markOrderPaid` and `failOrder` each run in one `db.$transaction` with `PAYMENT_TRANSACTION_OPTIONS` (maxWait 5 s, timeout 20 s). A throw anywhere in them rolls back every write, so "the order stays `PENDING`" holds only because of that atomicity. The new database cases below check it.
+- The catch is wide: a programming error in the outcome recording would also be answered `PENDING` and logged, not raised. That is fail-safe for the customer (the stock stays taken until the sweep fails the order) and is visible in the `error` line. Not a finding.
+- Not changed by this fix: if the final `readOrderOfUser` fails as well (database unreachable), the request is a 500. A repeat with the same key returns the order and does not charge again (contract section 1.3). Covered by `service.test.ts` "a failing read of the order after payment is still an error".
+- `docs/API_CONTRACTS.md` 5.5.2 now states the 201 `PENDING` answer.
+
+Tests added: `tests/security/t032-sec055-recheck.itest.ts` (integration project, real PostgreSQL, 2 cases). The existing cases make `completeOrderPayment` reject before it opens a transaction. These make the real payment transaction fail. While the provider "answers", a second connection holds a row lock that the payment transaction needs, for 24 s, past its 20 s timeout.
+
+1. Decline, `Product` row held. `failOrder` has already set the order `FAILED`, cancelled the seller order, and claimed the items when it blocks on the stock restore. Result: route `201` with `PENDING`. In the database the order is `PENDING` with `paidAt` null, the seller order `PENDING`, 0 items restored, `failureReason` null, the stock still 7 of 10, and the cart empty. A repeat with the key gives `200` with the same order and no provider call.
+2. Confirmation, `Order` row held. `checkout` resolves `created: true` with `PENDING`. The order is not `PAID`, the provider reference is not written, and the stock is still taken. There is exactly one log line: level `error`, the four keys above, a class-name `errorClass` (`PrismaClientKnownRequestError` in the run), and no order or user id.
+
+Mutation: `throw error;` was inserted as the first statement of the catch around the outcome recording in `pay`, in place, with a copy kept in the session scratch directory. Five cases failed:
+
+- `src/modules/checkout/service.test.ts`: both cases "a PAID/DECLINED that cannot be recorded ...", with `promise rejected ... instead of resolving`;
+- `tests/integration/checkout/review-fixes.test.ts`: the SEC-055 item 2 case, with `expected 500 to be 201`;
+- both cases of the new file, the decline one with `expected 500 to be 201`.
+
+The file was then restored from the copy. SHA-256 `C1130ADD3AF5A9F7FEB3038C95BB5C52D7F459C33606728854C48145ECDEE57D` before and after, and `git diff --quiet -- src/modules/checkout/service.ts` exit 0.
+
+Commands run (after the restore unless stated):
+
+- `pnpm exec vitest run --config vitest.integration.config.mts tests/security/t032-sec055-recheck.itest.ts`, before the mutation: 2 passed
+- With the mutant: `pnpm test src/modules/checkout/service.test.ts` 2 failed, 19 passed; `pnpm exec vitest run --config vitest.integration.config.mts tests/security/t032-sec055-recheck.itest.ts tests/integration/checkout/review-fixes.test.ts` 3 failed, 2 passed
+- `pnpm test src/modules/checkout tests/security/t032-checkout.test.ts`: 5 files, 149 passed, 1 expected fail (SEC-056; the SEC-055 case had already been flipped by devops in `35903a1`)
+- `pnpm test:integration tests/integration/checkout tests/security/t032-sec055-recheck.itest.ts`: 4 files, 34 passed
+- `pnpm exec prettier --check` and `pnpm exec eslint` on the new file: exit 0; `pnpm typecheck`: exit 0
+
+Not run: the full `pnpm test:integration`, `pnpm verify`, `pnpm build`, any HTTP request against a running server, any check of item 1 (`35903a1`). Passing tests are not proof that checkout is secure. They show that these particular failures are answered as the contract says.
