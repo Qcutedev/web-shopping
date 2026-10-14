@@ -2,15 +2,34 @@ import { describe, expect, it } from "vitest";
 
 import * as catalog from "./index";
 import * as visibility from "./visibility";
-import { isSoldOut, PUBLIC_STORE_WHERE, VISIBLE_PRODUCT_WHERE } from "./visibility";
+import {
+  isSoldOut,
+  PUBLIC_STORE_WHERE,
+  VISIBLE_PRODUCT_SQL,
+  VISIBLE_PRODUCT_WHERE,
+} from "./visibility";
 
 describe("one definition of visible (BR-05; CR-86)", () => {
-  it("visibility.ts exports the query form and isSoldOut only, no pure restatement", () => {
+  it("visibility.ts exports the two query forms and isSoldOut only, no pure restatement", () => {
     expect(Object.keys(visibility).sort()).toEqual([
       "PUBLIC_STORE_WHERE",
+      "VISIBLE_PRODUCT_SQL",
       "VISIBLE_PRODUCT_WHERE",
       "isSoldOut",
     ]);
+  });
+
+  it("the SQL form states the five conditions of the Prisma form, with no parameter (T-032)", () => {
+    const text = VISIBLE_PRODUCT_SQL.sql.replace(/\s+/g, " ").trim();
+    expect(VISIBLE_PRODUCT_SQL.values).toEqual([]);
+    expect(text).toBe(
+      `(p."status" = '${VISIBLE_PRODUCT_WHERE.status}'` +
+        ` AND p."moderationStatus" = '${VISIBLE_PRODUCT_WHERE.moderationStatus}'` +
+        ` AND s."status" = '${VISIBLE_PRODUCT_WHERE.store.status}'` +
+        ` AND u."isActive" = ${String(VISIBLE_PRODUCT_WHERE.store.owner.isActive).toUpperCase()}` +
+        ` AND c."isActive" = ${String(VISIBLE_PRODUCT_WHERE.category.isActive).toUpperCase()})`,
+    );
+    expect(text).not.toContain("stock");
   });
 
   it("the module surface carries no second check of the five conditions", () => {

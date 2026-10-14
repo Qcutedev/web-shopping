@@ -16,7 +16,7 @@
  *
  * A store page is public when conditions 3 and 4 hold for the store.
  */
-import { ModerationStatus, type Prisma, ProductStatus, StoreStatus } from "@/server/db";
+import { ModerationStatus, Prisma, ProductStatus, StoreStatus } from "@/server/db";
 
 /** Conditions 3 and 4, on a `Store`. */
 export const PUBLIC_STORE_WHERE = {
@@ -31,6 +31,24 @@ export const VISIBLE_PRODUCT_WHERE = {
   store: PUBLIC_STORE_WHERE,
   category: { isActive: true },
 } as const satisfies Prisma.ProductWhereInput;
+
+/**
+ * The same five conditions as a raw SQL fragment, for the guarded statements that must decide
+ * and write in one statement (checkout's stock decrement, the classification read and the
+ * lowering of a refused checkout; DATA_MODEL.md sections 7.1 and 21.6). A Prisma `updateMany`
+ * with a relation filter is not used there, because it may read the matching ids first and
+ * update them in a second statement, which would let two checkouts both pass `stock >= q`.
+ *
+ * The fragment needs the four tables under these aliases, joined by the caller:
+ * `p` = "Product", `s` = "Store" (`s.id = p."storeId"`), `u` = "User" (`u.id = s."ownerId"`),
+ * `c` = "Category" (`c.id = p."categoryId"`). It holds no parameter. visibility.test.ts compares
+ * its literals with VISIBLE_PRODUCT_WHERE above, so the two forms cannot drift apart.
+ */
+export const VISIBLE_PRODUCT_SQL = Prisma.sql`(p."status" = 'PUBLISHED'
+  AND p."moderationStatus" = 'APPROVED'
+  AND s."status" = 'APPROVED'
+  AND u."isActive" = TRUE
+  AND c."isActive" = TRUE)`;
 
 /*
  * No pure restatement of the five conditions (a check on rows already loaded) exists: it would

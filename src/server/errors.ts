@@ -31,6 +31,7 @@ export const ERROR_STATUS = {
   NOT_FOUND: 404,
   INSUFFICIENT_STOCK: 409,
   PRODUCT_UNAVAILABLE: 409,
+  CART_EMPTY: 409,
   INVALID_STATE_TRANSITION: 409,
   CONFLICT: 409,
   PAYLOAD_TOO_LARGE: 413,
@@ -53,6 +54,7 @@ const DEFAULT_MESSAGE: Record<ErrorCode, string> = {
   NOT_FOUND: "The resource was not found.",
   INSUFFICIENT_STOCK: "One or more items do not have enough stock.",
   PRODUCT_UNAVAILABLE: "One or more items can no longer be purchased.",
+  CART_EMPTY: "The cart has nothing to check out.",
   INVALID_STATE_TRANSITION: "This status change is not allowed.",
   CONFLICT: "The request conflicts with existing data.",
   PAYLOAD_TOO_LARGE: "The request body is too large.",
@@ -514,6 +516,11 @@ export function insufficientStock(
 
 export function productUnavailable(options?: AppErrorOptions): AppError {
   return new AppError("PRODUCT_UNAVAILABLE", options);
+}
+
+/** Checkout with no cart, or a cart with no lines (D-023 point 3; docs/API_CONTRACTS.md 5.5.1). */
+export function cartEmpty(options?: AppErrorOptions): AppError {
+  return new AppError("CART_EMPTY", options);
 }
 
 export function invalidStateTransition(options?: AppErrorOptions): AppError {

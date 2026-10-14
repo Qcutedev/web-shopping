@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   ABORTED_BODY_ERROR_CODE,
   AppError,
+  cartEmpty,
   conflict,
   CONFLICT_REASON_PATTERN,
   describeErrorForLog,
@@ -52,6 +53,7 @@ const DOCUMENTED: Record<string, number> = {
   NOT_FOUND: 404,
   INSUFFICIENT_STOCK: 409,
   PRODUCT_UNAVAILABLE: 409,
+  CART_EMPTY: 409,
   INVALID_STATE_TRANSITION: 409,
   CONFLICT: 409,
   PAYLOAD_TOO_LARGE: 413,
@@ -84,6 +86,7 @@ describe("error codes", () => {
       notFound(),
       insufficientStock([]),
       productUnavailable(),
+      cartEmpty(),
       invalidStateTransition(),
       conflict("DUPLICATE_SKU"),
       payloadTooLarge(),
