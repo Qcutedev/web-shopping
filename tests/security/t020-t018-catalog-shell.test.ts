@@ -643,6 +643,10 @@ describe("T-020 review: the catalog route files are thin", () => {
     "src/app/api/v1/stores/[slug]/route.ts",
   ];
   const REVIEWED_NON_CATALOG_ROUTES = [
+    // T-031 cart routes; reviewed in tests/security/t031-cart.test.ts.
+    "src/app/api/v1/cart/items/[itemId]/route.ts",
+    "src/app/api/v1/cart/items/route.ts",
+    "src/app/api/v1/cart/route.ts",
     "src/app/api/v1/me/addresses/[id]/route.ts",
     "src/app/api/v1/me/addresses/route.ts",
     "src/app/api/v1/me/route.ts",
