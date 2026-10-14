@@ -308,15 +308,15 @@ describe("SEC-033 rendering: reviews show no author name", () => {
 // ---------------------------------------------------------------------------------------------
 
 describe("SEC-057: product titles are shown without isolation", () => {
-  it.fails("product card: the title is one text node inside its own bdi", () => {
+  it("product card: the title is one text node inside its own bdi", () => {
     expect(textOccurrences(cardHtml(), PRODUCT_TITLE)).toEqual({ isolated: 1, bare: 0 });
   });
 
-  it.fails("product detail: the h1 and the breadcrumb isolate the title", () => {
+  it("product detail: the h1 and the breadcrumb isolate the title", () => {
     expect(textOccurrences(detailHtml(), PRODUCT_TITLE)).toEqual({ isolated: 2, bare: 0 });
   });
 
-  it.fails("product detail: an image alt text wraps the title in FSI ... PDI", () => {
+  it("product detail: an image alt text wraps the title in FSI ... PDI", () => {
     const alt = /<img [^>]*alt="([^"]*)"/.exec(detailHtml())?.[1] ?? "";
     expect(alt.startsWith(`${FSI}${escaped(PRODUCT_TITLE)}${PDI}`)).toBe(true);
   });

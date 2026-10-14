@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
+import { CategoryHeading, CategoryHeadingFallback } from "@/components/catalog/category-heading";
 import { CatalogInvalidFilter } from "@/components/catalog/catalog-load-error";
 import { CategoryChips, CategoryChipsSkeleton } from "@/components/catalog/category-chips";
 import { hrefParamsOf, listHref } from "@/components/catalog/list-href";
@@ -26,8 +27,14 @@ export default function CategoryPage({
 }) {
   return (
     <div className="container-page flex flex-col gap-6 py-8">
-      <h1 className="type-page-title">{th.catalog.categories.label}</h1>
-      <Suspense fallback={<ProductGridSkeleton />}>
+      <Suspense
+        fallback={
+          <>
+            <CategoryHeadingFallback />
+            <ProductGridSkeleton />
+          </>
+        }
+      >
         <CategoryContent params={params} searchParams={searchParams} />
       </Suspense>
     </div>
@@ -46,13 +53,21 @@ async function CategoryContent({
   const slug = parsedSlug.data.slug;
   const price = applyPriceFilter(await searchParams);
   const query = parseListQuery(price.raw, { category: slug });
-  if (query === null) return <CatalogInvalidFilter resetHref={categoryHref(slug)} />;
+  if (query === null) {
+    return (
+      <>
+        <CategoryHeadingFallback />
+        <CatalogInvalidFilter resetHref={categoryHref(slug)} />
+      </>
+    );
+  }
 
   const base = categoryHref(slug);
   // The category is in the path; every other filter rides in the query string.
   const sortParams = hrefParamsOf(query, { category: undefined });
   return (
     <>
+      <CategoryHeading slug={slug} />
       <Suspense fallback={<CategoryChipsSkeleton />}>
         <CategoryChips currentSlug={slug} />
       </Suspense>

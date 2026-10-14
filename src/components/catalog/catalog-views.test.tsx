@@ -61,7 +61,8 @@ describe("ProductCard", () => {
 
   it("isolates the store name for bidirectional text", () => {
     const { container } = render(<ProductCard product={product()} />);
-    expect(container.querySelector("bdi")?.textContent).toBe("ร้านตัวอย่าง");
+    const bdis = [...container.querySelectorAll("bdi")].map((node) => node.textContent);
+    expect(bdis).toEqual(["เสื้อยืดผ้าฝ้าย", "ร้านตัวอย่าง"]);
   });
 
   it("renders markup in a title as text", () => {
@@ -176,7 +177,9 @@ describe("ProductDetailView", () => {
     );
     expect(screen.getByText("คะแนน 4.5 จาก 5 (2 รีวิว)")).toBeTruthy();
     expect(container.querySelector("a bdi")?.textContent).toBe("ร้านตัวอย่าง");
-    expect(screen.getByRole("img").getAttribute("alt")).toBe("เสื้อยืดผ้าฝ้าย รูปที่ 1 จาก 1");
+    expect(screen.getByRole("img").getAttribute("alt")).toBe(
+      `${String.fromCodePoint(0x2068)}เสื้อยืดผ้าฝ้าย${String.fromCodePoint(0x2069)} รูปที่ 1 จาก 1`,
+    );
   });
 
   it("renders the description as text, not markup", () => {

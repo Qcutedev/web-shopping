@@ -11,6 +11,10 @@ import { th } from "@/i18n/th";
 import { categoryHref, ROUTES, storeHref } from "@/lib/routes";
 import type { ProductDetailDto } from "@/modules/catalog/schema";
 
+/** First-strong isolate and pop: wrap a user title inside an attribute, where `<bdi>` cannot go (SEC-057). */
+const FSI = String.fromCodePoint(0x2068);
+const PDI = String.fromCodePoint(0x2069);
+
 /**
  * Product page content from a loaded product. Price, stock state, and sold-out mark are what the
  * server sent; nothing is computed here. The purchase control (quantity, add to cart) belongs to
@@ -25,7 +29,7 @@ export function ProductDetailView({ product }: { product: ProductDetailDto }) {
         items={[
           { label: th.site.name, href: ROUTES.home },
           { label: product.category.name, href: categoryHref(product.category.slug) },
-          { label: product.title },
+          { label: <UserName>{product.title}</UserName> },
         ]}
       />
       <div className="grid gap-6 lg:grid-cols-2 lg:gap-10">
@@ -42,7 +46,7 @@ export function ProductDetailView({ product }: { product: ProductDetailDto }) {
                   <ProductImage
                     image={image}
                     alt={fill(th.catalog.product.imageAlt, {
-                      title: product.title,
+                      title: `${FSI}${product.title}${PDI}`,
                       index: index + 1,
                       count: images.length,
                     })}
@@ -56,7 +60,7 @@ export function ProductDetailView({ product }: { product: ProductDetailDto }) {
         </section>
         <div className="flex flex-col gap-4">
           <h1 className="type-page-title text-foreground [overflow-wrap:anywhere]">
-            {product.title}
+            <UserName>{product.title}</UserName>
           </h1>
           {product.reviewSummary !== null ? (
             <p className="type-small text-foreground-secondary">

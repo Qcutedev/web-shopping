@@ -41,7 +41,7 @@ export function ProductCard({
         ) : null}
       </div>
       <Title className="type-card-title text-foreground line-clamp-2 group-hover:underline">
-        {product.title}
+        <UserName>{product.title}</UserName>
       </Title>
       <p className={`type-small text-foreground-muted ${USER_NAME_CONTAINER_CLASS}`}>
         <UserName>{product.store.name}</UserName>
