@@ -320,6 +320,14 @@ Owner, 2026-10-14, option (a) of the four in `docs/SECURITY.md` SEC-050.
 
 Owner answers: (1) build the GET filter form (price in baht converted to satang server side, category select on search) now; (2) a missing product, store, or category may answer HTTP 200 with the "not found" page, because `notFound()` runs inside Suspense (Next docs). Known cost: crawlers may treat these pages as soft-404; revisit before public launch. E2E must expect 200 plus the not-found content, not 404.
 
+### D-040 Owner rulings on the T-040 questions (2026-10-14)
+
+The owner accepted the orchestrator's recommendation on all three questions raised by T-040 (sixty-third session):
+
+1. **Approval refuses a deactivated applicant.** Approving an application whose applicant has `isActive = false` creates nothing and answers a conflict error; the application stays `PENDING` so an admin can reject it. Reason: a store owned by a deactivated account is hidden anyway (BR-27) and could not be managed. Needs a code change and a test in `src/modules/sellers/` (backend-api), plus the code name in API_CONTRACTS 5.7.1.1.
+2. **A store logo may be an upload that is also a product picture of the same store.** The ownership check by `storeId` is the rule; no extra restriction. Reason: uploads are public by design and a link is not a copy (API_CONTRACTS 5.8).
+3. **Text limits stay as the agent set them:** store name 100, description 2000, rejection reason 500 characters.
+
 ## Pending decisions for the user
 
 Undecided, none blocking the MVP: marketplace name and logo, real product photos, hosting provider for staging and production, production object storage, email provider, payment gateway.
