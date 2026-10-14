@@ -7,9 +7,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { type DbTransaction, Prisma } from "@/server/db";
 
+import { PAYMENT_TRANSACTION_OPTIONS } from "@/modules/orders";
+
 import {
+  CHECKOUT_TRANSACTION_OPTIONS,
   classifyCartLines,
+  findCartLinesForCheckout,
+  findPrimaryUploadIds,
   lowerCartLinesToStock,
+  releaseSavepoint,
   rollbackToSavepoint,
   setSavepoint,
   takeStock,
@@ -109,14 +115,69 @@ describe("the refusal statements (DATA_MODEL 7.1, D-029 point 2)", () => {
     expect(statements[0]?.values).toEqual(["user_me", "cart_me"]);
   });
 
-  it("the savepoint statements name the same savepoint", async () => {
+  it("the savepoint statements name the same savepoint; a rollback also releases it (CR-T032-05)", async () => {
     const { tag, statements } = recorder(0);
     const tx = { $executeRaw: tag } as unknown as DbTransaction;
     await setSavepoint(tx);
     await rollbackToSavepoint(tx);
+    await setSavepoint(tx);
+    await releaseSavepoint(tx);
     expect(statements.map((statement) => statement.sql)).toEqual([
       "SAVEPOINT checkout_attempt",
       "ROLLBACK TO SAVEPOINT checkout_attempt",
+      "RELEASE SAVEPOINT checkout_attempt",
+      "SAVEPOINT checkout_attempt",
+      "RELEASE SAVEPOINT checkout_attempt",
     ]);
+  });
+});
+
+describe("lock order (CR-T032-06, DATA_MODEL 7.5)", () => {
+  it("the cart lines come in byte order of the product id, the order the payment failure restores in", async () => {
+    const { tag, statements } = recorder([]);
+    const tx = { $queryRaw: tag } as unknown as DbTransaction;
+    await findCartLinesForCheckout(tx, "cart_me");
+    const text = flat(statements[0]);
+    expect(text).toContain(`WHERE "cartId" = $1`);
+    expect(text).toMatch(/ORDER BY "productId" COLLATE "C" ASC$/);
+    expect(statements[0]?.values).toEqual(["cart_me"]);
+  });
+});
+
+describe("findPrimaryUploadIds (CR-T032-12)", () => {
+  it("reads every product's first picture in one statement, null where there is none", async () => {
+    const { tag, statements } = recorder([{ productId: "p2", uploadId: "u2" }]);
+    const tx = { $queryRaw: tag } as unknown as DbTransaction;
+    const uploads = await findPrimaryUploadIds(tx, ["p1", "p2"]);
+    expect(uploads).toEqual(
+      new Map([
+        ["p1", null],
+        ["p2", "u2"],
+      ]),
+    );
+    expect(tag).toHaveBeenCalledTimes(1);
+    const text = flat(statements[0]);
+    expect(text).toContain(`SELECT DISTINCT ON ("productId") "productId", "uploadId"`);
+    expect(text).toContain(`WHERE "productId" IN ($1,$2)`);
+    expect(text).toContain(`ORDER BY "productId", "sortOrder" ASC, "id" COLLATE "C" ASC`);
+    expect(statements[0]?.values).toEqual(["p1", "p2"]);
+  });
+
+  it("runs no statement for no product", async () => {
+    const { tag } = recorder([]);
+    const tx = { $queryRaw: tag } as unknown as DbTransaction;
+    await expect(findPrimaryUploadIds(tx, [])).resolves.toEqual(new Map());
+    expect(tag).not.toHaveBeenCalled();
+  });
+});
+
+describe("transaction limits (CR-T032-02, DATA_MODEL 21.5)", () => {
+  it("a payment transaction may run longer than the longest checkout it can wait behind", () => {
+    expect(PAYMENT_TRANSACTION_OPTIONS.timeout).toBeGreaterThan(
+      CHECKOUT_TRANSACTION_OPTIONS.timeout,
+    );
+    expect(PAYMENT_TRANSACTION_OPTIONS.maxWait).toBeGreaterThanOrEqual(
+      CHECKOUT_TRANSACTION_OPTIONS.maxWait,
+    );
   });
 });

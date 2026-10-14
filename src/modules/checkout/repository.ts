@@ -20,7 +20,7 @@
  * Nothing here logs: the rows hold names, phones, and addresses (SECURITY.md SR-04).
  */
 import { VISIBLE_PRODUCT_SQL } from "@/modules/catalog/visibility";
-import { db, type DbTransaction } from "@/server/db";
+import { db, type DbTransaction, Prisma } from "@/server/db";
 
 import type { ClassifiedLineRow, PricedOrder, PurchasedLine } from "./pricing";
 
@@ -98,16 +98,21 @@ export interface CartLine {
   quantity: number;
 }
 
-/** Every line of the cart, in product id order (the order the stock statements run in). */
+/**
+ * Every line of the cart, in product id order (the order the stock statements run in, so the
+ * order `Product` rows are locked in). The order is byte order (`COLLATE "C"`), never the
+ * database's default collation: the payment failure transaction restores stock in the same byte
+ * order, so the two can never wait on each other in a cycle, whatever characters an id holds
+ * (CR-T032-06; DATA_MODEL.md section 7.5).
+ */
 export async function findCartLinesForCheckout(
   tx: DbTransaction,
   cartId: string,
 ): Promise<CartLine[]> {
-  return tx.cartItem.findMany({
-    where: { cartId },
-    select: { id: true, productId: true, quantity: true },
-    orderBy: [{ productId: "asc" }],
-  });
+  return tx.$queryRaw<CartLine[]>`
+    SELECT "id", "productId", "quantity" FROM "CartItem"
+     WHERE "cartId" = ${cartId}
+     ORDER BY "productId" COLLATE "C" ASC`;
 }
 
 /*
@@ -115,14 +120,25 @@ export async function findCartLinesForCheckout(
  * candidate 2). Its statements are fixed text: a savepoint name cannot be a bound parameter. Prisma 7.10 with the pg adapter accepts them as raw statements and
  * keeps the transaction client working afterwards (validated in T-013, DATA_MODEL.md section
  * 21.6); this is not documented Prisma behaviour, so a Prisma upgrade must re-run that check.
+ *
+ * One savepoint at a time (CR-T032-05): every attempt ends it, by RELEASE after a complete
+ * attempt, or by ROLLBACK TO followed by RELEASE after a refused one. `ROLLBACK TO` alone keeps
+ * the savepoint, and a second `SAVEPOINT checkout_attempt` would then stack a new one with the
+ * same name on top. PostgreSQL resolves the name to the newest, so that was correct, but with
+ * the RELEASE each attempt starts from a transaction with no savepoint, which is simpler to reason
+ * about.
  */
 export async function setSavepoint(tx: DbTransaction): Promise<void> {
   await tx.$executeRaw`SAVEPOINT checkout_attempt`;
 }
 
-/** Undoes every statement since the savepoint: no stock decrement of the attempt survives. */
+/**
+ * Undoes every statement since the savepoint (no stock decrement of the attempt survives), then
+ * releases it, so the next attempt sets a fresh one (CR-T032-05).
+ */
 export async function rollbackToSavepoint(tx: DbTransaction): Promise<void> {
   await tx.$executeRaw`ROLLBACK TO SAVEPOINT checkout_attempt`;
+  await tx.$executeRaw`RELEASE SAVEPOINT checkout_attempt`;
 }
 
 export async function releaseSavepoint(tx: DbTransaction): Promise<void> {
@@ -233,19 +249,26 @@ export async function readSettings(tx: DbTransaction): Promise<Settings> {
 }
 
 /**
- * The upload of the product's primary picture now (the first by `sortOrder`, then id), or null.
- * The order item keeps a reference to it (BR-09; DATA_MODEL.md section 8, S7).
+ * The upload of each product's primary picture now (the first by `sortOrder`, then id), in one
+ * statement for every product of the order (CR-T032-12). The order item keeps a reference to it
+ * (BR-09; DATA_MODEL.md section 8, S7). A product with no picture maps to null. The `id`
+ * tie-breaker is byte order, as `orderBy: { id: "asc" }` gives no collation guarantee either.
  */
-export async function findPrimaryUploadId(
+export async function findPrimaryUploadIds(
   tx: DbTransaction,
-  productId: string,
-): Promise<string | null> {
-  const image = await tx.productImage.findFirst({
-    where: { productId },
-    select: { uploadId: true },
-    orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
-  });
-  return image?.uploadId ?? null;
+  productIds: readonly string[],
+): Promise<Map<string, string | null>> {
+  const uploads = new Map<string, string | null>(productIds.map((id) => [id, null]));
+  if (productIds.length === 0) return uploads;
+  const rows = await tx.$queryRaw<{ productId: string; uploadId: string }[]>`
+    SELECT DISTINCT ON ("productId") "productId", "uploadId"
+      FROM "ProductImage"
+     WHERE "productId" IN (${Prisma.join([...productIds])})
+     ORDER BY "productId", "sortOrder" ASC, "id" COLLATE "C" ASC`;
+  for (const row of rows) {
+    if (uploads.has(row.productId)) uploads.set(row.productId, row.uploadId);
+  }
+  return uploads;
 }
 
 export interface NewOrder {

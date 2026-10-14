@@ -15,7 +15,7 @@
 import type { Actor } from "@/server/auth/actor";
 import { logger as defaultLogger, type Logger } from "@/server/logger";
 
-import type { PaymentFailureReason } from "@/modules/payments";
+import type { ProviderDeclineReason } from "@/modules/payments";
 
 import { errorLabel } from "./error-label";
 import { orderNotFound } from "./errors";
@@ -67,7 +67,7 @@ export async function completeOrderPayment(
  */
 export async function failOrderPayment(
   orderId: string,
-  reason: Extract<PaymentFailureReason, "SIMULATED_DECLINE">,
+  reason: ProviderDeclineReason,
 ): Promise<boolean> {
   return failOrder(orderId, "PROVIDER_DECLINED", reason);
 }

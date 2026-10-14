@@ -23,6 +23,12 @@ export type PaymentProviderName = (typeof PAYMENT_PROVIDERS)[number];
 export const PAYMENT_FAILURE_REASONS = ["SIMULATED_DECLINE", "TIMEOUT"] as const;
 export type PaymentFailureReason = (typeof PAYMENT_FAILURE_REASONS)[number];
 
+/**
+ * The failure reasons a provider may report with a decline. `TIMEOUT` is not one of them: only the
+ * timeout sweep writes it (CR-T032-04).
+ */
+export type ProviderDeclineReason = Exclude<PaymentFailureReason, "TIMEOUT">;
+
 /** What the mock provider is asked to do (`mockOutcome` of `POST /checkout`). */
 export const MOCK_OUTCOMES = ["SUCCESS", "FAIL"] as const;
 export type MockOutcome = (typeof MOCK_OUTCOMES)[number];
@@ -41,7 +47,7 @@ export interface ChargeRequest {
 
 export type ChargeResult =
   | { outcome: "PAID"; providerReference: string }
-  | { outcome: "DECLINED"; failureReason: PaymentFailureReason };
+  | { outcome: "DECLINED"; failureReason: ProviderDeclineReason };
 
 export interface PaymentProvider {
   readonly name: PaymentProviderName;

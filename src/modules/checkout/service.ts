@@ -19,11 +19,12 @@
  *   6. if every line was taken: compute the totals (BR-04 refuses above the cap, 422, and the
  *      whole transaction rolls back), write the order with its copies and the mock payment row,
  *      empty the cart, commit;
- *   7. if a line was not taken: roll back to the savepoint (no decrement survives), read why each
- *      line cannot be bought, store the lowered quantity on every line above a stock of 1 or more
- *      (the only write of a refusal, D-029 point 2), commit, and answer 409 with every such line
- *      and the new totals. If that read finds every line buyable after all (the stock or a status
- *      changed in between), step 5 is tried again, at most CHECKOUT_ATTEMPTS times in all.
+ *   7. if a line was not taken: roll back to the savepoint and release it (no decrement survives),
+ *      read why each line cannot be bought, store the lowered quantity on every line above a
+ *      stock of 1 or more (the only write of a refusal, D-029 point 2), read the lines again
+ *      (CR-T032-07), commit, and answer 409 with every such line and the totals of the stored
+ *      cart. If a read finds every line buyable after all (the stock or a status changed in
+ *      between), step 5 is tried again, at most CHECKOUT_ATTEMPTS times in all.
  *
  * Mechanism choice (item 8.2-2): the savepoint candidate of DATA_MODEL.md section 21.6. It keeps
  * the cart lock for the whole request, so a refusal and the lowering it stores belong to the same
@@ -33,7 +34,8 @@
  * Then, for an order this request created, the mock provider is asked for the outcome and the
  * order is moved by the orders module in a second guarded transaction: `PAID`, or `FAILED` with
  * the seller orders cancelled, the stock restored once, and the items back in the cart (BR-20).
- * If the provider does not answer the order stays `PENDING` and the timeout sweep fails it later.
+ * If the provider does not answer, or that second transaction fails, the order stays `PENDING`,
+ * the request still answers it (201), and the timeout sweep fails it later (SEC-055).
  */
 import type { Actor } from "@/server/auth/actor";
 import type { DbTransaction } from "@/server/db";
@@ -61,7 +63,7 @@ import {
   findCartLinesForCheckout,
   findOrderIdByKey,
   findOwnedAddress,
-  findPrimaryUploadId,
+  findPrimaryUploadIds,
   inCheckoutTransaction,
   insertOrder,
   lockCart,
@@ -159,11 +161,18 @@ async function placeOrder(
     const classified = await classifyCartLines(tx, cartId, actor.userId);
     if (classified.some((line) => refusalReason(line) !== null)) {
       const lowered = await lowerCartLinesToStock(tx, cartId, actor.userId);
+      // Read again after the lowering, so the answer matches what is stored (CR-T032-07): a
+      // stock that moved between the first read and the lowering is reflected in the reasons,
+      // in `availableStock`, and in the totals.
+      const after = await classifyCartLines(tx, cartId, actor.userId);
+      const items = refusedItems(classified, lowered, after);
+      // Everything became buyable in between and nothing was stored: try the stock again.
+      if (items.length === 0) continue;
       const settings = await readSettings(tx);
       return {
         kind: "refused",
-        items: refusedItems(classified, lowered),
-        totals: refusalTotals(classified, lowered, settings.flatShippingFeeSatang),
+        items,
+        totals: refusalTotals(after, settings.flatShippingFeeSatang),
       };
     }
   }
@@ -182,10 +191,11 @@ async function writeOrder(
   const priced = priceOrder(purchased, settings.flatShippingFeeSatang, settings.commissionRateBps);
   // Thrown inside the transaction: everything above, the stock taken included, is rolled back.
   if (!priced.withinLimit) throw totalAboveLimit();
-  const uploads = new Map<string, string | null>();
-  for (const line of purchased) {
-    uploads.set(line.productId, await findPrimaryUploadId(tx, line.productId));
-  }
+  // One statement for every product, not one per line (CR-T032-12).
+  const uploads = await findPrimaryUploadIds(
+    tx,
+    purchased.map((line) => line.productId),
+  );
   const orderId = await insertOrder(tx, cartId, {
     userId: actor.userId,
     idempotencyKey,
@@ -197,10 +207,16 @@ async function writeOrder(
 }
 
 /**
- * Asks the provider and moves the payment. A provider that throws leaves the order `PENDING`
- * (section 5.5.2: the provider did not answer); the sweep fails it after the timeout. An error of
- * the guarded transaction itself is not caught: the order exists, and a repeat with the same key
- * returns it.
+ * Asks the provider and moves the payment. Never throws: the order has committed, so the request
+ * answers it whatever happens here (API_CONTRACTS.md section 5.5.2; SEC-055, CR-T032-03).
+ *
+ *   - A provider that throws leaves the order `PENDING` (the provider did not answer).
+ *   - A guarded payment transaction that throws (a lock timeout, P2028; a lost connection) is
+ *     rolled back, so the order also stays `PENDING`.
+ *
+ * Either way one line is logged with the error's class only, and the timeout sweep fails the
+ * order after `PAYMENT_TIMEOUT_MINUTES` (reason `TIMEOUT`). The decline reason written is the one
+ * the provider reported (CR-T032-04).
  */
 async function pay(
   orderId: string,
@@ -220,9 +236,18 @@ async function pay(
     });
     return;
   }
-  if (result.outcome === "PAID") {
-    await completeOrderPayment(orderId, result.providerReference);
-  } else {
-    await failOrderPayment(orderId, "SIMULATED_DECLINE");
+  try {
+    if (result.outcome === "PAID") {
+      await completeOrderPayment(orderId, result.providerReference);
+    } else {
+      await failOrderPayment(orderId, result.failureReason);
+    }
+  } catch (error) {
+    options.log?.error("Payment outcome could not be recorded; the order stays PENDING", {
+      component: "checkout",
+      provider: provider.name,
+      outcome: result.outcome,
+      errorClass: describeErrorForLog(error).errorClass,
+    });
   }
 }

@@ -10,7 +10,8 @@
  * The two payment transactions (DATA_MODEL.md section 7.2) run as one interactive transaction
  * each. Inside them every `tx` statement selects scalar fields only and the statements are awaited
  * one after the other (section 7.8). Locks are taken in the order of section 7.5: the `Cart` row,
- * `Order`, `SellerOrder`, `OrderItem`, `Product` rows in ascending id, `CartItem`. Every status
+ * `Order`, `SellerOrder`, `OrderItem`, `Product` rows in ascending id (byte order, `COLLATE "C"`,
+ * the same order checkout uses), `CartItem`. Every status
  * statement is guarded by the source states of the tables in state.ts, and acts only when it
  * affected the row; zero rows means another request finished the order first, and nothing changes.
  *
@@ -150,6 +151,17 @@ function fulfilmentStatusIn(states: readonly string[]): Prisma.Sql {
 }
 
 /**
+ * Interactive transaction limits of the two payment transactions (DATA_MODEL.md section 21.5;
+ * CR-T032-02). `failOrder` waits for the customer's cart lock, which a concurrent checkout of the
+ * same user may hold for up to its own `timeout` (15 s, `CHECKOUT_TRANSACTION_OPTIONS` of the
+ * checkout module); `markOrderPaid` may wait for the order row a failure holds. With Prisma's
+ * defaults (2 s wait, 5 s run) a decline behind such a checkout was rolled back with P2028 and the
+ * order stayed `PENDING`. So each runs at most 20 s: the longest checkout plus 5 s for its own
+ * statements. A test of the checkout module keeps this above the checkout's limit.
+ */
+export const PAYMENT_TRANSACTION_OPTIONS = { maxWait: 5_000, timeout: 20_000 } as const;
+
+/**
  * One transaction: `PENDING` to `PAID` with `paidAt` from the database clock, guarded by the
  * source state, then the provider's reference on the payment row. False when the order was no
  * longer `PENDING` (failed by the timeout first, or already paid): nothing is changed.
@@ -164,7 +176,7 @@ export async function markOrderPaid(orderId: string, providerReference: string):
     if (updated !== 1) return false;
     await tx.payment.updateMany({ where: { orderId }, data: { providerReference } });
     return true;
-  });
+  }, PAYMENT_TRANSACTION_OPTIONS);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -256,15 +268,18 @@ export async function failOrder(
       UPDATE "SellerOrder" SET "fulfilmentStatus" = 'CANCELLED', "updatedAt" = now()
        WHERE "orderId" = ${orderId} AND ${fulfilmentStatusIn(sellerOrderSources)}`;
 
-    const claimed = await tx.$queryRaw<ClaimedItem[]>`
-      UPDATE "OrderItem" oi SET "stockRestoredAt" = now()
-        FROM "SellerOrder" so
-       WHERE so."id" = oi."sellerOrderId" AND so."orderId" = ${orderId}
-         AND oi."stockRestoredAt" IS NULL
-      RETURNING oi."id", oi."productId", oi."quantity"`;
-    const inProductOrder = [...claimed].sort((a, b) =>
-      a.productId < b.productId ? -1 : a.productId > b.productId ? 1 : 0,
-    );
+    // Sorted by the database in byte order (`COLLATE "C"`), the order checkout takes Product rows
+    // in (CR-T032-06): never the database's default collation, never a JavaScript sort.
+    const inProductOrder = await tx.$queryRaw<ClaimedItem[]>`
+      WITH claimed AS (
+        UPDATE "OrderItem" oi SET "stockRestoredAt" = now()
+          FROM "SellerOrder" so
+         WHERE so."id" = oi."sellerOrderId" AND so."orderId" = ${orderId}
+           AND oi."stockRestoredAt" IS NULL
+        RETURNING oi."id", oi."productId", oi."quantity"
+      )
+      SELECT "id", "productId", "quantity" FROM claimed
+       ORDER BY "productId" COLLATE "C" ASC, "id" COLLATE "C" ASC`;
 
     const stockAfter = new Map<string, number>();
     for (const item of inProductOrder) {
@@ -284,5 +299,5 @@ export async function failOrder(
 
     await tx.payment.updateMany({ where: { orderId }, data: { failureReason: reason } });
     return true;
-  });
+  }, PAYMENT_TRANSACTION_OPTIONS);
 }

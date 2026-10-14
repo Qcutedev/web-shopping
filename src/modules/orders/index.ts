@@ -12,6 +12,7 @@ export {
   readOrderOfUser,
 } from "./service";
 export type { SweepResult } from "./service";
+export { PAYMENT_TRANSACTION_OPTIONS } from "./repository";
 export {
   runPaymentTimeoutSweep,
   startPaymentTimeoutSweepSchedule,

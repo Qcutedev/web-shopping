@@ -30,7 +30,7 @@ vi.mock("./repository", () => ({
   classifyCartLines: vi.fn(),
   lowerCartLinesToStock: vi.fn(),
   readSettings: vi.fn(),
-  findPrimaryUploadId: vi.fn(),
+  findPrimaryUploadIds: vi.fn(),
   insertOrder: vi.fn(),
 }));
 vi.mock("@/modules/orders", () => ({
@@ -129,7 +129,9 @@ beforeEach(() => {
     purchased(productId, quantity),
   );
   repo.readSettings.mockResolvedValue({ flatShippingFeeSatang: 4_000, commissionRateBps: 500 });
-  repo.findPrimaryUploadId.mockResolvedValue(null);
+  repo.findPrimaryUploadIds.mockImplementation(
+    async (_tx, ids) => new Map(ids.map((id) => [id, null] as const)),
+  );
   repo.insertOrder.mockResolvedValue("order_1");
   repo.lowerCartLinesToStock.mockResolvedValue(new Map());
   ordersMock.readOrderOfUser.mockResolvedValue(ORDER);
@@ -182,11 +184,16 @@ describe("checkout: success", () => {
     expect(repo.insertOrder.mock.calls[0]?.[2].priced.itemsSubtotalSatang).toBe(2 * 12_345 + 100);
   });
 
-  it("copies each product's primary picture onto the order", async () => {
-    repo.findPrimaryUploadId.mockImplementation(async (_tx, productId) =>
-      productId === "a" ? "upload_a" : null,
+  it("copies each product's primary picture onto the order, read in one statement (CR-T032-12)", async () => {
+    repo.findPrimaryUploadIds.mockResolvedValue(
+      new Map([
+        ["a", "upload_a"],
+        ["b", null],
+      ]),
     );
     await checkout(BUYER, KEY, BODY, { provider });
+    expect(repo.findPrimaryUploadIds).toHaveBeenCalledTimes(1);
+    expect(repo.findPrimaryUploadIds).toHaveBeenCalledWith(TX, ["a", "b"]);
     const uploads = repo.insertOrder.mock.calls[0]?.[2].uploads;
     expect(uploads?.get("a")).toBe("upload_a");
     expect(uploads?.get("b")).toBeNull();
@@ -211,6 +218,57 @@ describe("checkout: success", () => {
     expect(ordersMock.failOrderPayment).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(warn.mock.calls)).not.toContain("provider down");
+  });
+
+  it("the decline reason written is the one the provider reported (CR-T032-04)", async () => {
+    // A sentinel the code cannot have typed in itself: only a pass-through writes it.
+    provider.charge.mockResolvedValue({
+      outcome: "DECLINED",
+      failureReason: "PROVIDER_SENTINEL" as never,
+    });
+    await checkout(BUYER, KEY, { ...BODY, mockOutcome: "FAIL" }, { provider });
+    expect(ordersMock.failOrderPayment).toHaveBeenCalledWith("order_1", "PROVIDER_SENTINEL");
+  });
+
+  for (const [outcome, move] of [
+    ["PAID", "completeOrderPayment"],
+    ["DECLINED", "failOrderPayment"],
+  ] as const) {
+    it(`a ${outcome} that cannot be recorded after the order committed still answers the order, 201, PENDING (SEC-055, CR-T032-03)`, async () => {
+      provider.charge.mockResolvedValue(
+        outcome === "PAID"
+          ? { outcome, providerReference: "MOCK-ref" }
+          : { outcome, failureReason: "SIMULATED_DECLINE" },
+      );
+      const pending = { id: "order_1", paymentStatus: "PENDING" } as unknown as OrderDto;
+      ordersMock.readOrderOfUser.mockResolvedValue(pending);
+      const failure = Object.assign(new Error("Transaction already closed: row 0812345678"), {
+        name: "PrismaClientKnownRequestError",
+        code: "P2028",
+      });
+      ordersMock[move].mockRejectedValue(failure);
+      const log = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), child: vi.fn() };
+
+      await expect(checkout(BUYER, KEY, BODY, { provider, log })).resolves.toEqual({
+        order: pending,
+        created: true,
+      });
+      expect(ordersMock[move]).toHaveBeenCalledTimes(1);
+      expect(ordersMock.readOrderOfUser).toHaveBeenCalledWith("user_me", "order_1");
+      expect(log.error).toHaveBeenCalledTimes(1);
+      expect(log.error.mock.calls[0]?.[1]).toEqual({
+        component: "checkout",
+        provider: "MOCK",
+        outcome,
+        errorClass: "PrismaClientKnownRequestError",
+      });
+      expect(JSON.stringify(log.error.mock.calls)).not.toContain("0812345678");
+    });
+  }
+
+  it("a failing read of the order after payment is still an error (nothing to answer with)", async () => {
+    ordersMock.readOrderOfUser.mockRejectedValue(new Error("connection lost"));
+    await expect(checkout(BUYER, KEY, BODY, { provider })).rejects.toThrow("connection lost");
   });
 });
 
@@ -303,10 +361,17 @@ describe("checkout: a line that cannot be bought (BR-22, D-029 point 2)", () => 
     repo.takeStock.mockImplementation(async (_tx, _buyer, productId, quantity) =>
       productId === "b" ? null : purchased(productId, quantity),
     );
-    repo.classifyCartLines.mockResolvedValue([
-      classified({ cartItemId: "line_a", productId: "a", quantity: 2 }),
-      classified({ cartItemId: "line_b", productId: "b", quantity: 5, stock: 3 }),
-    ]);
+    repo.classifyCartLines
+      // The refusal read.
+      .mockResolvedValueOnce([
+        classified({ cartItemId: "line_a", productId: "a", quantity: 2 }),
+        classified({ cartItemId: "line_b", productId: "b", quantity: 5, stock: 3 }),
+      ])
+      // The read after the lowering: line_b now holds 3.
+      .mockResolvedValueOnce([
+        classified({ cartItemId: "line_a", productId: "a", quantity: 2 }),
+        classified({ cartItemId: "line_b", productId: "b", quantity: 3, stock: 3 }),
+      ]);
     repo.lowerCartLinesToStock.mockResolvedValue(new Map([["line_b", 3]]));
   });
 
@@ -314,8 +379,14 @@ describe("checkout: a line that cannot be bought (BR-22, D-029 point 2)", () => 
     const error = await refusal(checkout(BUYER, KEY, BODY, { provider }));
     expect(repo.rollbackToSavepoint).toHaveBeenCalledTimes(1);
     expect(repo.releaseSavepoint).not.toHaveBeenCalled();
-    expect(repo.classifyCartLines).toHaveBeenCalledWith(TX, "cart_me", "user_me");
+    expect(repo.classifyCartLines).toHaveBeenCalledTimes(2);
+    expect(repo.classifyCartLines).toHaveBeenNthCalledWith(1, TX, "cart_me", "user_me");
+    expect(repo.classifyCartLines).toHaveBeenNthCalledWith(2, TX, "cart_me", "user_me");
     expect(repo.lowerCartLinesToStock).toHaveBeenCalledWith(TX, "cart_me", "user_me");
+    // The second read comes after the lowering.
+    expect(repo.lowerCartLinesToStock.mock.invocationCallOrder[0]).toBeLessThan(
+      repo.classifyCartLines.mock.invocationCallOrder[1] ?? 0,
+    );
     expect(error.code).toBe("INSUFFICIENT_STOCK");
     expect(error.status).toBe(409);
     expect(error.details).toEqual({
@@ -349,6 +420,7 @@ describe("checkout: a line that cannot be bought (BR-22, D-029 point 2)", () => 
   });
 
   it("a line of the caller's own store, or a hidden product, is PRODUCT_UNAVAILABLE", async () => {
+    repo.classifyCartLines.mockReset();
     repo.classifyCartLines.mockResolvedValue([
       classified({ cartItemId: "line_a", productId: "a", ownStore: true }),
       classified({ cartItemId: "line_b", productId: "b", visible: false }),
@@ -362,7 +434,35 @@ describe("checkout: a line that cannot be bought (BR-22, D-029 point 2)", () => 
     ]);
   });
 
+  it("when the read after the lowering finds every line buyable and nothing was lowered, the stock is tried again", async () => {
+    repo.classifyCartLines.mockReset();
+    repo.classifyCartLines
+      .mockResolvedValueOnce([
+        classified({ cartItemId: "line_b", productId: "b", quantity: 5, stock: 3 }),
+      ])
+      .mockResolvedValueOnce([
+        classified({ cartItemId: "line_b", productId: "b", quantity: 5, stock: 9 }),
+      ]);
+    repo.lowerCartLinesToStock.mockResolvedValue(new Map());
+    repo.takeStock
+      .mockImplementationOnce(async (_tx, _buyer, productId, quantity) =>
+        purchased(productId, quantity),
+      )
+      .mockImplementationOnce(async () => null);
+    repo.takeStock.mockImplementation(async (_tx, _buyer, productId, quantity) =>
+      purchased(productId, quantity),
+    );
+    const result = await checkout(BUYER, KEY, BODY, { provider });
+    expect(result.created).toBe(true);
+    expect(repo.setSavepoint).toHaveBeenCalledTimes(2);
+    expect(repo.rollbackToSavepoint).toHaveBeenCalledTimes(1);
+    expect(repo.lowerCartLinesToStock).toHaveBeenCalledTimes(1);
+    expect(repo.classifyCartLines).toHaveBeenCalledTimes(2);
+    expect(repo.insertOrder).toHaveBeenCalledTimes(1);
+  });
+
   it("when the refusal read finds every line buyable, the stock is tried again", async () => {
+    repo.classifyCartLines.mockReset();
     repo.classifyCartLines.mockResolvedValueOnce([classified({}), classified({ productId: "b" })]);
     repo.takeStock
       .mockImplementationOnce(async (_tx, _buyer, productId, quantity) =>
@@ -381,6 +481,7 @@ describe("checkout: a line that cannot be bought (BR-22, D-029 point 2)", () => 
   });
 
   it(`gives up after ${CHECKOUT_ATTEMPTS} attempts with a server error, storing nothing`, async () => {
+    repo.classifyCartLines.mockReset();
     repo.classifyCartLines.mockResolvedValue([classified({})]);
     await expect(checkout(BUYER, KEY, BODY, { provider })).rejects.not.toBeInstanceOf(AppError);
     expect(repo.setSavepoint).toHaveBeenCalledTimes(CHECKOUT_ATTEMPTS);

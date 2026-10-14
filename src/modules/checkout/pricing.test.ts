@@ -143,8 +143,17 @@ describe("refusedItems and refusalCode (API_CONTRACTS 5.5.3)", () => {
     classified({ cartItemId: "own", productId: "e", ownStore: true, quantity: 4 }),
   ];
 
+  /** The read after the lowering: the lowered lines hold their new quantity. */
+  function afterLowering(
+    rows: readonly ClassifiedLineRow[],
+    lowered: ReadonlyMap<string, number>,
+  ): ClassifiedLineRow[] {
+    return rows.map((row) => ({ ...row, quantity: lowered.get(row.cartItemId) ?? row.quantity }));
+  }
+
   it("names every line that cannot be bought, in cart order, with the stored new quantity", () => {
-    const items = refusedItems(lines, new Map([["low", 3]]));
+    const lowered = new Map([["low", 3]]);
+    const items = refusedItems(lines, lowered, afterLowering(lines, lowered));
     expect(items).toEqual([
       {
         cartItemId: "hidden",
@@ -179,8 +188,63 @@ describe("refusedItems and refusalCode (API_CONTRACTS 5.5.3)", () => {
   });
 
   it("is INSUFFICIENT_STOCK only when every listed line fails on stock", () => {
-    const items = refusedItems([lines[2], lines[3]] as ClassifiedLineRow[], new Map([["low", 3]]));
+    const rows = [lines[2], lines[3]] as ClassifiedLineRow[];
+    const lowered = new Map([["low", 3]]);
+    const items = refusedItems(rows, lowered, afterLowering(rows, lowered));
     expect(refusalCode(items)).toBe("INSUFFICIENT_STOCK");
+  });
+
+  describe("a race between the first read and the lowering (CR-T032-07)", () => {
+    it("a line the first read found buyable but the lowering changed is listed, with the stored quantity", () => {
+      // First read: stock 10 for 2. Then stock fell to 1, and the lowering stored 1.
+      const before = [classified({ cartItemId: "x", productId: "x", quantity: 2, stock: 10 })];
+      const after = [classified({ cartItemId: "x", productId: "x", quantity: 1, stock: 1 })];
+      expect(refusedItems(before, new Map([["x", 1]]), after)).toEqual([
+        {
+          cartItemId: "x",
+          productId: "x",
+          reason: "INSUFFICIENT_STOCK",
+          requestedQuantity: 2,
+          availableStock: 1,
+        },
+      ]);
+    });
+
+    it("a line the first read refused but that sold out before the lowering says 0, not the old stock", () => {
+      const before = [classified({ cartItemId: "y", productId: "y", quantity: 5, stock: 3 })];
+      const after = [classified({ cartItemId: "y", productId: "y", quantity: 5, stock: 0 })];
+      expect(refusedItems(before, new Map(), after)).toEqual([
+        {
+          cartItemId: "y",
+          productId: "y",
+          reason: "INSUFFICIENT_STOCK",
+          requestedQuantity: 5,
+          availableStock: 0,
+        },
+      ]);
+    });
+
+    it("a lowered line whose product was hidden before the read after is NOT_AVAILABLE", () => {
+      const before = [classified({ cartItemId: "z", productId: "z", quantity: 5, stock: 3 })];
+      const after = [
+        classified({ cartItemId: "z", productId: "z", quantity: 3, stock: 3, visible: false }),
+      ];
+      expect(refusedItems(before, new Map([["z", 3]]), after)).toEqual([
+        {
+          cartItemId: "z",
+          productId: "z",
+          reason: "NOT_AVAILABLE",
+          requestedQuantity: 5,
+          availableStock: null,
+        },
+      ]);
+    });
+
+    it("a line refused at first but buyable after, and not lowered, is not listed", () => {
+      const before = [classified({ cartItemId: "w", productId: "w", quantity: 5, stock: 3 })];
+      const after = [classified({ cartItemId: "w", productId: "w", quantity: 5, stock: 9 })];
+      expect(refusedItems(before, new Map(), after)).toEqual([]);
+    });
   });
 });
 
@@ -194,10 +258,11 @@ describe("refusalTotals: what GET /cart returns after the refusal", () => {
         priceSatang: 1_000,
         storeId: "s1",
       }),
+      // As the read after the lowering finds it: 5 lowered to the stock of 3.
       classified({
         cartItemId: "low",
         productId: "c",
-        quantity: 5,
+        quantity: 3,
         stock: 3,
         priceSatang: 500,
         storeId: "s2",
@@ -205,7 +270,7 @@ describe("refusalTotals: what GET /cart returns after the refusal", () => {
       classified({ cartItemId: "hidden", productId: "b", visible: false, storeId: "s3" }),
       classified({ cartItemId: "soldout", productId: "d", stock: 0, storeId: "s4" }),
     ];
-    expect(refusalTotals(lines, new Map([["low", 3]]), 4_000)).toEqual({
+    expect(refusalTotals(lines, 4_000)).toEqual({
       itemsSubtotalSatang: 2_000 + 1_500,
       shippingTotalSatang: 8_000,
       grandTotalSatang: 11_500,

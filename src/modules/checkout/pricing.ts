@@ -157,28 +157,41 @@ export function refusalReason(line: ClassifiedLineRow): RefusedLineDetail["reaso
 }
 
 /**
- * The refusal's `details.items`, one entry per line that cannot be bought, in cart order.
- * `lowered` maps a line id to the quantity the refusal stored on it. For an `INSUFFICIENT_STOCK`
- * line `availableStock` is that new quantity, or 0 when the product is sold out and nothing was
- * stored; `requestedQuantity` is what the line held.
+ * The refusal's `details.items`, one entry per line that cannot be bought, in cart order
+ * (CR-T032-07).
+ *
+ *   - `before`: the lines as the refusal read found them, before the lowering;
+ *   - `lowered`: the lines the lowering statement changed, with the quantity it stored;
+ *   - `after`: the lines read again after the lowering, as `GET /cart` now finds them.
+ *
+ * A line is listed when the read after the lowering refuses it, or when the lowering changed it.
+ * The lowering carries its own conditions, so a line it changed had too little stock when it ran,
+ * even if the first read (an earlier moment) found it buyable. The reason is the one of the read
+ * after (a product hidden in between is `NOT_AVAILABLE`), else `INSUFFICIENT_STOCK`.
+ * `requestedQuantity` is the quantity the line held before the lowering. For an
+ * `INSUFFICIENT_STOCK` line `availableStock` is the quantity the lowering stored, so it always
+ * equals the stored quantity; for one the lowering did not change, the stock the read after
+ * found (0 when sold out).
  */
 export function refusedItems(
-  lines: readonly ClassifiedLineRow[],
+  before: readonly ClassifiedLineRow[],
   lowered: ReadonlyMap<string, number>,
+  after: readonly ClassifiedLineRow[],
 ): RefusedLineDetail[] {
+  const requested = new Map(before.map((line) => [line.cartItemId, line.quantity]));
   const items: RefusedLineDetail[] = [];
-  for (const line of lines) {
-    const reason = refusalReason(line);
+  for (const line of after) {
+    const loweredTo = lowered.get(line.cartItemId);
+    const reason =
+      refusalReason(line) ?? (loweredTo === undefined ? null : ("INSUFFICIENT_STOCK" as const));
     if (reason === null) continue;
     items.push({
       cartItemId: line.cartItemId,
       productId: line.productId,
       reason,
-      requestedQuantity: line.quantity,
+      requestedQuantity: requested.get(line.cartItemId) ?? line.quantity,
       availableStock:
-        reason === "INSUFFICIENT_STOCK"
-          ? (lowered.get(line.cartItemId) ?? Math.max(0, line.stock))
-          : null,
+        reason === "INSUFFICIENT_STOCK" ? (loweredTo ?? Math.max(0, line.stock)) : null,
     });
   }
   return items;
@@ -195,18 +208,18 @@ export function refusalCode(
 
 /**
  * `details.totals`: exactly what `GET /cart` computes from the lines as they are stored after the
- * refusal (the lowered quantities included) and the current fee. The cart's own function does
- * the arithmetic, so the two cannot differ.
+ * refusal and the current fee. `lines` is the read after the lowering, so the stored quantities
+ * and the stock are the ones the cart now holds (CR-T032-07). The cart's own function does the
+ * arithmetic, so the two cannot differ.
  */
 export function refusalTotals(
   lines: readonly ClassifiedLineRow[],
-  lowered: ReadonlyMap<string, number>,
   flatShippingFeeSatang: number,
 ): RefusedCheckoutTotals {
   const inputs: CartLineInput[] = lines.map((line) => ({
     id: line.cartItemId,
     productId: line.productId,
-    storedQuantity: lowered.get(line.cartItemId) ?? line.quantity,
+    storedQuantity: line.quantity,
     slug: line.slug,
     title: line.title,
     imageKey: null,

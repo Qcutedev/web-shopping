@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db, Prisma } from "@/server/db";
 
-import { failOrder, markOrderPaid } from "./repository";
+import { failOrder, markOrderPaid, PAYMENT_TRANSACTION_OPTIONS } from "./repository";
 
 vi.mock("@/server/db", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/server/db")>();
@@ -68,6 +68,21 @@ beforeEach(() => {
   tx.cartItem.findFirst.mockResolvedValue(null);
 });
 
+describe("transaction limits (CR-T032-02, DATA_MODEL 21.5)", () => {
+  it("both payment transactions run with their own limits, not Prisma's defaults", async () => {
+    executeResults = [1];
+    await markOrderPaid("order_1", "MOCK-ref");
+    queryResults = [[{ id: "cart_1" }]];
+    executeResults = [0];
+    await failOrder("order_1", "TIMEOUT", "TIMEOUT");
+    expect(transaction.mock.calls.map((call) => call[1])).toEqual([
+      PAYMENT_TRANSACTION_OPTIONS,
+      PAYMENT_TRANSACTION_OPTIONS,
+    ]);
+    expect(PAYMENT_TRANSACTION_OPTIONS).toEqual({ maxWait: 5_000, timeout: 20_000 });
+  });
+});
+
 describe("markOrderPaid (PENDING to PAID)", () => {
   it("is guarded by the source state of the table and sets paidAt from the database clock", async () => {
     executeResults = [1];
@@ -110,10 +125,10 @@ describe("failOrder (DATA_MODEL 7.2 'Failure', 7.3, 7.5)", () => {
   it("locks the cart first, then fails, cancels, claims, restores in product order, returns, records", async () => {
     queryResults = [
       [{ id: "cart_1" }],
-      // The claim: two items, out of product order.
+      // The claim, as the database returns it: sorted by product id in byte order (CR-T032-06).
       [
-        { id: "item_b", productId: "prod_b", quantity: 50 },
         { id: "item_a", productId: "prod_a", quantity: 3 },
+        { id: "item_b", productId: "prod_b", quantity: 50 },
       ],
       [{ stock: 3 }], // restore prod_a
       [{ stock: 200 }], // restore prod_b
@@ -140,6 +155,9 @@ describe("failOrder (DATA_MODEL 7.2 'Failure', 7.3, 7.5)", () => {
     expect(steps[2]?.values).toEqual(["order_1", "PENDING"]);
     expect(texts[3]).toContain(`SET "stockRestoredAt" = now()`);
     expect(texts[3]).toContain(`oi."stockRestoredAt" IS NULL`);
+    // The claimed rows come back in the byte order checkout locks Product rows in, never the
+    // database's default collation (CR-T032-06).
+    expect(texts[3]).toMatch(/ORDER BY "productId" COLLATE "C" ASC, "id" COLLATE "C" ASC$/);
     // Restores in ascending product id, each by exactly the claimed quantity, with no guard.
     expect(texts[4]).toContain(`SET "stock" = "stock" + $1::int`);
     expect(steps[4]?.values).toEqual([3, "prod_a"]);
