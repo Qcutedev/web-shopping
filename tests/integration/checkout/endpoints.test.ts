@@ -1,4 +1,4 @@
-﻿/**
+/**
  * T-032: `POST /api/v1/checkout`, `GET /api/v1/orders`, `GET /api/v1/orders/{id}` against the
  * worker's real test database (docs/API_CONTRACTS.md section 5.5; REQ-C-11 to REQ-C-13; BR-04,
  * BR-07 to BR-09, BR-15, BR-16, BR-20, BR-22, BR-30, BR-32, BR-39). Each case makes its own users
@@ -93,8 +93,8 @@ async function cartLines(userId: string) {
 describe("POST /api/v1/checkout: success", () => {
   it("places one order with one seller order per store, at database prices, and pays it (mock)", async () => {
     const user = await signedIn();
-    const storeA = await createStore({ name: "à¸£à¹‰à¸²à¸™à¹€à¸­" });
-    const storeB = await createStore({ name: "à¸£à¹‰à¸²à¸™à¸šà¸µ" });
+    const storeA = await createStore({ name: "ร้านเอ" });
+    const storeB = await createStore({ name: "ร้านบี" });
     const a = await createProduct({ storeId: storeA.id, priceSatang: 25_900, stock: 5 });
     const b = await createProduct({ storeId: storeB.id, priceSatang: 10_000, stock: 2 });
     const { addressId } = await readyToBuy(user, [
@@ -113,10 +113,7 @@ describe("POST /api/v1/checkout: success", () => {
     expect(order.shippingTotalSatang).toBe(8_000);
     expect(order.grandTotalSatang).toBe(95_700);
     expect(order.cartReturn).toBeNull();
-    expect(order.sellerOrders.map((part) => part.storeName).sort()).toEqual([
-      "à¸£à¹‰à¸²à¸™à¸šà¸µ",
-      "à¸£à¹‰à¸²à¸™à¹€à¸­",
-    ]);
+    expect(order.sellerOrders.map((part) => part.storeName).sort()).toEqual(["ร้านบี", "ร้านเอ"]);
     for (const part of order.sellerOrders) {
       expect(part).toMatchObject({
         fulfilmentStatus: "PENDING",
@@ -147,10 +144,10 @@ describe("POST /api/v1/checkout: success", () => {
 
   it("copies title, SKU, price, picture, store name, and address; later edits change nothing (BR-09)", async () => {
     const user = await signedIn();
-    const store = await createStore({ name: "à¸Šà¸·à¹ˆà¸­à¹€à¸”à¸´à¸¡" });
+    const store = await createStore({ name: "ชื่อเดิม" });
     const product = await createProduct({
       storeId: store.id,
-      title: "à¸Šà¸·à¹ˆà¸­à¸ªà¸´à¸™à¸„à¹‰à¸²à¹€à¸”à¸´à¸¡",
+      title: "ชื่อสินค้าเดิม",
       sku: "OLD-1",
       priceSatang: 5_000,
     });
@@ -163,27 +160,27 @@ describe("POST /api/v1/checkout: success", () => {
 
     await db.product.update({
       where: { id: product.id },
-      data: { title: "à¹ƒà¸«à¸¡à¹ˆ", sku: "NEW-1", priceSatang: 9_900 },
+      data: { title: "ใหม่", sku: "NEW-1", priceSatang: 9_900 },
     });
-    await db.store.update({ where: { id: store.id }, data: { name: "à¸Šà¸·à¹ˆà¸­à¹ƒà¸«à¸¡à¹ˆ" } });
+    await db.store.update({ where: { id: store.id }, data: { name: "ชื่อใหม่" } });
     await db.address.update({
       where: { id: addressId },
-      data: { line1: "à¸—à¸µà¹ˆà¸­à¸¢à¸¹à¹ˆà¹ƒà¸«à¸¡à¹ˆ" },
+      data: { line1: "ที่อยู่ใหม่" },
     });
 
     const read = await getOrder(user, placed.body.data.id);
     expect(read.status).toBe(200);
     const part = read.body.data.sellerOrders[0];
-    expect(part?.storeName).toBe("à¸Šà¸·à¹ˆà¸­à¹€à¸”à¸´à¸¡");
+    expect(part?.storeName).toBe("ชื่อเดิม");
     expect(part?.items[0]).toMatchObject({
-      productTitle: "à¸Šà¸·à¹ˆà¸­à¸ªà¸´à¸™à¸„à¹‰à¸²à¹€à¸”à¸´à¸¡",
+      productTitle: "ชื่อสินค้าเดิม",
       productSku: "OLD-1",
       unitPriceSatang: 5_000,
       quantity: 2,
       lineTotalSatang: 10_000,
       image: { key: upload.storageKey },
     });
-    expect(read.body.data.shippingAddress.line1).not.toBe("à¸—à¸µà¹ˆà¸­à¸¢à¸¹à¹ˆà¹ƒà¸«à¸¡à¹ˆ");
+    expect(read.body.data.shippingAddress.line1).not.toBe("ที่อยู่ใหม่");
   });
 });
 
