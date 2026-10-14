@@ -339,6 +339,15 @@ The owner accepted the security agent's remediation (a) + (b) + (d) and not (c) 
 
 The SEC-058 `it.fails` case flips to `it` unchanged once (a) lands; a case is added for (b) and (d). Owners: database (column, index, migration), backend-api (`src/modules/sellers`, contract), security (re-check).
 
+### D-042 Owner ruling on SEC-059 and SEC-060: reserved-name matching and look-alike characters (2026-10-15)
+
+The owner accepted the security agent's recommendation on both Low findings raised by the SEC-058 re-check:
+
+1. **SEC-059: options (a) + (b).** A store name is refused as reserved when, after punctuation is stripped, its key contains a reserved key (so `Admin.` and `<site name> Official` are refused, not only an exact match). Accepted side effect: a real store whose name happens to contain a reserved word is refused too; the list stays in `RESERVED_STORE_NAMES` and the owner may trim it.
+2. **SEC-060: option (b).** `NAME_ALLOWED_TEXT` refuses the characters that create look-alike names: a doubled sara e, a repeated tone mark, and blank look-alikes such as U+2800. `store_name_key` is not extended and no migration is written. Accepted side effect: the same rule applies to every field that uses `NAME_ALLOWED_TEXT` (sign-up name, profile display name, store text), so those fields refuse these characters too.
+
+Owners: backend-api (`src/modules/auth/schema.ts`, `src/modules/sellers/store-name.ts`, contract), security (flip the SEC-059 and SEC-060 `it.fails` cases and re-check). Frontend needs no new string if the existing reserved and invalid-text messages are reused.
+
 ## Pending decisions for the user
 
 Undecided, none blocking the MVP: marketplace name and logo, real product photos, hosting provider for staging and production, production object storage, email provider, payment gateway.
