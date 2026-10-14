@@ -108,7 +108,8 @@ export interface ErrorBody {
 
 /** The error object without its per-request id, to compare two answers. */
 export function sameAnswer(error: ErrorBody["error"]): Record<string, unknown> {
-  const { requestId: _requestId, ...rest } = error as ErrorBody["error"] & { requestId?: string };
+  const rest: Record<string, unknown> = { ...error };
+  delete rest.requestId;
   return rest;
 }
 
