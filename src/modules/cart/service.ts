@@ -158,7 +158,8 @@ export async function addCartItem(
         throw ownStoreProduct({
           cartItemId: null,
           productId: product.id,
-          requestedQuantity: input.quantity,
+          // The resulting quantity, as in every other answer of an add (CR-T031-04).
+          requestedQuantity,
         });
       }
       if (requestedQuantity > MAX_LINE_QUANTITY) throw lineQuantityTooBig();

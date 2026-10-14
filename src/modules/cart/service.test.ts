@@ -260,6 +260,19 @@ describe("addCartItem", () => {
     expect(repo.insertLine).not.toHaveBeenCalled();
   });
 
+  it("reports the resulting quantity in OWN_STORE, like every other add answer (CR-T031-04)", async () => {
+    repo.findVisibleProduct.mockResolvedValue({ ...PRODUCT, storeId: "store_own" });
+    repo.findLineForProduct.mockResolvedValue({
+      id: "line_old",
+      productId: "product_1",
+      quantity: 4,
+    });
+    const error = await refusal(addCartItem(SELLER, { productId: "product_1", quantity: 2 }));
+    expect(error.details).toMatchObject({
+      items: [{ reason: "OWN_STORE", requestedQuantity: 6 }],
+    });
+  });
+
   it("lets a seller add another store's product", async () => {
     const result = await addCartItem(SELLER, { productId: "product_1", quantity: 1 });
     expect(result.created).toBe(true);
