@@ -173,6 +173,35 @@ describe("submitApplication", () => {
   });
 });
 
+/** The refusal of a promise as `status reason`, with no cause attached (SEC-058, D-041). */
+async function nameRefusal(promise: Promise<unknown>): Promise<string> {
+  try {
+    await promise;
+  } catch (error) {
+    expect(error).toBeInstanceOf(AppError);
+    const appError = error as AppError;
+    expect(appError.code).toBe("CONFLICT");
+    // The database error's meta holds the name; it is never attached to the response error.
+    expect(appError.cause).toBeUndefined();
+    return `${String(appError.status)} ${String(appError.details.reason)}`;
+  }
+  throw new Error("expected a refusal");
+}
+
+describe("store name refusals (SEC-058, D-041)", () => {
+  it.each([
+    ["store-name-taken", "409 STORE_NAME_TAKEN"],
+    ["store-name-reserved", "409 STORE_NAME_RESERVED"],
+  ])("maps %s to %s on the application, the rename, and the approval", async (kind, answer) => {
+    repo.insertApplication.mockResolvedValue({ kind });
+    expect(await nameRefusal(submitApplication(CUSTOMER, SUBMIT))).toBe(answer);
+    repo.updateOwnStore.mockResolvedValue({ kind });
+    expect(await nameRefusal(updateOwnStore(SELLER, { name: "admin" }))).toBe(answer);
+    repo.approveApplicationRow.mockResolvedValue({ kind });
+    expect(await nameRefusal(approveApplication(ADMIN, "app_1"))).toBe(answer);
+  });
+});
+
 describe("getOwnApplication", () => {
   it("reads the session user's latest application, for any role", async () => {
     repo.findLatestApplication.mockResolvedValue(APPLICATION_ROW);

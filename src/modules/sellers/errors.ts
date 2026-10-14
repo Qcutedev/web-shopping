@@ -12,6 +12,11 @@
  * - Approving an application whose applicant's account is deactivated (`isActive = false`):
  *   `409 CONFLICT`, reason `APPLICANT_INACTIVE`; nothing changes and the application stays
  *   `PENDING` so it can be rejected (D-040 point 1).
+ * - A store name whose key (DATA_MODEL.md section 21.7) another store already has, on the
+ *   application, the approval, and a rename: `409 CONFLICT`, reason `STORE_NAME_TAKEN` (SEC-058,
+ *   D-041 point 1). Nothing changes; a refused approval leaves the application `PENDING`.
+ * - A store name whose key equals that of a reserved name (`RESERVED_STORE_NAMES`), on the same
+ *   three: `409 CONFLICT`, reason `STORE_NAME_RESERVED` (D-041 point 3). Nothing changes.
  * - A decision on an application that is not `PENDING`, including one that lost a race:
  *   `409 INVALID_STATE_TRANSITION` (state.ts).
  * - A write to a store that is not `APPROVED`: `403 SELLER_NOT_APPROVED` (DATA_MODEL.md section
@@ -22,6 +27,8 @@ import { type AppError, conflict, notFound, sellerNotApproved } from "@/server/e
 export const OPEN_APPLICATION = "OPEN_APPLICATION";
 export const APPLICANT_NOT_CUSTOMER = "APPLICANT_NOT_CUSTOMER";
 export const APPLICANT_INACTIVE = "APPLICANT_INACTIVE";
+export const STORE_NAME_TAKEN = "STORE_NAME_TAKEN";
+export const STORE_NAME_RESERVED = "STORE_NAME_RESERVED";
 
 export function applicationNotFound(): AppError {
   return notFound();
@@ -45,6 +52,15 @@ export function applicantNotCustomer(): AppError {
 
 export function applicantInactive(): AppError {
   return conflict(APPLICANT_INACTIVE);
+}
+
+/** No cause is attached: the database error's `meta` holds the name (DATA_MODEL.md 21.5). */
+export function storeNameTaken(): AppError {
+  return conflict(STORE_NAME_TAKEN);
+}
+
+export function storeNameReserved(): AppError {
+  return conflict(STORE_NAME_RESERVED);
 }
 
 export function storeNotApproved(): AppError {

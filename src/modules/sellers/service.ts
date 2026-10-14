@@ -28,6 +28,8 @@ import {
   applicantNotCustomer,
   applicationNotFound,
   openApplication,
+  storeNameReserved,
+  storeNameTaken,
   storeNotApproved,
   storeNotFound,
   uploadNotFound,
@@ -109,7 +111,9 @@ export function toDecisionDto(row: DecisionRow): ApplicationDecisionDto {
  * owns one and an `ADMIN` cannot become a seller, both 403 FORBIDDEN (BR-06; section 5.7.1). The
  * repository repeats both checks under the user row's lock, so a role that changed after the
  * session was read is still refused. A second application while one is `PENDING` is
- * 409 OPEN_APPLICATION and creates nothing; a rejected applicant may apply again.
+ * 409 OPEN_APPLICATION and creates nothing; a rejected applicant may apply again. A store name
+ * that is reserved is 409 STORE_NAME_RESERVED, one whose key an existing store has is
+ * 409 STORE_NAME_TAKEN; both create nothing (SEC-058, D-041).
  */
 export async function submitApplication(
   actor: Actor,
@@ -132,6 +136,10 @@ export async function submitApplication(
       throw forbidden();
     case "open-application":
       throw openApplication(outcome.cause);
+    case "store-name-reserved":
+      throw storeNameReserved();
+    case "store-name-taken":
+      throw storeNameTaken();
   }
 }
 
@@ -167,7 +175,9 @@ export async function getOwnStore(actor: Actor): Promise<SellerStoreDto> {
  * `APPROVED` store, judged here from the session's actor and again by the transaction under the
  * store row's lock; a suspended store is 403 SELLER_NOT_APPROVED and nothing changes. A change of
  * contact phone needs no approval. A rename keeps the slug. `logoKey` must be an upload of the
- * caller's own store, else 404 with `details.resource` `"upload"`.
+ * caller's own store, else 404 with `details.resource` `"upload"`. A new name that is reserved is
+ * 409 STORE_NAME_RESERVED, one whose key another store has is 409 STORE_NAME_TAKEN, and nothing
+ * changes; a rename writes an audit row with the seller as actor (SEC-058, D-041).
  */
 export async function updateOwnStore(
   actor: Actor,
@@ -189,6 +199,10 @@ export async function updateOwnStore(
       throw storeNotApproved();
     case "upload-not-found":
       throw uploadNotFound();
+    case "store-name-reserved":
+      throw storeNameReserved();
+    case "store-name-taken":
+      throw storeNameTaken();
   }
 }
 
@@ -225,6 +239,10 @@ function decided(outcome: DecisionOutcome): ApplicationDecisionDto {
       throw applicantNotCustomer();
     case "applicant-inactive":
       throw applicantInactive();
+    case "store-name-reserved":
+      throw storeNameReserved();
+    case "store-name-taken":
+      throw storeNameTaken();
   }
 }
 
@@ -234,7 +252,9 @@ function decided(outcome: DecisionOutcome): ApplicationDecisionDto {
  * `SELLER`, and an audit row is written. Not `PENDING`: 409 INVALID_STATE_TRANSITION. Applicant
  * no longer a `CUSTOMER`: 409 APPLICANT_NOT_CUSTOMER, nothing changes. Applicant deactivated
  * (`isActive = false`): 409 APPLICANT_INACTIVE, nothing changes and the application stays
- * `PENDING` so an admin can reject it (D-040 point 1). Unknown id: 404.
+ * `PENDING` so an admin can reject it (D-040 point 1). A store name that is reserved, or whose key
+ * another store has by now: 409 STORE_NAME_RESERVED or STORE_NAME_TAKEN, nothing changes and the
+ * application stays `PENDING` (SEC-058, D-041). Unknown id: 404.
  */
 export async function approveApplication(
   actor: Actor,

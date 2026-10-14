@@ -25,6 +25,7 @@ import {
   type ApplicationStatusValue,
   type StoreStatusValue,
 } from "./state";
+import { isStoreNameKeyViolation, RESERVED_STORE_NAMES } from "./store-name";
 
 export const SELLER_TRANSACTION_OPTIONS = { maxWait: 5_000, timeout: 10_000 } as const;
 
@@ -54,6 +55,38 @@ class Rollback<K extends string> extends Error {
     super(outcome);
     this.name = "Rollback";
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Store names (SEC-058, D-041; store-name.ts, DATA_MODEL.md section 21.7)
+// ---------------------------------------------------------------------------------------------
+
+export interface StoreNameCheck {
+  /** Another store (or, on a rename, this one) already has a name with the same key. */
+  taken: boolean;
+  /** The key equals the key of an entry of `RESERVED_STORE_NAMES`. */
+  reserved: boolean;
+}
+
+/**
+ * Compares `name` with the stored keys and with the reserved names, by the database's own
+ * normalisation (`store_name_key`): one statement, bound parameters only. Nothing is locked; a
+ * store created after this read is caught by `Store_nameKey_key` at approval.
+ */
+export async function checkStoreName(
+  client: Pick<DbTransaction, "$queryRaw">,
+  name: string,
+): Promise<StoreNameCheck> {
+  const reservedNames = [...RESERVED_STORE_NAMES];
+  const rows = await client.$queryRaw<StoreNameCheck[]>`
+    SELECT
+      EXISTS (SELECT 1 FROM "Store" WHERE "nameKey" = store_name_key(${name})) AS "taken",
+      store_name_key(${name}) IN (
+        SELECT store_name_key(x) FROM unnest(${reservedNames}::text[]) AS x
+      ) AS "reserved"`;
+  const row = rows[0];
+  // One row always; a missing one would be a driver fault, and refusing is the safe answer.
+  return { taken: row?.taken !== false, reserved: row?.reserved !== false };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -101,7 +134,9 @@ export type SubmitOutcome =
   | { kind: "created"; row: ApplicationRow }
   | { kind: "user-gone" }
   | { kind: "not-customer" }
-  | { kind: "open-application"; cause?: unknown };
+  | { kind: "open-application"; cause?: unknown }
+  | { kind: "store-name-reserved" }
+  | { kind: "store-name-taken" };
 
 /**
  * Inserts a `PENDING` application for the user, in one transaction (DATA_MODEL.md section 4.1,
@@ -113,7 +148,10 @@ export type SubmitOutcome =
  *   2. the role must still be `CUSTOMER` and the user must own no store (BR-06), else
  *      `not-customer`;
  *   3. no other `PENDING` application, else `open-application`;
- *   4. insert. The partial unique index `SellerApplication_userId_pending_key` is the backstop:
+ *   4. the store name (SEC-058, D-041): a reserved name is `store-name-reserved`, a name whose key
+ *      an existing store has is `store-name-taken` (`checkStoreName`). Pending applications are not
+ *      compared with each other; the second of two approvals of one name fails on the index;
+ *   5. insert. The partial unique index `SellerApplication_userId_pending_key` is the backstop:
  *      its violation also answers `open-application`.
  */
 export async function insertApplication(
@@ -136,6 +174,9 @@ export async function insertApplication(
         select: { id: true },
       });
       if (open !== null) return { kind: "open-application" } as const;
+      const name = await checkStoreName(tx, input.storeName);
+      if (name.reserved) return { kind: "store-name-reserved" } as const;
+      if (name.taken) return { kind: "store-name-taken" } as const;
       const row = await tx.sellerApplication.create({
         data: { userId, ...input },
         select: APPLICATION_SELECT,
@@ -204,21 +245,59 @@ export type StoreUpdateOutcome =
   | { kind: "updated"; row: StoreRow }
   | { kind: "not-found" }
   | { kind: "not-approved" }
-  | { kind: "upload-not-found" };
+  | { kind: "upload-not-found" }
+  | { kind: "store-name-reserved" }
+  | { kind: "store-name-taken" };
+
+export const AUDIT_ACTION_STORE_RENAMED = "SELLER_STORE_RENAMED";
+export const AUDIT_TARGET_STORE = "Store";
+
+/**
+ * Locks the seller's own store row and reads its status and name. A rename changes the generated
+ * `nameKey`, which has a unique index, so PostgreSQL takes the row's `FOR UPDATE` lock for that
+ * update; a request that sends `name` takes `FOR UPDATE` from the start rather than upgrading from
+ * `FOR NO KEY UPDATE` while other transactions may hold `FOR KEY SHARE` on the row. Any other
+ * change keeps `FOR NO KEY UPDATE`. Neither is `FOR SHARE` followed by an update (T-040 review,
+ * observation 1).
+ */
+async function lockOwnStore(
+  tx: DbTransaction,
+  storeId: string,
+  userId: string,
+  forRename: boolean,
+): Promise<{ status: string; name: string } | null> {
+  const rows = forRename
+    ? await tx.$queryRaw<{ status: string; name: string }[]>`
+        SELECT "status"::text AS "status", "name" FROM "Store"
+        WHERE "id" = ${storeId} AND "ownerId" = ${userId}
+        FOR UPDATE`
+    : await tx.$queryRaw<{ status: string; name: string }[]>`
+        SELECT "status"::text AS "status", "name" FROM "Store"
+        WHERE "id" = ${storeId} AND "ownerId" = ${userId}
+        FOR NO KEY UPDATE`;
+  return rows[0] ?? null;
+}
 
 /**
  * Changes the seller's own store in one transaction (REQ-S-02; DATA_MODEL.md sections 6.3, 7.7,
- * and 8):
+ * 8, and 21.7):
  *
- *   1. lock the store row with its owner in the `WHERE` (`FOR NO KEY UPDATE`): none is
- *      `not-found`; a status other than `APPROVED` is `not-approved` (BR-14: the store status is
- *      judged before the upload is looked up, section 1.8 steps 8 and 9);
- *   2. a `logoKey` is resolved by `storageKey` **and** `storeId`, so an unknown key and another
+ *   1. lock the store row with its owner in the `WHERE` (`lockOwnStore`): none is `not-found`; a
+ *      status other than `APPROVED` is `not-approved` (BR-14: the store status is judged before
+ *      the upload is looked up, section 1.8 steps 8 and 9);
+ *   2. a `name` that differs from the current one is a rename (SEC-058, D-041): a reserved name is
+ *      `store-name-reserved`. A name whose key another store has is refused by the unique index
+ *      `Store_nameKey_key` in step 4; that error leaves the callback (the transaction is dead) and
+ *      is `store-name-taken`;
+ *   3. a `logoKey` is resolved by `storageKey` **and** `storeId`, so an unknown key and another
  *      store's key are both `upload-not-found`;
- *   3. the guarded update carries `status = 'APPROVED'` itself (section 7.7); zero rows is
+ *   4. the guarded update carries `status = 'APPROVED'` itself (section 7.7); zero rows is
  *      `not-approved`. A foreign-key failure on the logo (the upload was removed in between) is
  *      `upload-not-found`. The slug never changes;
- *   4. the store is read back.
+ *   5. a rename writes one `AuditLog` row: the seller as actor, action `SELLER_STORE_RENAMED`,
+ *      target the store, `metadata` `{ before: { name }, after: { name } }` (D-041 point 2). A
+ *      name sent unchanged, character for character, is no rename and writes no row;
+ *   6. the store is read back.
  */
 export async function updateOwnStore(
   storeId: string,
@@ -227,15 +306,18 @@ export async function updateOwnStore(
 ): Promise<StoreUpdateOutcome> {
   try {
     return await db.$transaction(async (tx) => {
-      const locked = await tx.$queryRaw<{ status: string }[]>`
-        SELECT "status"::text AS "status" FROM "Store"
-        WHERE "id" = ${storeId} AND "ownerId" = ${userId}
-        FOR NO KEY UPDATE`;
-      const current = locked[0];
-      if (current === undefined) return { kind: "not-found" } as const;
+      const current = await lockOwnStore(tx, storeId, userId, update.name !== undefined);
+      if (current === null) return { kind: "not-found" } as const;
       if (current.status !== "APPROVED") return { kind: "not-approved" } as const;
 
+      const renamedTo =
+        update.name !== undefined && update.name !== current.name ? update.name : null;
+      if (renamedTo !== null && (await checkStoreName(tx, renamedTo)).reserved) {
+        return { kind: "store-name-reserved" } as const;
+      }
+
       const data: Prisma.StoreUncheckedUpdateManyInput = {};
+      // Written also when unchanged, so `data` is never empty and the guarded update always runs.
       if (update.name !== undefined) data.name = update.name;
       if (update.description !== undefined) data.description = update.description;
       if (update.contactPhone !== undefined) data.contactPhone = update.contactPhone;
@@ -254,6 +336,18 @@ export async function updateOwnStore(
         data,
       });
       if (count === 0) return { kind: "not-approved" } as const;
+      if (renamedTo !== null) {
+        await tx.auditLog.create({
+          data: {
+            actorId: userId,
+            action: AUDIT_ACTION_STORE_RENAMED,
+            targetType: AUDIT_TARGET_STORE,
+            targetId: storeId,
+            metadata: { before: { name: current.name }, after: { name: renamedTo } },
+          },
+          select: { id: true },
+        });
+      }
       const row = await tx.store.findFirstOrThrow({
         where: { id: storeId, ownerId: userId },
         select: STORE_SELECT,
@@ -261,6 +355,7 @@ export async function updateOwnStore(
       return { kind: "updated", row: await withLogoKey(tx, row) } as const;
     }, SELLER_TRANSACTION_OPTIONS);
   } catch (error) {
+    if (isStoreNameKeyViolation(error)) return { kind: "store-name-taken" };
     if (isForeignKeyViolation(error)) return { kind: "upload-not-found" };
     throw error;
   }
@@ -331,7 +426,9 @@ export type DecisionOutcome =
   | { kind: "not-found" }
   | { kind: "not-pending" }
   | { kind: "applicant-not-customer" }
-  | { kind: "applicant-inactive" };
+  | { kind: "applicant-inactive" }
+  | { kind: "store-name-reserved" }
+  | { kind: "store-name-taken" };
 
 /**
  * Locks the applicant's user row (`FOR NO KEY UPDATE`, the lock submission takes) and reads its
@@ -373,17 +470,21 @@ async function moveApplication(
  *      `applicant-inactive` and nothing is written, so the application stays `PENDING` and can be
  *      rejected (D-040 point 1; a store of a deactivated owner is hidden anyway, BR-27). A missing
  *      user row (the foreign key does not allow it) is `applicant-not-customer`;
- *   3. the guarded application update (`status = 'PENDING'`);
- *   4. the guarded role update `CUSTOMER` to `SELLER` (`WHERE role = 'CUSTOMER'` and
+ *   3. the application's store name must not be reserved (SEC-058, D-041 point 3), else
+ *      `store-name-reserved` and nothing is written; the application stays `PENDING`;
+ *   4. the guarded application update (`status = 'PENDING'`);
+ *   5. the guarded role update `CUSTOMER` to `SELLER` (`WHERE role = 'CUSTOMER'` and
  *      `isActive = true`; section 7.6); zero rows rolls everything back as
  *      `applicant-not-customer`;
- *   5. the store is created with status `APPROVED`, the application's name, description, and
+ *   6. the store is created with status `APPROVED`, the application's name, description, and
  *      contact phone, and a generated slug (`Store_ownerId_key` is the backstop against a second
- *      store);
- *   6. one `AuditLog` row (REQ-A-10), in the same transaction.
+ *      store). A name whose key another store has (approved since the application was submitted)
+ *      is refused by `Store_nameKey_key`; the error leaves the callback, everything is rolled back,
+ *      and the outcome is `store-name-taken` with the application still `PENDING` (D-041 point 1);
+ *   7. one `AuditLog` row (REQ-A-10), in the same transaction.
  *
- * A unique violation (a slug collision, which is all but impossible with 40 random bits) rolls
- * the transaction back and the whole approval is tried again with a new slug, at most
+ * Any other unique violation (a slug collision, which is all but impossible with 40 random bits)
+ * rolls the transaction back and the whole approval is tried again with a new slug, at most
  * APPROVAL_SLUG_ATTEMPTS times; after that the error is passed on (500, nothing stored).
  */
 export async function approveApplicationRow(
@@ -400,6 +501,9 @@ export async function approveApplicationRow(
         const applicant = await lockApplicant(tx, application.userId);
         if (applicant === null) return { kind: "applicant-not-customer" } as const;
         if (!applicant.isActive) return { kind: "applicant-inactive" } as const;
+        if ((await checkStoreName(tx, application.storeName)).reserved) {
+          return { kind: "store-name-reserved" } as const;
+        }
         const reviewedAt = new Date();
         if (!(await moveApplication(tx, applicationId, "APPROVED", adminId, null, reviewedAt))) {
           return { kind: "not-pending" } as const;
@@ -450,6 +554,7 @@ export async function approveApplicationRow(
       }, SELLER_TRANSACTION_OPTIONS);
     } catch (error) {
       if (error instanceof Rollback) return { kind: "applicant-not-customer" };
+      if (isStoreNameKeyViolation(error)) return { kind: "store-name-taken" };
       if (isUniqueViolation(error) && attempt < APPROVAL_SLUG_ATTEMPTS) continue;
       throw error;
     }

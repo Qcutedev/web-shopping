@@ -389,6 +389,8 @@ describe("conflict requires a reason (CR-02; docs/API_CONTRACTS.md section 2.3)"
     "LAST_ADMIN",
     "APPLICANT_INACTIVE",
     "APPLICANT_NOT_CUSTOMER",
+    "STORE_NAME_TAKEN",
+    "STORE_NAME_RESERVED",
   ];
 
   it.each(DOCUMENTED_REASONS)("carries %s as details.reason and nothing else", (reason) => {

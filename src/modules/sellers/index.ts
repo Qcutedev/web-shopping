@@ -20,3 +20,5 @@ export {
   STORE_TRANSITIONS,
 } from "./state";
 export { generateSlug, slugReadablePart } from "./slug";
+export { STORE_NAME_RESERVED, STORE_NAME_TAKEN } from "./errors";
+export { RESERVED_STORE_NAMES } from "./store-name";
