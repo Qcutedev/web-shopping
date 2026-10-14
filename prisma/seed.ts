@@ -37,7 +37,7 @@ import {
   StoreStatus,
   type DbTransaction,
 } from "../src/server/db";
-import { buildSampleAccountRows } from "./seed/accounts";
+import { buildSampleAccountRows, type SampleAccountRows } from "./seed/accounts";
 import {
   buildSampleData,
   SAMPLE_PASSWORD,
@@ -90,13 +90,18 @@ function describeError(error: unknown): string {
   return `${name}${code}`;
 }
 
-function required<T>(map: Map<string, T>, key: string): T {
+function required<T>(map: ReadonlyMap<string, T>, key: string): T {
   const value = map.get(key);
   if (value === undefined) throw new Error(`Seed data refers to an unknown key: ${key}`);
   return value;
 }
 
-async function seedUser(tx: DbTransaction, sample: SampleUser, counts: Counts): Promise<string> {
+async function seedUser(
+  tx: DbTransaction,
+  sample: SampleUser,
+  rows: SampleAccountRows,
+  counts: Counts,
+): Promise<string> {
   const existing = await tx.user.findFirst({
     where: { email: { equals: sample.email, mode: "insensitive" } },
     select: { id: true, role: true },
@@ -111,7 +116,6 @@ async function seedUser(tx: DbTransaction, sample: SampleUser, counts: Counts): 
     counts.users.present += 1;
     return existing.id;
   }
-  const rows = await buildSampleAccountRows(sample, SAMPLE_PASSWORD);
   await tx.user.create({
     data: { ...rows.user, role: sample.role === "SELLER" ? Role.SELLER : Role.CUSTOMER },
     select: { id: true },
@@ -121,12 +125,17 @@ async function seedUser(tx: DbTransaction, sample: SampleUser, counts: Counts): 
   return rows.user.id;
 }
 
-async function seed(tx: DbTransaction, data: SampleData): Promise<Counts> {
+async function seed(
+  tx: DbTransaction,
+  data: SampleData,
+  accountRows: ReadonlyMap<string, SampleAccountRows>,
+): Promise<Counts> {
   const counts = newCounts();
 
   const userIds = new Map<string, string>();
   for (const sample of data.users) {
-    userIds.set(sample.key, await seedUser(tx, sample, counts));
+    const rows = required(accountRows, sample.key);
+    userIds.set(sample.key, await seedUser(tx, sample, rows, counts));
   }
 
   for (const address of data.addresses) {
@@ -197,6 +206,15 @@ async function seed(tx: DbTransaction, data: SampleData): Promise<Counts> {
       counts.stores.present += 1;
       continue;
     }
+    const slugTaken = await tx.store.findUnique({
+      where: { slug: store.slug },
+      select: { id: true },
+    });
+    if (slugTaken !== null) {
+      throw new SeedConflictError(
+        `Store ${slugTaken.id} has a sample store slug but another owner.`,
+      );
+    }
     // The end state of the approval transaction (DATA_MODEL.md section 4.1): an APPROVED
     // application, an APPROVED store, and the SELLER role (already set on the inserted user).
     const reviewedAt = new Date();
@@ -230,11 +248,29 @@ async function seed(tx: DbTransaction, data: SampleData): Promise<Counts> {
 
   for (const product of data.products) {
     const storeId = required(storeIds, product.storeKey);
-    const existing = await tx.product.findFirst({
+    // The fixed slug finds the sample product in any status, ARCHIVED included: an archived
+    // sample product keeps its slug, so inserting it again would break Product_slug_key.
+    const bySlug = await tx.product.findUnique({
+      where: { slug: product.slug },
+      select: { id: true, storeId: true, isSample: true },
+    });
+    if (bySlug !== null) {
+      if (!bySlug.isSample || bySlug.storeId !== storeId) {
+        throw new SeedConflictError(
+          `Product ${bySlug.id} has a sample slug but is not that sample product.`,
+        );
+      }
+      counts.products.present += 1;
+      continue;
+    }
+    // A live product of the sample store already uses the SKU (the partial unique index
+    // Product_storeId_sku_live_key would refuse a second one), for example one made by hand
+    // while signed in as the sample seller. It is left alone.
+    const bySku = await tx.product.findFirst({
       where: { storeId, sku: product.sku, status: { not: ProductStatus.ARCHIVED } },
       select: { id: true },
     });
-    if (existing !== null) {
+    if (bySku !== null) {
       counts.products.present += 1;
       continue;
     }
@@ -303,8 +339,15 @@ async function main(): Promise<number> {
     return SEED_EXIT.refused;
   }
 
+  // Hashing is slow on purpose (scrypt), so the account rows are built before the transaction
+  // opens. A row is only written for a user the transaction does not find.
+  const accountRows = new Map<string, SampleAccountRows>();
+  for (const sample of data.users) {
+    accountRows.set(sample.key, await buildSampleAccountRows(sample, SAMPLE_PASSWORD));
+  }
+
   try {
-    const counts = await db.$transaction((tx) => seed(tx, data), {
+    const counts = await db.$transaction((tx) => seed(tx, data, accountRows), {
       maxWait: 10_000,
       timeout: 60_000,
     });
