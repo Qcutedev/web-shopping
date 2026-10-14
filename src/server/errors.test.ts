@@ -387,6 +387,7 @@ describe("conflict requires a reason (CR-02; docs/API_CONTRACTS.md section 2.3)"
     "CATEGORY_HAS_PRODUCTS",
     "SELF_DEACTIVATION",
     "LAST_ADMIN",
+    "APPLICANT_INACTIVE",
     "APPLICANT_NOT_CUSTOMER",
   ];
 
