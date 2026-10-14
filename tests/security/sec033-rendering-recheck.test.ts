@@ -17,6 +17,8 @@ import { describe, expect, it } from "vitest";
 import { ProductCard } from "@/components/catalog/product-card";
 import { ProductDetailView } from "@/components/catalog/product-detail-view";
 import { ReviewsView } from "@/components/catalog/reviews-view";
+import { fill } from "@/i18n/fill";
+import { th } from "@/i18n/th";
 import type { ProductDetailDto, ProductListItemDto, ReviewDto } from "@/modules/catalog/schema";
 
 const ROOT = join(__dirname, "..", "..");
@@ -304,7 +306,8 @@ describe("SEC-033 rendering: reviews show no author name", () => {
 });
 
 // ---------------------------------------------------------------------------------------------
-// SEC-057: product titles are not isolated (open)
+// SEC-057: product titles. These three were flipped to `it` by frontend in 004c213 (only
+// `it.fails(` to `it(`); re-checked 2026-10-14: each fails on its assertion against 004c213^.
 // ---------------------------------------------------------------------------------------------
 
 describe("SEC-057: product titles are shown without isolation", () => {
@@ -319,5 +322,107 @@ describe("SEC-057: product titles are shown without isolation", () => {
   it("product detail: an image alt text wraps the title in FSI ... PDI", () => {
     const alt = /<img [^>]*alt="([^"]*)"/.exec(detailHtml())?.[1] ?? "";
     expect(alt.startsWith(`${FSI}${escaped(PRODUCT_TITLE)}${PDI}`)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// SEC-057 re-check (2026-10-14, commit 004c213): every gallery image, the attribute wrap with a
+// hostile title, and a static scan for new places that show a product title.
+// ---------------------------------------------------------------------------------------------
+
+const PDF = String.fromCodePoint(0x202c);
+const ISOLATE_OPENERS = new Set([0x2066, 0x2067, 0x2068]);
+
+/**
+ * Index of the PDI that closes the isolate opened at `start` (UAX #9 BD9: isolate initiators and
+ * PDIs nest; embeddings and overrides inside are closed by that PDI). -1 when it never closes.
+ */
+function isolateEnd(text: string, start: number): number {
+  const chars = [...text];
+  let depth = 0;
+  let offset = 0;
+  for (let index = 0; index < chars.length; index += 1) {
+    const code = chars[index]?.codePointAt(0) ?? 0;
+    if (offset >= start) {
+      if (ISOLATE_OPENERS.has(code)) depth += 1;
+      else if (code === 0x2069) {
+        depth -= 1;
+        if (depth === 0) return offset;
+      }
+    }
+    offset += chars[index]?.length ?? 1;
+  }
+  return -1;
+}
+
+const detailWith = (title: string, imageCount: number) =>
+  renderToStaticMarkup(
+    createElement(ProductDetailView, {
+      product: {
+        ...detail,
+        title,
+        images: Array.from({ length: imageCount }, (_, index) => ({
+          key: `k${index}`,
+          url: `/api/files/k${index}`,
+        })),
+      },
+    }),
+  );
+
+const altsOf = (html: string) =>
+  [...html.matchAll(/<img [^>]*alt="([^"]*)"/g)].map((match) => match[1] ?? "");
+
+/** The shop's own words after the title in image `index` of `count`, with no title. */
+const altSuffix = (index: number, count: number) =>
+  fill(th.catalog.product.imageAlt, { title: "", index, count });
+
+describe("SEC-057 re-check: product titles in attributes and new places", () => {
+  it("every gallery image alt wraps the title, and the isolate closes before the shop's words", () => {
+    const alts = altsOf(detailWith("Plain title", 3));
+    expect(alts).toHaveLength(3);
+    alts.forEach((alt, index) => {
+      expect(alt.startsWith(`${FSI}Plain title${PDI}`)).toBe(true);
+      expect(alt.slice(isolateEnd(alt, 0) + 1)).toBe(altSuffix(index + 1, 3));
+    });
+  });
+
+  // OPEN (SEC-057 attribute part): FSI ... PDI is text-level. A PDI inside the title closes the
+  // isolate early, and the override after it runs over the shop's words. `<bdi>` is not affected,
+  // because CSS isolation does not depend on characters inside the text.
+  it.fails("a title holding PDI then RLO cannot close the alt isolate early", () => {
+    const [alt] = altsOf(detailWith(`Title${PDI}${RLO}Admin`, 1));
+    const end = isolateEnd(alt ?? "", 0);
+    expect((alt ?? "").slice(end + 1)).toBe(altSuffix(1, 1));
+  });
+
+  it.fails("a title holding an unmatched isolate opener cannot swallow the shop's words", () => {
+    const [alt] = altsOf(detailWith(`Title${LRI}Admin`, 1));
+    const end = isolateEnd(alt ?? "", 0);
+    expect(end).toBeGreaterThan(0);
+    expect((alt ?? "").slice(end + 1)).toBe(altSuffix(1, 1));
+  });
+
+  it("a title holding RLO and PDF only stays inside the alt isolate (control case)", () => {
+    const [alt] = altsOf(detailWith(`Title${RLO}Admin${PDF}`, 1));
+    expect((alt ?? "").slice(isolateEnd(alt ?? "", 0) + 1)).toBe(altSuffix(1, 1));
+  });
+
+  it("every product title in storefront source is in UserName or an FSI ... PDI wrap", () => {
+    const files = [
+      ...filesUnder(join(ROOT, "src", "app"), (path) => /\.tsx?$/.test(path)),
+      ...filesUnder(join(ROOT, "src", "components"), (path) => /\.tsx?$/.test(path)),
+    ].filter((path) => !/\.test\.tsx?$/.test(path));
+    const bare: string[] = [];
+    for (const path of files) {
+      const source = readFileSync(path, "utf8");
+      const all = source.match(/\b(?:product|item|line)\.(?:title|productTitle)\b/g) ?? [];
+      const wrapped =
+        source.match(
+          /<UserName>\{\s*(?:product|item|line)\.(?:title|productTitle)\s*\}<\/UserName>|\$\{FSI\}\$\{(?:product|item|line)\.(?:title|productTitle)\}\$\{PDI\}/g,
+        ) ?? [];
+      if (all.length !== wrapped.length)
+        bare.push(`${posix(path)}: ${all.length - wrapped.length}`);
+    }
+    expect(bare).toEqual([]);
   });
 });
