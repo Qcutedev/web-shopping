@@ -13,6 +13,7 @@ import { z } from "zod";
 
 import type { RefusedLineDetail } from "@/modules/cart";
 import { MOCK_OUTCOMES } from "@/modules/payments";
+import { invalidHeader } from "@/server/errors";
 
 export type { RefusedLineDetail, RefusedLineReason } from "@/modules/cart";
 
@@ -68,6 +69,25 @@ export const idempotencyKeySchema = z
   .regex(IDEMPOTENCY_KEY_PATTERN, { error: "Must be a UUID in its 36-character hyphenated form." })
   .transform((value) => value.toLowerCase());
 export type IdempotencyKey = z.infer<typeof idempotencyKeySchema>;
+
+/**
+ * Reads the header at step 7 of the order of refusals (section 1.8). A missing or malformed value
+ * is `400 VALIDATION_ERROR` with one field error `{ path: "Idempotency-Key", code:
+ * "invalid_header" }` (section 1.1); the value itself is never echoed.
+ */
+export function parseIdempotencyKeyHeader(value: string | null): IdempotencyKey {
+  if (value === null) {
+    throw invalidHeader(IDEMPOTENCY_KEY_HEADER, "The Idempotency-Key header is required.");
+  }
+  const parsed = idempotencyKeySchema.safeParse(value);
+  if (!parsed.success) {
+    throw invalidHeader(
+      IDEMPOTENCY_KEY_HEADER,
+      "The Idempotency-Key header must be a UUID in its 36-character hyphenated form.",
+    );
+  }
+  return parsed.data;
+}
 
 // ---------------------------------------------------------------------------------------------
 // Refusal shape (section 5.5.3)

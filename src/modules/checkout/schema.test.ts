@@ -1,6 +1,34 @@
 import { describe, expect, it } from "vitest";
 
-import { checkoutBodySchema, idempotencyKeySchema } from "./schema";
+import { AppError } from "@/server/errors";
+
+import { checkoutBodySchema, idempotencyKeySchema, parseIdempotencyKeyHeader } from "./schema";
+
+describe("parseIdempotencyKeyHeader (API_CONTRACTS 1.1, 1.3)", () => {
+  it("returns the normalised key", () => {
+    expect(parseIdempotencyKeyHeader("0F8FAD5B-D9CB-469F-A165-70867728950E")).toBe(
+      "0f8fad5b-d9cb-469f-a165-70867728950e",
+    );
+  });
+
+  it.each([null, "", "nope", "secret-value-123"])(
+    "refuses %j with invalid_header on the header's path, never echoing it",
+    (value) => {
+      try {
+        parseIdempotencyKeyHeader(value);
+        throw new Error("expected a refusal");
+      } catch (error) {
+        expect(error).toBeInstanceOf(AppError);
+        const appError = error as AppError;
+        expect(appError.status).toBe(400);
+        expect(appError.details).toMatchObject({
+          fields: [{ path: "Idempotency-Key", code: "invalid_header" }],
+        });
+        if (value) expect(JSON.stringify(appError.toPublic())).not.toContain(value);
+      }
+    },
+  );
+});
 
 describe("checkoutBodySchema (API_CONTRACTS 5.5.1; D-031 point 3)", () => {
   it("accepts the address and the mock method, with SUCCESS as the default outcome", () => {
