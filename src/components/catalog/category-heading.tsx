@@ -1,4 +1,4 @@
-﻿import { notFound, unstable_rethrow } from "next/navigation";
+import { notFound, unstable_rethrow } from "next/navigation";
 import { UserName, USER_NAME_CONTAINER_CLASS } from "@/components/user-name";
 import { th } from "@/i18n/th";
 import { getCategory } from "@/modules/catalog";

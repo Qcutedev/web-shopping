@@ -229,7 +229,7 @@ describe("search page", () => {
   it("search term sits in bdi inside the heading (SEC-033)", async () => {
     catalog.listProducts.mockResolvedValue(pageOf([item(1)], 1));
     const { container } = await renderPage(
-      <SearchPage searchParams={searchParams({ q: "x‮y" })} />,
+      <SearchPage searchParams={searchParams({ q: `x${String.fromCodePoint(0x202e)}y` })} />,
     );
     const heading = container.querySelector("h1");
     expect(heading?.querySelector("bdi")).not.toBeNull();

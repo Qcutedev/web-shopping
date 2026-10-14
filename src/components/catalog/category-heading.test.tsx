@@ -1,4 +1,4 @@
-﻿import { render } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { th } from "@/i18n/th";
 
