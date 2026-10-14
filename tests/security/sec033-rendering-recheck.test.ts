@@ -426,3 +426,99 @@ describe("SEC-057 re-check: product titles in attributes and new places", () => 
     expect(bare).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// SEC-057 second re-check (2026-10-14, commit b411e34): `stripIsolateControls` removes U+2066 to
+// U+2069 from the title before the FSI ... PDI wrap. Bypass search: every isolate control and
+// mixes of them, paragraph separators, and a guard that every attribute wrap strips first.
+// ---------------------------------------------------------------------------------------------
+
+const LRE = String.fromCodePoint(0x202a);
+const RLE = String.fromCodePoint(0x202b);
+const LRO = String.fromCodePoint(0x202d);
+const RLI = String.fromCodePoint(0x2067);
+
+/**
+ * UAX #9 rule P1: text is split into paragraphs at every character of Bidi_Class B, and no
+ * isolate, embedding, or override crosses that split. These are all the B characters.
+ */
+const PARAGRAPH_SEPARATORS = [0x0a, 0x0d, 0x1c, 0x1d, 0x1e, 0x85, 0x2029];
+
+/** As `isolateEnd`, but -1 when a paragraph separator comes before the closing PDI (rule P1). */
+function isolateEndInParagraph(text: string, start: number): number {
+  const end = isolateEnd(text, start);
+  if (end < 0) return -1;
+  const inside = [...text.slice(start, end)];
+  return inside.some((char) => PARAGRAPH_SEPARATORS.includes(char.codePointAt(0) ?? 0)) ? -1 : end;
+}
+
+describe("SEC-057 second re-check: the alt wrap after stripIsolateControls (b411e34)", () => {
+  const hostileTitles: [string, string][] = [
+    ["LRI alone", `Title${LRI}Admin`],
+    ["RLI alone", `Title${RLI}Admin`],
+    ["FSI alone", `Title${FSI}Admin`],
+    ["PDI then RLO", `Title${PDI}${RLO}Admin`],
+    ["two PDIs then RLO", `Title${PDI}${PDI}${RLO}Admin`],
+    ["a closed isolate then a stray PDI and RLO", `${RLI}x${PDI}${PDI}${RLO}Admin`],
+    ["a title that is itself an FSI ... PDI wrap", `${FSI}Title${PDI}${RLO}Admin`],
+    ["three openers, never closed", `${LRI}${RLI}${FSI}Admin`],
+    ["unclosed embeddings and overrides", `${LRE}${RLE}${LRO}${RLO}Admin`],
+  ];
+
+  it.each(hostileTitles)("%s: the isolate closes right before the shop's words", (_, title) => {
+    for (const count of [1, 3]) {
+      const alts = altsOf(detailWith(title, count));
+      expect(alts).toHaveLength(count);
+      alts.forEach((alt, index) => {
+        const end = isolateEnd(alt, 0);
+        expect(end).toBeGreaterThan(0);
+        expect(alt.slice(end + 1)).toBe(altSuffix(index + 1, count));
+      });
+    }
+  });
+
+  it("no isolate control from the title is left in the alt text, only the wrapper's two", () => {
+    const all = String.fromCodePoint(0x2066, 0x2067, 0x2068, 0x2069);
+    const [alt] = altsOf(detailWith(`a${all}b${all}c`, 1));
+    const controls = [...(alt ?? "")].filter((char) => {
+      const code = char.codePointAt(0) ?? 0;
+      return code >= 0x2066 && code <= 0x2069;
+    });
+    expect(controls).toEqual([FSI, PDI]);
+  });
+
+  // OPEN (SEC-057, found at this re-check): a paragraph separator in the title ends the FSI
+  // isolate (UAX #9 P1). An override after it starts a new paragraph in which the wrapper's PDI
+  // matches nothing, so the override runs over "รูปที่ 1 จาก 1". This models UAX #9; it was not
+  // checked in a browser (CSS collapses a line feed to a space; U+2029 is not collapsed).
+  it.fails("a paragraph separator in the title cannot end the alt isolate", () => {
+    const escaping = PARAGRAPH_SEPARATORS.filter((code) => {
+      const [alt] = altsOf(detailWith(`Title${String.fromCodePoint(code)}${RLO}Admin`, 1));
+      const end = isolateEndInParagraph(alt ?? "", 0);
+      return end < 0 || (alt ?? "").slice(end + 1) !== altSuffix(1, 1);
+    });
+    expect(escaping.map((code) => `U+${code.toString(16).toUpperCase().padStart(4, "0")}`)).toEqual(
+      [],
+    );
+  });
+
+  it("every FSI ... PDI wrap in storefront source strips isolate controls first", () => {
+    const files = [
+      ...filesUnder(join(ROOT, "src", "app"), (path) => /\.tsx?$/.test(path)),
+      ...filesUnder(join(ROOT, "src", "components"), (path) => /\.tsx?$/.test(path)),
+    ].filter((path) => !/\.test\.tsx?$/.test(path));
+    const unstripped: string[] = [];
+    let wraps = 0;
+    for (const path of files) {
+      const source = readFileSync(path, "utf8");
+      for (const match of source.matchAll(/\$\{FSI\}\$\{(.*?)\}\$\{PDI\}/g)) {
+        wraps += 1;
+        if (!/^stripIsolateControls\([^)]*\)$/.test(match[1] ?? "")) {
+          unstripped.push(`${posix(path)}: ${match[0]}`);
+        }
+      }
+    }
+    expect(wraps).toBeGreaterThan(0);
+    expect(unstripped).toEqual([]);
+  });
+});
