@@ -130,6 +130,7 @@ const searchParams = (value: Search = {}) => Promise.resolve(value);
 
 beforeEach(() => {
   vi.resetAllMocks();
+  catalog.getCategory.mockResolvedValue(categories[0]);
   catalog.listCategories.mockResolvedValue({ items: categories, page: 1, pageSize: 50, total: 2 });
   catalog.listProductReviews.mockResolvedValue({ items: [], page: 1, pageSize: 10, total: 0 });
 });

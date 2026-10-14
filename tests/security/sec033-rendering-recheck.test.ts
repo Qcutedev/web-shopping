@@ -491,7 +491,7 @@ describe("SEC-057 second re-check: the alt wrap after stripIsolateControls (b411
   // isolate (UAX #9 P1). An override after it starts a new paragraph in which the wrapper's PDI
   // matches nothing, so the override runs over "รูปที่ 1 จาก 1". This models UAX #9; it was not
   // checked in a browser (CSS collapses a line feed to a space; U+2029 is not collapsed).
-  it.fails("a paragraph separator in the title cannot end the alt isolate", () => {
+  it("a paragraph separator in the title cannot end the alt isolate", () => {
     const escaping = PARAGRAPH_SEPARATORS.filter((code) => {
       const [alt] = altsOf(detailWith(`Title${String.fromCodePoint(code)}${RLO}Admin`, 1));
       const end = isolateEndInParagraph(alt ?? "", 0);

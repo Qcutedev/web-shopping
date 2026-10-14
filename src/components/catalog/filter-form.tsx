@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { FilterErrorSummary } from "@/components/catalog/filter-error-summary";
 import { Button } from "@/components/ui/button";
 import { InputField } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/select";
@@ -74,16 +75,7 @@ export function FilterForm({
       {q !== undefined && q !== "" ? <input type="hidden" name="q" value={q} /> : null}
       {hiddenCategory ? <input type="hidden" name="category" value={category ?? ""} /> : null}
       {sort !== DEFAULT_PRODUCT_SORT ? <input type="hidden" name="sort" value={sort} /> : null}
-      {summary.length > 0 ? (
-        <div role="alert" className="text-danger type-body-sm">
-          <p className="font-medium">{th.catalog.filter.errorSummary}</p>
-          <ul className="list-disc ps-5">
-            {summary.map((text) => (
-              <li key={text}>{text}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
+      {summary.length > 0 ? <FilterErrorSummary messages={summary} /> : null}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {hasCategories ? (
           <SelectField
@@ -93,7 +85,9 @@ export function FilterForm({
             defaultValue={category ?? ""}
           >
             <option value="">{th.catalog.filter.categoryAll}</option>
-            {categoryMissing ? <option value={category}>{category}</option> : null}
+            {categoryMissing ? (
+              <option value={category}>{th.catalog.filter.categoryOther}</option>
+            ) : null}
             {categories.map((item) => (
               <option key={item.id} value={item.slug}>
                 {item.name}

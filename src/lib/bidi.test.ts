@@ -7,6 +7,12 @@ describe("stripIsolateControls", () => {
     expect(stripIsolateControls(`a${isolates}b`)).toBe("ab");
   });
 
+  it("replaces every Bidi_Class B character with a space", () => {
+    const b = String.fromCodePoint(0x0a, 0x0d, 0x1c, 0x1d, 0x1e, 0x85, 0x2029);
+    expect(stripIsolateControls(`a${b}b`)).toBe("a b");
+    expect(stripIsolateControls(`a${String.fromCodePoint(0x2029)}`)).toBe("a ");
+  });
+
   it("keeps overrides, Thai, and Latin text", () => {
     const rlo = String.fromCodePoint(0x202e);
     expect(stripIsolateControls(`เสื้อยืด${rlo}Basic 100%`)).toBe(`เสื้อยืด${rlo}Basic 100%`);

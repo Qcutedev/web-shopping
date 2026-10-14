@@ -76,6 +76,8 @@ describe("FilterForm", () => {
     );
     const select = screen.getByLabelText(th.catalog.filter.category) as HTMLSelectElement;
     expect(select.value).toBe("stale");
+    expect(screen.getByRole("option", { name: th.catalog.filter.categoryOther })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: "stale" })).toBeNull();
     expect(container.querySelectorAll('input[name="category"]')).toHaveLength(0);
   });
 
@@ -92,6 +94,11 @@ describe("FilterForm", () => {
     const alert = screen.getByRole("alert");
     expect(alert.textContent).toContain(th.catalog.filter.errorSummary);
     expect(alert.textContent).toContain(th.catalog.filter.minInvalid);
+  });
+
+  it("moves focus to the alert summary so it is announced after a GET reload", () => {
+    render(<FilterForm {...base} errors={["min-invalid"]} />);
+    expect(document.activeElement).toBe(screen.getByRole("alert"));
   });
 
   it("shows no alert without errors", () => {
