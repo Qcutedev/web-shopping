@@ -217,6 +217,25 @@ These run against the real database with real parallel connections and committed
 | CC-13 | A seller edits moderated content while an admin approves with the revision seen before the edit | Either the approval is applied first and the edit then returns the product to `PENDING`, or the edit is applied first and the approval is `409 CONFLICT`, reason `STALE_REVISION`. The product is never `APPROVED` with content the admin was not shown | DATA_MODEL section 4.2, D-024 |
 | CC-14 | Another customer buys stock between a refused checkout and its confirming submission, and in parallel with the confirming submission | No order holds more than the stock that was left; stock is never negative; a submission that cannot be met is refused again with the line lowered again; at most one order per cart | D-029 point 2, API_CONTRACTS section 5.5.3 |
 
+### Coverage marks (checkout and cart, T-033)
+
+Marks reflect tests that exist under `tests/integration/` and were read, not just named. All use the real PostgreSQL test database. Note: the `(CC-nn)` labels inside `races.test.ts` describe blocks are older local labels and do not match the ids in the table above; the ids below are the ones that count.
+
+| Id | Mark | Tests | Not covered |
+| --- | --- | --- | --- |
+| CC-01 | Covered | `tests/integration/checkout/races.test.ts` "last item": 10 customers on stock 1 give one 201, nine `INSUFFICIENT_STOCK` 409, stock 0, exactly one order, seller order, item, and payment row, losers keep cart lines; "stock 5, eight customers want 2 each": two orders, stock 1. Also `tests/integration/checkout/concurrency.test.ts` (two customers, one 201 and one 409, stock 0) | Repeat count is one run per test, not a repeated loop |
+| CC-02 | Covered | `races.test.ts` "the same key sent twice in sequence": 201 then 200, same order id, one payment, stock taken once; `endpoints.test.ts` "a repeat with the same key returns the same order with 200"; same key from two users is two orders | None known |
+| CC-03 | Covered | `races.test.ts` "eight parallel requests with one key": one 201, seven 200, one order id, one payment, stock taken once; `concurrency.test.ts` "two simultaneous requests with one key" | None known |
+| CC-04 | Not covered | Parallel same-key tests use stock far above the cart quantity | Same key in parallel with stock equal to the cart quantity (both responses are the order, none is a conflict, stock 0) |
+| CC-05 | Partly covered | `races.test.ts` "parallel requests with different keys and one cart": four requests, exactly one 201, one order, stock taken once | Asserts only `status >= 400` for the others, not `409 CART_EMPTY`; one payment row is not asserted separately; the sequential variant is not written |
+| CC-06 | Not covered | None in checkout/cart; decline restores stock once is in `endpoints.test.ts` "a simulated decline" | Seller and admin cancel after a failed payment, in sequence and in parallel (needs the seller-order cancel endpoint) |
+| CC-07 | Mostly covered | `endpoints.test.ts` "a provider that does not answer leaves PENDING": order exists with stock taken, younger order left alone, sweep after 16 minutes fails it with `TIMEOUT`, stock restored, items back in cart (capped merge), second sweep restores nothing; sweep vs late success ("paid first", "swept first", six-order race with a second sweep), sweep vs decline; `review-fixes.test.ts` repeat with the key returns the PENDING order; `races.test.ts` "payment-timeout sweep racing checkout" (two cases) | Replay with the same key on the sweep-timeout order is not asserted to avoid a second charge (provider call count is not checked); two sweeps in parallel are not run (sequential second sweep only) |
+| CC-12 | Not covered | `tests/integration/cart/checkout-race.test.ts` covers cart edits (add, quantity change, delete) racing a checkout, which is a different case | Sweep or decline return racing `POST /cart/items` for the same product: final line equals a serial outcome, at most 99 and at most stock, return columns written once |
+
+Cart concurrency tests that exist and are not CC rows: `tests/integration/cart/concurrency.test.ts` (parallel adds sum, cap 99 never exceeded, PATCH vs DELETE, hard-deleted product gives 404 not 500, rollback leaves no cart row).
+
+Not yet written or not marked here: CC-08, CC-09, CC-10, CC-11, CC-13, CC-14.
+
 ## End-to-end journeys
 
 1. Customer registers and logs in.
