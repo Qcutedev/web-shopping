@@ -153,8 +153,10 @@ export async function addCartItem(
       const existing = await findLineForProduct(tx, cartId, product.id);
       const requestedQuantity = (existing?.quantity ?? 0) + input.quantity;
       if (isOwnStore(actor, product.storeId)) {
+        // Always null on an add (API_CONTRACTS 5.4, CR-T031-03): the request names a product, not
+        // a line, even when the actor still holds a line for it from before the store existed.
         throw ownStoreProduct({
-          cartItemId: existing?.id ?? null,
+          cartItemId: null,
           productId: product.id,
           requestedQuantity: input.quantity,
         });
