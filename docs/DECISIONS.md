@@ -316,6 +316,10 @@ Owner, 2026-10-14, option (a) of the four in `docs/SECURITY.md` SEC-050.
 
 `sign-in-account` gets a larger share of the limiter's total window budget, taken from the signed-in rules; the total (`MAX_TOTAL_WINDOWS`) does not change. The new share must make filling the rule cost clearly more than 33 new emails per second, and the signed-in rules must still hold their own limits. Built by backend-api; security re-checks.
 
+### D-039 Owner ruling on CR-T021-01 and CR-T021-04 (2026-10-14)
+
+Owner answers: (1) build the GET filter form (price in baht converted to satang server side, category select on search) now; (2) a missing product, store, or category may answer HTTP 200 with the "not found" page, because `notFound()` runs inside Suspense (Next docs). Known cost: crawlers may treat these pages as soft-404; revisit before public launch. E2E must expect 200 plus the not-found content, not 404.
+
 ## Pending decisions for the user
 
 Undecided, none blocking the MVP: marketplace name and logo, real product photos, hosting provider for staging and production, production object storage, email provider, payment gateway.
