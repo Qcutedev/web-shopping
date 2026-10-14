@@ -293,6 +293,22 @@ describe("addCartItem", () => {
     expect(repo.setLineQuantity).not.toHaveBeenCalled();
   });
 
+  it("sums the stored quantity, not the lowered one a read shows (CR-T031-05, documented)", async () => {
+    // Stored 95, stock 2: GET /cart shows 2, but an add of 5 asks for 100 and is refused.
+    repo.findVisibleProduct.mockResolvedValue({ ...PRODUCT, stock: 2 });
+    repo.findLineForProduct.mockResolvedValue({
+      id: "line_1",
+      productId: "product_1",
+      quantity: 95,
+    });
+    const error = await refusal(addCartItem(CUSTOMER, { productId: "product_1", quantity: 5 }));
+    expect(error.toPublic()).toMatchObject({
+      code: "VALIDATION_ERROR",
+      details: { fields: [{ path: "quantity", code: "too_big" }] },
+    });
+    expect(repo.setLineQuantity).not.toHaveBeenCalled();
+  });
+
   it("accepts an add that brings the line to exactly 99", async () => {
     repo.findVisibleProduct.mockResolvedValue({ ...PRODUCT, stock: 1_000 });
     repo.findLineForProduct.mockResolvedValue({
