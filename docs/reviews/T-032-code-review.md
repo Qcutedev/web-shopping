@@ -27,6 +27,10 @@ Verdict: **APPROVED WITH FOLLOW-UPS.** Nothing blocking. T-032 stays IMPLEMENTED
 | CR-T032-11 | Low | `tests/integration/checkout/endpoints.test.ts:233, :442` | "no cart" case untested; weak assertion; missing cases (attempt exhaustion and retry success, capped cart return via checkout, paid-vs-sweep race, decline while second checkout holds lock) | add | qa (T-033) |
 | CR-T032-12 | Low | `checkout/service.ts:186-188` | per-line `findPrimaryUploadId` and `takeStock` sequential inside locked tx; grows with cart (SEC-053 open) | one `DISTINCT ON` query; line cap | backend-api |
 
+## Follow-up status
+
+- CR-T032-09 resolved 2026-10-14 (documentation): `docs/API_CONTRACTS.md` 5.5.1 now says nothing refuses `mockOutcome` as built (SEC-056 open); 5.5.5 states the integration runs and that the sweep is wired in `src/instrumentation.ts` (`35903a1`).
+
 ## Checks re-run by reviewer
 
 `pnpm typecheck` 0; `pnpm format:check` 0; `pnpm lint` exit 1 (one warning `tests/integration/cart/support.ts:111`, qa, T-031); 14 T-032 unit and route files 303 passed; `pnpm test` 105 files, 3012 passed, 1 failed (review gate, by design), 4 expected fail; `tests/integration/checkout` 18 of 18 passed.
