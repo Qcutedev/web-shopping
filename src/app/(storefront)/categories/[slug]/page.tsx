@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { CatalogInvalidFilter } from "@/components/catalog/catalog-load-error";
 import { CategoryChips, CategoryChipsSkeleton } from "@/components/catalog/category-chips";
-import { listHref } from "@/components/catalog/list-href";
+import { hrefParamsOf, listHref } from "@/components/catalog/list-href";
 import { parseListQuery } from "@/components/catalog/list-query";
 import { ProductGridSkeleton } from "@/components/catalog/product-grid";
 import { ProductListSection } from "@/components/catalog/product-list-section";
@@ -46,13 +46,17 @@ async function CategoryContent({
   if (query === null) return <CatalogInvalidFilter resetHref={categoryHref(slug)} />;
 
   const base = categoryHref(slug);
-  const sortParams = { sort: query.sort };
+  // The category is in the path; every other filter rides in the query string.
+  const sortParams = hrefParamsOf(query, { category: undefined });
   return (
     <>
       <Suspense fallback={<CategoryChipsSkeleton />}>
         <CategoryChips currentSlug={slug} />
       </Suspense>
-      <SortLinks current={query.sort} hrefForSort={(sort) => listHref(base, { sort }, 1)} />
+      <SortLinks
+        current={query.sort}
+        hrefForSort={(sort) => listHref(base, { ...sortParams, sort }, 1)}
+      />
       <ProductListSection
         load={() => listProducts(query)}
         hrefForPage={(page) => listHref(base, sortParams, page)}

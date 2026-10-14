@@ -99,8 +99,6 @@ export const th = {
     },
     categories: {
       label: "หมวดหมู่",
-      all: "ทั้งหมด",
-      empty: "ยังไม่มีหมวดหมู่",
     },
     sort: {
       label: "เรียงตาม",
@@ -110,8 +108,9 @@ export const th = {
     },
     search: {
       title: "ค้นหาสินค้า",
-      // {q} is the text the visitor typed.
-      resultsFor: "ผลการค้นหา “{q}”",
+      // The visitor's text sits between these two, isolated for bidirectional text.
+      resultsForPrefix: "ผลการค้นหา “",
+      resultsForSuffix: "”",
       // {total} is the number of products found.
       count: "พบสินค้า {total} รายการ",
       emptyTitle: "ไม่พบสินค้าที่ตรงกับการค้นหา",
@@ -120,15 +119,15 @@ export const th = {
       allTitle: "สินค้าทั้งหมด",
     },
     category: {
-      // {name} is the category name.
-      title: "หมวดหมู่ {name}",
       emptyTitle: "ยังไม่มีสินค้าในหมวดหมู่นี้",
       emptyDescription: "ลองดูหมวดหมู่อื่น หรือสินค้าทั้งหมดของเรา",
+    },
+    list: {
+      // Page number is past the last page of a list.
       pageEmptyTitle: "ไม่มีสินค้าในหน้านี้",
       pageEmptyAction: "กลับไปหน้าแรกของรายการ",
     },
     store: {
-      title: "ร้านค้า",
       emptyTitle: "ร้านนี้ยังไม่มีสินค้า",
       emptyDescription: "กรุณากลับมาดูใหม่อีกครั้งภายหลัง",
     },

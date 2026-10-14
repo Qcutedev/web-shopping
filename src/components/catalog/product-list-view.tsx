@@ -1,5 +1,4 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
 import { ProductGrid } from "@/components/catalog/product-grid";
 import { buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -25,13 +24,11 @@ export function ProductListView({
   hrefForPage,
   empty,
   showCount = false,
-  heading,
 }: {
   data: Page<ProductListItemDto>;
   hrefForPage: (page: number) => string;
   empty: ListEmpty;
   showCount?: boolean;
-  heading?: ReactNode;
 }) {
   if (data.total === 0) {
     return (
@@ -49,10 +46,10 @@ export function ProductListView({
   if (data.items.length === 0) {
     return (
       <EmptyState
-        title={th.catalog.category.pageEmptyTitle}
+        title={th.catalog.list.pageEmptyTitle}
         action={
           <Link href={hrefForPage(1)} className={buttonVariants({ variant: "primary" })}>
-            {th.catalog.category.pageEmptyAction}
+            {th.catalog.list.pageEmptyAction}
           </Link>
         }
       />
@@ -61,7 +58,6 @@ export function ProductListView({
   const totalPages = Math.ceil(data.total / data.pageSize);
   return (
     <div className="flex flex-col gap-6">
-      {heading}
       {showCount ? (
         <p className="type-small text-foreground-secondary" role="status">
           {fill(th.catalog.search.count, { total: data.total })}

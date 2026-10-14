@@ -98,9 +98,9 @@ describe("ProductListView", () => {
 
   it("past the last page: links back to page 1", () => {
     render(<ProductListView data={pageOf([], 5, 9)} hrefForPage={href} empty={empty} />);
-    expect(screen.getByText(th.catalog.category.pageEmptyTitle)).toBeTruthy();
+    expect(screen.getByText(th.catalog.list.pageEmptyTitle)).toBeTruthy();
     expect(
-      screen.getByRole("link", { name: th.catalog.category.pageEmptyAction }).getAttribute("href"),
+      screen.getByRole("link", { name: th.catalog.list.pageEmptyAction }).getAttribute("href"),
     ).toBe("/search?page=1");
   });
 });
@@ -167,7 +167,7 @@ describe("ProductDetailView", () => {
   };
 
   it("shows h1, price, labels, store link, and the rating summary", () => {
-    render(<ProductDetailView product={detail} />);
+    const { container } = render(<ProductDetailView product={detail} />);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("เสื้อยืดผ้าฝ้าย");
     expect(screen.getByText(formatSatang(129900))).toBeTruthy();
     expect(screen.getAllByText(th.notice.sampleData).length).toBeGreaterThan(0);
@@ -175,6 +175,7 @@ describe("ProductDetailView", () => {
       "/stores/shop-a",
     );
     expect(screen.getByText("คะแนน 4.5 จาก 5 (2 รีวิว)")).toBeTruthy();
+    expect(container.querySelector("a bdi")?.textContent).toBe("ร้านตัวอย่าง");
     expect(screen.getByRole("img").getAttribute("alt")).toBe("เสื้อยืดผ้าฝ้าย รูปที่ 1 จาก 1");
   });
 

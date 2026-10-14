@@ -1,6 +1,5 @@
 import { notFound, unstable_rethrow } from "next/navigation";
 import { connection } from "next/server";
-import type { ReactNode } from "react";
 import { CatalogLoadError } from "@/components/catalog/catalog-load-error";
 import { type ListEmpty, ProductListView } from "@/components/catalog/product-list-view";
 import { isAppError } from "@/server/errors";
@@ -20,14 +19,12 @@ export async function ProductListSection({
   retryHref,
   empty,
   showCount,
-  heading,
 }: {
   load: () => Promise<Page<ProductListItemDto>>;
   hrefForPage: (page: number) => string;
   retryHref: string;
   empty: ListEmpty;
   showCount?: boolean;
-  heading?: ReactNode;
 }) {
   await connection();
   let data: Page<ProductListItemDto>;
@@ -39,12 +36,6 @@ export async function ProductListSection({
     return <CatalogLoadError retryHref={retryHref} />;
   }
   return (
-    <ProductListView
-      data={data}
-      hrefForPage={hrefForPage}
-      empty={empty}
-      showCount={showCount}
-      heading={heading}
-    />
+    <ProductListView data={data} hrefForPage={hrefForPage} empty={empty} showCount={showCount} />
   );
 }
