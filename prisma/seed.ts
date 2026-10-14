@@ -215,6 +215,16 @@ async function seed(
         `Store ${slugTaken.id} has a sample store slug but another owner.`,
       );
     }
+    // Store_nameKey_key would refuse the insert (DATA_MODEL.md section 21.7). The key is computed
+    // by the database function, so the comparison is made there too.
+    const nameTaken = await tx.$queryRaw<{ id: string }[]>`
+      SELECT "id" FROM "Store" WHERE "nameKey" = "store_name_key"(${store.name}) LIMIT 1`;
+    const nameHolder = nameTaken[0];
+    if (nameHolder !== undefined) {
+      throw new SeedConflictError(
+        `Store ${nameHolder.id} has a sample store name (after normalisation) but another owner.`,
+      );
+    }
     // The end state of the approval transaction (DATA_MODEL.md section 4.1): an APPROVED
     // application, an APPROVED store, and the SELLER role (already set on the inserted user).
     const reviewedAt = new Date();
