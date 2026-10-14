@@ -1,18 +1,20 @@
-/**
+﻿/**
  * T-032: `POST /api/v1/checkout`, `GET /api/v1/orders`, `GET /api/v1/orders/{id}` against the
  * worker's real test database (docs/API_CONTRACTS.md section 5.5; REQ-C-11 to REQ-C-13; BR-04,
  * BR-07 to BR-09, BR-15, BR-16, BR-20, BR-22, BR-30, BR-32, BR-39). Each case makes its own users
  * and products, because the database is emptied once per file, not per case. The race cases of
  * T-033 belong to qa; two basic ones are in concurrency.test.ts.
  */
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { checkout } from "@/modules/checkout";
-import { failOverdueOrders } from "@/modules/orders";
+import { checkout, CHECKOUT_ATTEMPTS } from "@/modules/checkout";
+import { takeStock } from "@/modules/checkout/repository";
+import { completeOrderPayment, failOrderPayment, failOverdueOrders } from "@/modules/orders";
 import type { PaymentProvider } from "@/modules/payments";
 import { db } from "@/server/db";
 
 import {
+  createAddress,
   createCart,
   createCartItem,
   createProduct,
@@ -24,6 +26,15 @@ import { diffSnapshots, snapshotDatabase } from "../../helpers/snapshot";
 import { resetProcessRateLimiter, stubAuthEnvironment } from "../auth/support";
 import { getOrder, listOrders, newKey, postCheckout, readyToBuy, signedIn } from "./support";
 
+/**
+ * Fault-injection seam, used only by the cases that say so: `takeStock` runs the real statement
+ * unless a case queues a one-time replacement. The database stays real.
+ */
+vi.mock("@/modules/checkout/repository", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/modules/checkout/repository")>();
+  return { ...actual, takeStock: vi.fn(actual.takeStock) };
+});
+
 beforeAll(() => {
   stubAuthEnvironment();
 });
@@ -31,6 +42,37 @@ beforeAll(() => {
 beforeEach(() => {
   resetProcessRateLimiter();
 });
+
+afterEach(() => {
+  // Back to the real implementation, queued one-time replacements dropped.
+  vi.mocked(takeStock).mockReset();
+});
+
+function actorOf(user: { userId: string }) {
+  return { userId: user.userId, role: "CUSTOMER", storeId: null, storeStatus: null } as const;
+}
+
+/** A promise settled from outside, to hold a step of a concurrent flow. */
+function gate(): { promise: Promise<void>; open: () => void } {
+  let open: () => void = () => undefined;
+  const promise = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { promise, open };
+}
+
+/** Whether `promise` settles within `ms`; it is not consumed. */
+async function settlesWithin(promise: Promise<unknown>, ms: number): Promise<boolean> {
+  const pending = Symbol("pending");
+  const result = await Promise.race([
+    promise.then(
+      () => "settled",
+      () => "settled",
+    ),
+    new Promise((resolve) => setTimeout(() => resolve(pending), ms)),
+  ]);
+  return result !== pending;
+}
 
 async function stockOf(productId: string): Promise<number> {
   const row = await db.product.findUniqueOrThrow({
@@ -51,8 +93,8 @@ async function cartLines(userId: string) {
 describe("POST /api/v1/checkout: success", () => {
   it("places one order with one seller order per store, at database prices, and pays it (mock)", async () => {
     const user = await signedIn();
-    const storeA = await createStore({ name: "ร้านเอ" });
-    const storeB = await createStore({ name: "ร้านบี" });
+    const storeA = await createStore({ name: "à¸£à¹‰à¸²à¸™à¹€à¸­" });
+    const storeB = await createStore({ name: "à¸£à¹‰à¸²à¸™à¸šà¸µ" });
     const a = await createProduct({ storeId: storeA.id, priceSatang: 25_900, stock: 5 });
     const b = await createProduct({ storeId: storeB.id, priceSatang: 10_000, stock: 2 });
     const { addressId } = await readyToBuy(user, [
@@ -71,7 +113,10 @@ describe("POST /api/v1/checkout: success", () => {
     expect(order.shippingTotalSatang).toBe(8_000);
     expect(order.grandTotalSatang).toBe(95_700);
     expect(order.cartReturn).toBeNull();
-    expect(order.sellerOrders.map((part) => part.storeName).sort()).toEqual(["ร้านบี", "ร้านเอ"]);
+    expect(order.sellerOrders.map((part) => part.storeName).sort()).toEqual([
+      "à¸£à¹‰à¸²à¸™à¸šà¸µ",
+      "à¸£à¹‰à¸²à¸™à¹€à¸­",
+    ]);
     for (const part of order.sellerOrders) {
       expect(part).toMatchObject({
         fulfilmentStatus: "PENDING",
@@ -102,10 +147,10 @@ describe("POST /api/v1/checkout: success", () => {
 
   it("copies title, SKU, price, picture, store name, and address; later edits change nothing (BR-09)", async () => {
     const user = await signedIn();
-    const store = await createStore({ name: "ชื่อเดิม" });
+    const store = await createStore({ name: "à¸Šà¸·à¹ˆà¸­à¹€à¸”à¸´à¸¡" });
     const product = await createProduct({
       storeId: store.id,
-      title: "ชื่อสินค้าเดิม",
+      title: "à¸Šà¸·à¹ˆà¸­à¸ªà¸´à¸™à¸„à¹‰à¸²à¹€à¸”à¸´à¸¡",
       sku: "OLD-1",
       priceSatang: 5_000,
     });
@@ -118,24 +163,27 @@ describe("POST /api/v1/checkout: success", () => {
 
     await db.product.update({
       where: { id: product.id },
-      data: { title: "ใหม่", sku: "NEW-1", priceSatang: 9_900 },
+      data: { title: "à¹ƒà¸«à¸¡à¹ˆ", sku: "NEW-1", priceSatang: 9_900 },
     });
-    await db.store.update({ where: { id: store.id }, data: { name: "ชื่อใหม่" } });
-    await db.address.update({ where: { id: addressId }, data: { line1: "ที่อยู่ใหม่" } });
+    await db.store.update({ where: { id: store.id }, data: { name: "à¸Šà¸·à¹ˆà¸­à¹ƒà¸«à¸¡à¹ˆ" } });
+    await db.address.update({
+      where: { id: addressId },
+      data: { line1: "à¸—à¸µà¹ˆà¸­à¸¢à¸¹à¹ˆà¹ƒà¸«à¸¡à¹ˆ" },
+    });
 
     const read = await getOrder(user, placed.body.data.id);
     expect(read.status).toBe(200);
     const part = read.body.data.sellerOrders[0];
-    expect(part?.storeName).toBe("ชื่อเดิม");
+    expect(part?.storeName).toBe("à¸Šà¸·à¹ˆà¸­à¹€à¸”à¸´à¸¡");
     expect(part?.items[0]).toMatchObject({
-      productTitle: "ชื่อสินค้าเดิม",
+      productTitle: "à¸Šà¸·à¹ˆà¸­à¸ªà¸´à¸™à¸„à¹‰à¸²à¹€à¸”à¸´à¸¡",
       productSku: "OLD-1",
       unitPriceSatang: 5_000,
       quantity: 2,
       lineTotalSatang: 10_000,
       image: { key: upload.storageKey },
     });
-    expect(read.body.data.shippingAddress.line1).not.toBe("ที่อยู่ใหม่");
+    expect(read.body.data.shippingAddress.line1).not.toBe("à¸—à¸µà¹ˆà¸­à¸¢à¸¹à¹ˆà¹ƒà¸«à¸¡à¹ˆ");
   });
 });
 
@@ -230,12 +278,45 @@ describe("POST /api/v1/checkout: refusals that change nothing", () => {
     expect(await db.order.count({ where: { userId: user.userId } })).toBe(0);
   });
 
-  it("no cart, and an empty cart, are 409 CART_EMPTY", async () => {
+  it("an empty cart is 409 CART_EMPTY with no details; nothing stored", async () => {
     const user = await signedIn();
     const { addressId } = await readyToBuy(user, []);
+    const before = await snapshotDatabase({ excludeTables: ["Session"] });
     const response = await postCheckout(user, { addressId, paymentMethod: "MOCK" });
     expect(response.status).toBe(409);
-    expect(response.body.error).toMatchObject({ code: "CART_EMPTY", details: {} });
+    expect(response.body.error.code).toBe("CART_EMPTY");
+    expect(response.body.error.details).toEqual({});
+    expect(diffSnapshots(before, await snapshotDatabase({ excludeTables: ["Session"] }))).toEqual(
+      [],
+    );
+  });
+
+  it("a user who never had a cart row is 409 CART_EMPTY; no cart row and no order is created", async () => {
+    const user = await signedIn();
+    const address = await createAddress({ userId: user.userId });
+    expect(await db.cart.count({ where: { userId: user.userId } })).toBe(0);
+    const before = await snapshotDatabase({ excludeTables: ["Session"] });
+    const response = await postCheckout(user, {
+      addressId: address.id,
+      paymentMethod: "MOCK",
+    });
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe("CART_EMPTY");
+    expect(response.body.error.details).toEqual({});
+    expect(await db.cart.count({ where: { userId: user.userId } })).toBe(0);
+    expect(await db.order.count({ where: { userId: user.userId } })).toBe(0);
+    expect(diffSnapshots(before, await snapshotDatabase({ excludeTables: ["Session"] }))).toEqual(
+      [],
+    );
+  });
+
+  it("no cart with another user's address is 404 address, not CART_EMPTY (the address is checked first)", async () => {
+    const user = await signedIn();
+    const other = await signedIn();
+    const foreign = await createAddress({ userId: other.userId });
+    const response = await postCheckout(user, { addressId: foreign.id, paymentMethod: "MOCK" });
+    expect(response.status).toBe(404);
+    expect(response.body.error.details).toEqual({ resource: "address" });
   });
 
   it("a grand total above BR-04 is 422; stock and cart unchanged", async () => {
@@ -438,8 +519,9 @@ describe("mock payment failure and the timeout (BR-20, BR-32)", () => {
 
     await createCartItem({ cartId, productId: product.id, quantity: 60 });
     await db.$executeRaw`UPDATE "Order" SET "createdAt" = now() - interval '16 minutes' WHERE "id" = ${result.order.id}`;
+    // This file's only overdue PENDING order is the one above (the database is per file).
     const swept = await failOverdueOrders(15);
-    expect(swept.failed).toBeGreaterThanOrEqual(1);
+    expect(swept).toEqual({ found: 1, failed: 1, errored: 0 });
 
     const failed = (await getOrder(user, result.order.id)).body.data;
     expect(failed.paymentStatus).toBe("FAILED");
@@ -491,5 +573,299 @@ describe("GET /api/v1/orders and /orders/{id} (REQ-C-13)", () => {
     const list = await listOrders(user);
     expect(list.body.data).toEqual([]);
     expect(list.body.meta["total"]).toBe(0);
+  });
+});
+
+describe("checkout attempts (step 7: the stock changed between the take and the read)", () => {
+  const noStock = () => Promise.resolve(null);
+
+  it("a take refused while every line is buyable on the read is tried again, and the third try buys", async () => {
+    const user = await signedIn();
+    const product = await createProduct({ priceSatang: 2_000, stock: 5 });
+    const { addressId } = await readyToBuy(user, [{ productId: product.id, quantity: 2 }]);
+    for (let i = 1; i < CHECKOUT_ATTEMPTS; i += 1) {
+      vi.mocked(takeStock).mockImplementationOnce(noStock);
+    }
+
+    const response = await postCheckout(user, { addressId, paymentMethod: "MOCK" });
+    expect(response.status).toBe(201);
+    expect(response.body.data.paymentStatus).toBe("PAID");
+    expect(response.body.data.itemsSubtotalSatang).toBe(4_000);
+    expect(vi.mocked(takeStock)).toHaveBeenCalledTimes(CHECKOUT_ATTEMPTS);
+    // One order, the stock taken once, the cart emptied.
+    expect(await db.order.count({ where: { userId: user.userId } })).toBe(1);
+    expect(await stockOf(product.id)).toBe(3);
+    expect(await cartLines(user.userId)).toEqual([]);
+  });
+
+  it("after CHECKOUT_ATTEMPTS refused takes the request is a server error and stores nothing", async () => {
+    const user = await signedIn();
+    const product = await createProduct({ stock: 5 });
+    const { addressId } = await readyToBuy(user, [{ productId: product.id, quantity: 2 }]);
+    for (let i = 0; i < CHECKOUT_ATTEMPTS; i += 1) {
+      vi.mocked(takeStock).mockImplementationOnce(noStock);
+    }
+    const before = await snapshotDatabase({ excludeTables: ["Session"] });
+
+    const response = await postCheckout(user, { addressId, paymentMethod: "MOCK" });
+    expect(response.status).toBe(500);
+    expect(response.body.error.code).toBe("INTERNAL_ERROR");
+    expect(vi.mocked(takeStock)).toHaveBeenCalledTimes(CHECKOUT_ATTEMPTS);
+    expect(await stockOf(product.id)).toBe(5);
+    expect(await cartLines(user.userId)).toEqual([{ productId: product.id, quantity: 2 }]);
+    expect(await db.order.count({ where: { userId: user.userId } })).toBe(0);
+    expect(diffSnapshots(before, await snapshotDatabase({ excludeTables: ["Session"] }))).toEqual(
+      [],
+    );
+
+    // The key was not consumed: the same request, with the stock statement real again, buys.
+    const retry = await postCheckout(user, { addressId, paymentMethod: "MOCK" });
+    expect(retry.status).toBe(201);
+    expect(await stockOf(product.id)).toBe(3);
+  });
+});
+
+describe("a decline merges into a cart that was refilled meanwhile (BR-32)", () => {
+  it("through checkout: the line returns capped at the stock, and the order records before and after", async () => {
+    const user = await signedIn();
+    const product = await createProduct({ stock: 60 });
+    const { addressId, cartId } = await readyToBuy(user, [{ productId: product.id, quantity: 50 }]);
+    // The customer adds the same product in another tab while the provider is deciding.
+    const provider: PaymentProvider = {
+      name: "MOCK",
+      isSimulated: true,
+      charge: async () => {
+        await createCartItem({ cartId, productId: product.id, quantity: 40 });
+        return { outcome: "DECLINED", failureReason: "SIMULATED_DECLINE" };
+      },
+    };
+
+    const result = await checkout(
+      actorOf(user),
+      newKey(),
+      { addressId, paymentMethod: "MOCK", mockOutcome: "FAIL" },
+      { provider },
+    );
+    expect(result.created).toBe(true);
+    expect(result.order.paymentStatus).toBe("FAILED");
+    // 40 in the cart + 50 returned = 90; the stock is back to 60, so the line is 60.
+    expect(result.order.cartReturn).toEqual({
+      capped: true,
+      items: [{ productId: product.id, orderedQuantity: 50, cartQuantity: 60, capped: true }],
+    });
+    expect(await stockOf(product.id)).toBe(60);
+    expect(await cartLines(user.userId)).toEqual([{ productId: product.id, quantity: 60 }]);
+  });
+
+  it("through checkout: a merged quantity above 99 is capped at 99 even when the stock is higher", async () => {
+    const user = await signedIn();
+    const product = await createProduct({ stock: 500 });
+    const { addressId, cartId } = await readyToBuy(user, [{ productId: product.id, quantity: 60 }]);
+    const provider: PaymentProvider = {
+      name: "MOCK",
+      isSimulated: true,
+      charge: async () => {
+        await createCartItem({ cartId, productId: product.id, quantity: 70 });
+        return { outcome: "DECLINED", failureReason: "SIMULATED_DECLINE" };
+      },
+    };
+    const result = await checkout(
+      actorOf(user),
+      newKey(),
+      { addressId, paymentMethod: "MOCK", mockOutcome: "FAIL" },
+      { provider },
+    );
+    expect(result.order.cartReturn).toEqual({
+      capped: true,
+      items: [{ productId: product.id, orderedQuantity: 60, cartQuantity: 99, capped: true }],
+    });
+    expect(await cartLines(user.userId)).toEqual([{ productId: product.id, quantity: 99 }]);
+    expect(await stockOf(product.id)).toBe(500);
+  });
+});
+
+describe("payment finished by two paths at once (BR-20, DATA_MODEL.md section 7.3)", () => {
+  /** A PENDING order, made overdue, for a fresh user: the provider never answered. */
+  async function overdueOrder(stock: number, quantity: number) {
+    const user = await signedIn();
+    const product = await createProduct({ stock });
+    const { addressId } = await readyToBuy(user, [{ productId: product.id, quantity }]);
+    const silent: PaymentProvider = {
+      name: "MOCK",
+      isSimulated: true,
+      charge: () => Promise.reject(new Error("no answer")),
+    };
+    const result = await checkout(
+      actorOf(user),
+      newKey(),
+      { addressId, paymentMethod: "MOCK", mockOutcome: "SUCCESS" },
+      { provider: silent },
+    );
+    expect(result.order.paymentStatus).toBe("PENDING");
+    await db.$executeRaw`UPDATE "Order" SET "createdAt" = now() - interval '30 minutes' WHERE "id" = ${result.order.id}`;
+    return { user, product, orderId: result.order.id, quantity, stock };
+  }
+
+  async function settled(orderId: string) {
+    return db.order.findUniqueOrThrow({
+      where: { id: orderId },
+      select: {
+        paymentStatus: true,
+        paidAt: true,
+        payment: { select: { providerReference: true, failureReason: true } },
+        sellerOrders: { select: { fulfilmentStatus: true } },
+      },
+    });
+  }
+
+  it("paid first: the sweep that follows fails nothing and restores nothing", async () => {
+    const order = await overdueOrder(10, 4);
+    expect(await completeOrderPayment(order.orderId, "MOCK-test-ref")).toBe(true);
+    const swept = await failOverdueOrders(15);
+    expect(swept).toEqual({ found: 0, failed: 0, errored: 0 });
+    const stored = await settled(order.orderId);
+    expect(stored.paymentStatus).toBe("PAID");
+    expect(stored.payment?.failureReason).toBeNull();
+    expect(await stockOf(order.product.id)).toBe(6);
+    expect(await cartLines(order.user.userId)).toEqual([]);
+  });
+
+  it("swept first: a late confirmation changes nothing", async () => {
+    const order = await overdueOrder(10, 4);
+    expect(await failOverdueOrders(15)).toEqual({ found: 1, failed: 1, errored: 0 });
+    expect(await completeOrderPayment(order.orderId, "MOCK-late")).toBe(false);
+    const stored = await settled(order.orderId);
+    expect(stored.paymentStatus).toBe("FAILED");
+    expect(stored.paidAt).toBeNull();
+    expect(stored.payment).toEqual({ providerReference: null, failureReason: "TIMEOUT" });
+    expect(await stockOf(order.product.id)).toBe(10);
+  });
+
+  it("raced: each order ends PAID or FAILED, never both, and stock and cart agree with the outcome", async () => {
+    const orders = [];
+    for (let i = 0; i < 6; i += 1) orders.push(await overdueOrder(10, 3));
+
+    const [paid] = await Promise.all([
+      Promise.all(
+        orders.map((order, i) => completeOrderPayment(order.orderId, `MOCK-race-${String(i)}`)),
+      ),
+      failOverdueOrders(15),
+    ]);
+    // A second sweep must find nothing left to do, whatever the first one lost.
+    const second = await failOverdueOrders(15);
+    expect(second.errored).toBe(0);
+
+    for (const [i, order] of orders.entries()) {
+      const stored = await settled(order.orderId);
+      const cart = await cartLines(order.user.userId);
+      if (stored.paymentStatus === "PAID") {
+        expect(paid[i], `order ${String(i)} paid`).toBe(true);
+        expect(stored.paidAt).not.toBeNull();
+        expect(stored.payment?.failureReason).toBeNull();
+        expect(stored.payment?.providerReference).toBe(`MOCK-race-${String(i)}`);
+        expect(stored.sellerOrders.map((part) => part.fulfilmentStatus)).toEqual(["PENDING"]);
+        expect(await stockOf(order.product.id)).toBe(order.stock - order.quantity);
+        expect(cart).toEqual([]);
+      } else {
+        expect(stored.paymentStatus).toBe("FAILED");
+        expect(paid[i], `order ${String(i)} paid`).toBe(false);
+        expect(stored.paidAt).toBeNull();
+        expect(stored.payment?.failureReason).toBe("TIMEOUT");
+        expect(stored.sellerOrders.map((part) => part.fulfilmentStatus)).toEqual(["CANCELLED"]);
+        // Restored exactly once: not still taken, not restored twice.
+        expect(await stockOf(order.product.id)).toBe(order.stock);
+        expect(cart).toEqual([{ productId: order.product.id, quantity: order.quantity }]);
+      }
+    }
+  });
+
+  it("raced against a decline: the second path to the order does nothing, stock restored once", async () => {
+    const order = await overdueOrder(10, 4);
+    const results = await Promise.all([
+      failOrderPayment(order.orderId, "SIMULATED_DECLINE"),
+      failOverdueOrders(15),
+    ]);
+    expect(results[0] === true || results[1].failed === 1).toBe(true);
+    expect(await stockOf(order.product.id)).toBe(10);
+    expect(await cartLines(order.user.userId)).toEqual([
+      { productId: order.product.id, quantity: 4 },
+    ]);
+    expect((await settled(order.orderId)).paymentStatus).toBe("FAILED");
+  });
+});
+
+describe("a decline while a second checkout of the same user holds the cart lock", () => {
+  it("waits for the lock, finishes after it, and neither order is lost or double-restored", async () => {
+    const user = await signedIn();
+    const product = await createProduct({ priceSatang: 1_000, stock: 10 });
+    const { addressId, cartId } = await readyToBuy(user, [{ productId: product.id, quantity: 3 }]);
+
+    const inCharge = gate();
+    const releaseDecline = gate();
+    const declining: PaymentProvider = {
+      name: "MOCK",
+      isSimulated: true,
+      charge: async () => {
+        inCharge.open();
+        await releaseDecline.promise;
+        return { outcome: "DECLINED", failureReason: "SIMULATED_DECLINE" };
+      },
+    };
+    const first = checkout(
+      actorOf(user),
+      newKey(),
+      { addressId, paymentMethod: "MOCK", mockOutcome: "FAIL" },
+      { provider: declining },
+    );
+    await inCharge.promise;
+    // The first order is committed (stock 7, cart empty) and waits for the provider.
+    expect(await stockOf(product.id)).toBe(7);
+    expect(await cartLines(user.userId)).toEqual([]);
+
+    // The customer shops again; the second checkout takes the cart lock and is held at its
+    // stock statement.
+    await createCartItem({ cartId, productId: product.id, quantity: 2 });
+    const secondHolds = gate();
+    const releaseSecond = gate();
+    vi.mocked(takeStock).mockImplementationOnce(async (...args) => {
+      secondHolds.open();
+      await releaseSecond.promise;
+      const real = await vi.importActual<typeof import("@/modules/checkout/repository")>(
+        "@/modules/checkout/repository",
+      );
+      return real.takeStock(...args);
+    });
+    const second = checkout(
+      actorOf(user),
+      newKey(),
+      { addressId, paymentMethod: "MOCK", mockOutcome: "SUCCESS" },
+      {},
+    );
+    await secondHolds.promise;
+
+    // The decline arrives while the lock is held: it must wait, not finish and not fail.
+    releaseDecline.open();
+    expect(await settlesWithin(first, 400)).toBe(false);
+    // Still PENDING, and the second checkout has written no order yet.
+    expect(await db.order.count({ where: { userId: user.userId } })).toBe(1);
+    expect(await db.order.count({ where: { userId: user.userId, paymentStatus: "PENDING" } })).toBe(
+      1,
+    );
+    expect(await stockOf(product.id)).toBe(7);
+
+    releaseSecond.open();
+    const [declined, bought] = await Promise.all([first, second]);
+
+    expect(declined.order.paymentStatus).toBe("FAILED");
+    expect(bought.order.paymentStatus).toBe("PAID");
+    // 10 - 3 (first, restored) - 2 (second, kept) + 3 restored = 8.
+    expect(await stockOf(product.id)).toBe(8);
+    // The second checkout emptied the cart before the decline returned its 3 units.
+    expect(await cartLines(user.userId)).toEqual([{ productId: product.id, quantity: 3 }]);
+    expect(declined.order.cartReturn).toEqual({
+      capped: false,
+      items: [{ productId: product.id, orderedQuantity: 3, cartQuantity: 3, capped: false }],
+    });
+    expect(await db.order.count({ where: { userId: user.userId } })).toBe(2);
   });
 });
