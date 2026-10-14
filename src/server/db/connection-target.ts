@@ -17,9 +17,9 @@
  * is what the pool does for every connection it opens (`new Client(pool.options)`), and its
  * `host`, `port`, `database`, and `user` are read. Constructing a client opens no connection.
  *
- * Not part of the public surface (index.ts): the application has no use for it. Import it from
- * `@/server/db/connection-target`. Importing this file loads nothing and reads nothing; the
- * driver is loaded on the first call.
+ * Exported from index.ts since T-014 for prisma/seed.ts, which refuses any database that is not on
+ * this machine and may import nothing below index.ts. The application itself has no use for it.
+ * Importing this file loads nothing and reads nothing; the driver is loaded on the first call.
  *
  * What a call reads besides its argument, all of it because the driver does:
  *   - `PGHOST`, `PGPORT`, `PGUSER`, `PGDATABASE`: each only when the connection string leaves

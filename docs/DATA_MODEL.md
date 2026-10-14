@@ -975,7 +975,42 @@ Indexes are listed with their tables in section 6; each serves a query a require
 
 ## 18. Seed data
 
-Local development and tests only; refuses to run when `NODE_ENV` is `production`. Creates sample categories, sample stores, sample products, and sample customer and seller accounts, each marked as in section 16, with credentials documented in the README as local-only. Accounts are inserted directly in the auth library's formats (its id format and its `hashPassword`), as the bootstrap script does, because sign-up cannot create a seller ([section 4.1](#41-seller-application-store-and-role-b3), D-035). Sample stores are created with their `APPROVED` application row and the `SELLER` role, the same end state the approval transaction produces. The seed creates no reviews, no orders presented as real, and no admin; the first admin comes from the bootstrap script.
+Local development and tests only. Creates sample categories, sample stores, sample products, and sample customer and seller accounts, each marked as in section 16. Accounts are inserted directly in the auth library's formats (its id format and its `hashPassword`), as the bootstrap script does, because sign-up cannot create a seller ([section 4.1](#41-seller-application-store-and-role-b3), D-035). Sample stores are created with their `APPROVED` application row and the `SELLER` role, the same end state the approval transaction produces. The seed creates no reviews, no orders, no payments, no shipments, and no admin; the first admin comes from the bootstrap script (`pnpm admin:bootstrap`).
+
+**Files (T-014).** `prisma/seed.ts` (the only file of the seed that imports `src/server/db`), `prisma/seed/guard.ts` (refusal), `prisma/seed/data.ts` (the sample rows, pure), `prisma/seed/accounts.ts` (account rows in the library's formats). Unit tests: `tests/unit/seed/guard.test.ts`, `tests/unit/seed/data.test.ts`.
+
+**Command.** `pnpm db:seed` runs `tsx prisma/seed.ts` (tsx, D-036). It is not wired as `migrations.seed` in `prisma7.config.ts`, so `prisma migrate reset` and `prisma db seed` do not run it; run `pnpm db:seed` after a reset. A local `.env` is loaded without overriding variables already set.
+
+**Refusal.** Before any connection is opened, the seed exits with status 2 and changes nothing when:
+
+| Condition | Reason |
+| --- | --- |
+| `NODE_ENV` is `production`, in any letter case, with or without surrounding blanks | Never in production |
+| `NODE_ENV` is set to anything other than empty, `development`, or `test` | Unknown environment; the same three values `src/server/env.ts` accepts |
+| `DATABASE_URL` is absent or blank, or the database driver cannot read it | Nothing to check |
+| The host the driver would connect to is not `localhost`, an address in 127.0.0.0/8, or `::1` | Not a database on this machine. The host is asked of the driver (`describeConnectionTarget`, CR-42), so a `?host=` query parameter or `PGHOST` that points elsewhere is caught. A Unix-socket directory is refused as well |
+
+Messages name the variable and the rule, never a value.
+
+**Idempotence.** Every row is looked up by a stable key and inserted only when absent; an existing sample row is never updated. Keys: users by email (case-insensitive), the customer's address by "the user has no address", categories by slug, stores by owner, products by `(storeId, sku)` among non-archived products. A second run reports every row as "already present". A row found under a sample key that is not sample data (a user with a sample email but another role, a category with a sample slug and `isSample` false, a store of a sample seller with `isSample` false) stops the run with status 3; the whole seed is one transaction, so nothing of that run is kept. To start over, reset the local database and seed again.
+
+**Sample slugs** follow section 9 with a fixed suffix (`smp0c001`, `smp0s001`, `smp0p001`, ...) instead of a random one, so the rows are recognisable and stable.
+
+**Output** is counts per table plus a pointer to this section. It never contains an email, a name, a phone number, or the password (SECURITY.md SR-04). Failures are reported by error class and Prisma code only. Exit statuses: 0 done, 1 failed (for example the database is unreachable), 2 refused, 3 conflict.
+
+**Sample accounts. LOCAL DEVELOPMENT ONLY.** The password is published here on purpose and is not a secret; the refusal above is what keeps these accounts out of any shared or production database. The same password is used for every sample account:
+
+| Email | Role | What it has |
+| --- | --- | --- |
+| `sample-customer-1@example.com` | `CUSTOMER` | One default address (sample text) |
+| `sample-seller-1@example.com` | `SELLER` | Store "ร้านตัวอย่าง เสื้อผ้าสบายใจ", `APPROVED` |
+| `sample-seller-2@example.com` | `SELLER` | Store "ร้านตัวอย่าง ไอทีและของใช้", `APPROVED` |
+
+Password: `sample_dev_only_not_a_secret` (constant `SAMPLE_PASSWORD` in `prisma/seed/data.ts`).
+
+**Sample catalogue.** Four sample categories (clothing, electronics, home, food; Thai names), nine sample products across the two stores, priced in integer satang from 9,900 to 129,000 and with stock from 0 to 200. One product is sold out (stock 0), one has low stock (3), one has a price with satang (25,050), and one is a `DRAFT` with moderation `PENDING`; the rest are `PUBLISHED` and moderation `APPROVED`. The schema has no variant table: a variant such as a size or colour is a separate product with its own SKU, price, and stock (the two sample T-shirts). No product images or uploads are seeded, since no file storage exists for them.
+
+**Mock payment and simulated shipping.** The seed writes no `Payment`, `SellerOrder`, or `Shipment` row, so no simulation marker is written by it. The markers of section 16 are set by checkout and the shipping transition. The `MarketplaceSettings` row (flat shipping fee) comes from the first migration, not the seed.
 
 ## 19. Open points
 
@@ -1136,10 +1171,10 @@ What exists since 2026-10-11, by name. Sections 1 to 20 say why; this section sa
 | Driver | The `pg` pool behind `@prisma/adapter-pg`, created in `src/server/db/client.ts` from `DATABASE_URL`. One client per process, kept on `globalThis` |
 | Where the URL comes from | `readDatabaseUrl()` of `src/server/env.ts`, called at the first use of `db` (review finding CR-23, SECURITY.md SEC-029). It reads `process.env` of that moment, keeps nothing between calls, and loads no `.env` file, so the integration harness can still point each worker at its own database before first use. Its refusals (absent, empty, not a PostgreSQL URL, and in production a published local password in the URL or in `PGPASSWORD`) therefore hold where the client is created, whether or not the start-up hook ran |
 | Pool settings | Constants in `src/server/db/pool-config.ts`, not environment variables (CR-23): at most 10 connections, 5 s to get a connection, an unused connection closed after 10 s, `statement_timeout` 30 s (the server cancels, error 57014), `query_timeout` 35 s (the driver stops waiting). Pinned against the installed driver by `pool-config.test.ts`. Limit: a `statement_timeout` or `query_timeout` query parameter in `DATABASE_URL` replaces the constant of that name; the pool size and the two pool timeouts cannot be replaced that way. `idle_in_transaction_session_timeout` and `lock_timeout` are deliberately not set |
-| Not on the public surface | `src/server/db/testing.ts` exports `TEST_ONLY_DB_GLOBAL_KEY`, the `globalThis` key of the client, for tests that need a second client in one process (CR-38). `src/server/db/connection-target.ts` exports `describeConnectionTarget(url)`: the host, port, database, and user the installed driver would connect to, asked of the driver itself, with no connection opened and no password in the answer (CR-42). Neither has a caller outside this folder yet; the harness side is qa's |
+| Not on the public surface | `src/server/db/testing.ts` exports `TEST_ONLY_DB_GLOBAL_KEY`, the `globalThis` key of the client, for tests that need a second client in one process (CR-38). `src/server/db/connection-target.ts` exports `describeConnectionTarget(url)`: the host, port, database, and user the installed driver would connect to, asked of the driver itself, with no connection opened and no password in the answer (CR-42). Since T-014 `describeConnectionTarget`, `ConnectionTargetError`, and `ConnectionTarget` are also exported from `index.ts`, because the seed refuses non-local databases with it and may import nothing below `index.ts` |
 | When the client is created | **On first use, not at import** (D-033 point 1, review finding CR-15). Importing `@/server/db` reads no variable, creates no pool, and cannot throw, so unit tests and `next build` need no `DATABASE_URL`. The exported `db` is a `Proxy` that creates the real client the first time a model or a `$` method is read, once per process, and forwards to it; its name and type (`Db`) are unchanged. With `DATABASE_URL` absent or empty that first use throws `EnvValidationError`, whose message names the variable and the rule (`DATABASE_URL is required`) and never a value; there is no fallback to another variable. `db.$disconnect()` before any use does nothing and creates no client. Creating the client opens no connection; the pool connects on the first query. Limit: reflection on own properties (`Object.keys(db)`) sees the empty proxy target, not the client |
 | Who may import what | Enforced by `eslint.config.mjs` and probed by `scripts/check-import-guards.mjs` (part of `pnpm lint`). Only `src/server/db/**` and the generated client under `prisma/generated/**` may import `@prisma/*`, `pg`, or the generated client. `prisma/seed.ts` may import `src/server/db` and nothing below it (rule 7, review finding CR-18); the seed gets the client, `Prisma`, and the enums from the layer's public surface |
-| Seed wiring | Not configured. In Prisma 7 the seed command is `migrations.seed` in `prisma7.config.ts` (no longer a `package.json` key); T-014 adds it |
+| Seed wiring | `pnpm db:seed` runs `tsx prisma/seed.ts` directly (T-014). `migrations.seed` in `prisma7.config.ts` is not set, so `prisma db seed` and `prisma migrate reset` do not run the seed (before T-014, `prisma db seed` printed "No seed command configured" and exited 0). See section 18 |
 | Shadow database | `prisma migrate dev` creates and drops its own temporary database on the local server. `migrate diff --from-migrations` needs `datasource.shadowDatabaseUrl`, which is not configured |
 | Install scripts | The install scripts of `prisma` and `@prisma/engines` are refused in `pnpm-workspace.yaml`, like every other dependency's. Consequence: the schema engine binary is downloaded the first time a `prisma` command needs it, which needs network access once per fresh install |
 
