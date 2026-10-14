@@ -690,6 +690,13 @@ One transaction: `UPDATE "SellerOrder" SET "fulfilmentStatus" = 'CANCELLED' WHER
 
 To keep transactions from deadlocking, every transaction takes its locks in this order and skips the ones it does not need: `Cart` row, then `Order`, then `SellerOrder`, then `OrderItem`, then `Product` rows in ascending id, then `ProductImage`, then `CartItem`. A seller's product edit locks its one `Product` row before it reads or replaces the `ProductImage` rows ([section 4.2](#42-product-status-and-moderation-s5-oq-04-oq-05-oq-06-oq-35-oq-36-oq-42)). Any transaction that writes cart lines on the customer's behalf outside a plain add or change (the return of step 5 in 7.2, and the lowering write of the refusal transaction in 7.1) holds the `Cart` row lock first. A read of the cart takes no lock and writes nothing ([section 6.9](#69-cart-and-cartitem)). "Not the last admin" locks the active admin `User` rows it counts (`FOR UPDATE`) before it changes one of them.
 
+**"Ascending id" for `Product` rows means `COLLATE "C"` order (CR-T032-06).** Both sides that take `Product` row locks in a sequence get that sequence from a SQL `ORDER BY` with `COLLATE "C"`, never from the database's default collation and never from a JavaScript sort:
+
+- Checkout (7.1 step 4) runs its stock statements in the order of `SELECT "id", "productId", "quantity" FROM "CartItem" WHERE "cartId" = :cartId ORDER BY "productId" COLLATE "C" ASC` (`findCartLinesForCheckout` in `src/modules/checkout/repository.ts`).
+- The payment failure transaction (7.2 step 4) restores stock in the order of its claim, `... RETURNING oi."id", oi."productId", oi."quantity"` wrapped in a CTE and read back with `ORDER BY "productId" COLLATE "C" ASC, "id" COLLATE "C" ASC` (`failOrder` in `src/modules/orders/repository.ts`). The second key only fixes the order of two items of the same product, whose `Product` lock is then already held.
+
+With the `"C"` collation PostgreSQL compares the strings byte by byte (their UTF-8 encoding), so the order is the same on both sides whatever the database's default collation is (`en_US.utf8` where the review found the mismatch) and whatever characters an id holds. The ids are cuids today, so this matters only if an id outside that alphabet ever appears; it is stated here so that a new path that locks several `Product` rows uses the same `ORDER BY ... COLLATE "C"`. The seller and admin cancel paths of 7.4 do not exist in code yet; when they are written, their restore follows the same rule. `findPrimaryUploadIds` in checkout also uses `"id" COLLATE "C"` as a tie-breaker, but it is a plain read that takes no lock.
+
 ### 7.6 Status columns and what each guarded update needs
 
 | Column | Guard in the `WHERE` | Other columns the statement needs |
