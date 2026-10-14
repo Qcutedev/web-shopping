@@ -328,6 +328,17 @@ The owner accepted the orchestrator's recommendation on all three questions rais
 2. **A store logo may be an upload that is also a product picture of the same store.** The ownership check by `storeId` is the rule; no extra restriction. Reason: uploads are public by design and a link is not a copy (API_CONTRACTS 5.8).
 3. **Text limits stay as the agent set them:** store name 100, description 2000, rejection reason 500 characters.
 
+### D-041 Owner ruling on SEC-058: unique store names, rename audit, reserved names (2026-10-15)
+
+The owner accepted the security agent's remediation (a) + (b) + (d) and not (c) or (e):
+
+1. **(a) Unique store names.** A store name is refused when it equals another store's name after NFKC, case folding, and white-space collapsing. Enforced by a unique index on a normalised column, on application, on approval, and on rename. Look-alike letters from other scripts are not caught; this is an accepted residual risk, to be recorded in SECURITY.md.
+2. **(b) Rename audit.** Every store rename writes an `AuditLog` row (old name, new name, time, seller as actor) in the same transaction. T-050 shows the history to admins.
+3. **(d) Reserved names.** Names that claim to be the marketplace are refused (the placeholder brand name, "admin", "official", and Thai equivalents). The list lives in one module constant; the owner may extend it.
+4. **(c) No rename rate limit.** `PATCH /seller/store` keeps no limit (API_CONTRACTS section 6 unchanged).
+
+The SEC-058 `it.fails` case flips to `it` unchanged once (a) lands; a case is added for (b) and (d). Owners: database (column, index, migration), backend-api (`src/modules/sellers`, contract), security (re-check).
+
 ## Pending decisions for the user
 
 Undecided, none blocking the MVP: marketplace name and logo, real product photos, hosting provider for staging and production, production object storage, email provider, payment gateway.
