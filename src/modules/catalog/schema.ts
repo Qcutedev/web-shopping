@@ -124,7 +124,7 @@ export const slugSchema = z
     z.string().min(1).max(MAX_SLUG_LENGTH).refine(isStorableText, { error: STORABLE_TEXT_MESSAGE }),
   );
 
-/** The `{slug}` path parameter of the product and store endpoints. */
+/** The `{slug}` path parameter of the category, product, and store endpoints. */
 export const slugParamsSchema = z.object({ slug: slugSchema });
 export type SlugParams = z.infer<typeof slugParamsSchema>;
 
@@ -229,6 +229,16 @@ export interface CategoryDto {
   isSample: boolean;
 }
 
+/**
+ * GET /categories/{slug}: the name and slug of one active category (code-review finding
+ * CR-T021-05, so the category page can name its category). The same pair the product detail
+ * carries as `category`.
+ */
+export interface CategorySummaryDto {
+  name: string;
+  slug: string;
+}
+
 export interface StoreSummaryDto {
   name: string;
   slug: string;
@@ -261,7 +271,7 @@ export interface ProductDetailDto {
   stock: number;
   soldOut: boolean;
   images: ImageRef[];
-  category: { name: string; slug: string };
+  category: CategorySummaryDto;
   store: StoreSummaryDto;
   reviewSummary: ReviewSummaryDto | null;
   isSample: boolean;

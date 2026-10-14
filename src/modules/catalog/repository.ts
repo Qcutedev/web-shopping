@@ -72,6 +72,23 @@ export async function findActiveCategoryIdBySlug(slug: string): Promise<string |
   return row?.id ?? null;
 }
 
+const CATEGORY_SUMMARY_SELECT = {
+  name: true,
+  slug: true,
+} as const satisfies Prisma.CategorySelect;
+
+export type CategorySummaryRow = Prisma.CategoryGetPayload<{
+  select: typeof CATEGORY_SUMMARY_SELECT;
+}>;
+
+/** The name and slug of the active category with this slug, or null (unknown and inactive alike). */
+export async function findActiveCategoryBySlug(slug: string): Promise<CategorySummaryRow | null> {
+  return db.category.findFirst({
+    where: { slug, isActive: true },
+    select: CATEGORY_SUMMARY_SELECT,
+  });
+}
+
 // ---------------------------------------------------------------------------------------------
 // Products
 // ---------------------------------------------------------------------------------------------

@@ -2,6 +2,7 @@
  * Calls the catalog route handlers in process, with a real `Request`, against the worker's test
  * database. Only the HTTP server is left out: the handler, the module, and PostgreSQL are real.
  */
+import { GET as getCategoryBySlug } from "@/app/api/v1/categories/[slug]/route";
 import { GET as getCategories } from "@/app/api/v1/categories/route";
 import { GET as getProducts } from "@/app/api/v1/products/route";
 import { GET as getProductBySlug } from "@/app/api/v1/products/[slug]/route";
@@ -50,6 +51,17 @@ function params(slug: string) {
 
 export async function callCategories<T = unknown>(query = "", headers?: HeadersInit) {
   return read<T>(await getCategories(request("/categories", query, headers)));
+}
+
+export async function callCategory<T = unknown>(slug: string, query = "", headers?: HeadersInit) {
+  return read<T>(
+    await getCategoryBySlug(request(`/categories/${encoded(slug)}`, query, headers), params(slug)),
+  );
+}
+
+/** Calls the category handler with the slug exactly as given, for the encoding cases. */
+export async function callCategoryRawSlug<T = unknown>(rawSlug: string) {
+  return read<T>(await getCategoryBySlug(request(`/categories/${rawSlug}`, ""), params(rawSlug)));
 }
 
 export async function callProducts<T = unknown>(query = "", headers?: HeadersInit) {

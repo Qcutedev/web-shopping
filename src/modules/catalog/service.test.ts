@@ -8,6 +8,7 @@ import { imageRef } from "./image";
 import { escapeLikePattern } from "./repository";
 import {
   toCategoryDto,
+  toCategorySummaryDto,
   toProductDetailDto,
   toProductListItemDto,
   toReviewDto,
@@ -163,6 +164,15 @@ describe("toCategoryDto and toReviewDto", () => {
         createdAt: new Date("2026-10-11T03:20:00.000Z"),
       }),
     ).toEqual({ id: "r", rating: 4, comment: "<b>ดี</b>", createdAt: "2026-10-11T03:20:00.000Z" });
+  });
+});
+
+describe("toCategorySummaryDto", () => {
+  it("maps name and slug only: no id, no isActive, no sortOrder", () => {
+    const row = { name: "เสื้อผ้า", slug: "เสื้อผ้า-k3m9x2qa", isActive: false, sortOrder: 3 };
+    const dto = toCategorySummaryDto(row);
+    expect(dto).toEqual({ name: "เสื้อผ้า", slug: "เสื้อผ้า-k3m9x2qa" });
+    expect(Object.keys(dto).sort()).toEqual(["name", "slug"]);
   });
 });
 

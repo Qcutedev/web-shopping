@@ -473,6 +473,7 @@ All public. All return only what the visibility rule allows ([section 3.4](#34-v
 | Method | Path | Access | Notes |
 | --- | --- | --- | --- |
 | GET | `/categories` | public | Paginated. Active categories only, ordered by `sortOrder`, then `id`. |
+| GET | `/categories/{slug}` | public | The `categorySummary` of one active category. Unknown or inactive category: 404. |
 | GET | `/products` | public | Paginated. Visible products only. Query below. |
 | GET | `/products/{slug}` | public | A product that is not visible: 404. |
 | GET | `/products/{slug}/reviews` | public | Paginated, newest first. Product not visible: 404. |
@@ -492,11 +493,13 @@ Query of `GET /products` (and of the store's product list):
 
 The earlier names `minPrice` and `maxPrice` no longer exist.
 
-Shapes. The block below is a catalogue of the five shapes keyed by name, not one response; each endpoint returns the matching shape inside the envelope of [section 2.1](#21-success-envelope):
+Shapes. The block below is a catalogue of the six shapes keyed by name, not one response; each endpoint returns the matching shape inside the envelope of [section 2.1](#21-success-envelope):
 
 ```json
 {
   "category": { "id": "...", "name": "...", "slug": "...", "isSample": false },
+
+  "categorySummary": { "name": "...", "slug": "..." },
 
   "productListItem": {
     "id": "...", "slug": "...", "title": "...",
@@ -539,7 +542,7 @@ Shapes. The block below is a catalogue of the five shapes keyed by name, not one
 
 Implemented in `src/modules/catalog` (service, repository, the visibility rule in `visibility.ts`) and the handlers under `src/app/api/v1/categories`, `products`, and `stores`. The schemas in `src/modules/catalog/schema.ts` are authoritative; this subsection states what they decide beyond the table above.
 
-**Access and order of checks.** All six are `public` `GET`s: steps 1 to 6 of [section 1.8](#18-access-levels-and-404-against-403) do not apply, nothing is rate-limited, and a session cookie, a role, or a `storeId`, `userId`, or `role` in the query changes nothing. The path parameter is validated first, then the query (`400`), then the service answers (`404`, or `200`). Every response is `Cache-Control: no-store`. No catalog request writes anything (D-029 point 1); the integration tests compare a snapshot of every table and sequence before and after.
+**Access and order of checks.** All seven are `public` `GET`s: steps 1 to 6 of [section 1.8](#18-access-levels-and-404-against-403) do not apply, nothing is rate-limited, and a session cookie, a role, or a `storeId`, `userId`, or `role` in the query changes nothing. The path parameter is validated first, then the query (`400`), then the service answers (`404`, or `200`). Every response is `Cache-Control: no-store`. No catalog request writes anything (D-029 point 1); the integration tests compare a snapshot of every table and sequence before and after.
 
 **Query parameters.**
 
@@ -567,6 +570,7 @@ Implemented in `src/modules/catalog` (service, repository, the visibility rule i
 - `url` is `/api/files/` followed by the key percent-encoded as one path segment. **The file endpoint does not exist yet** (T-041), so such a URL answers `404` until it does.
 - `store.description` is `null` when the seller wrote none; `logo` is `null` without a logo.
 - The review shape carries no reviewer name or id.
+- `GET /categories/{slug}` (added 2026-10-14 for code-review finding CR-T021-05, so the category page can name its category) returns `categorySummary`, the same `{ name, slug }` pair as `category` in the product detail; TypeScript type `CategorySummaryDto`, path schema `slugParamsSchema`, service `getCategory`. It carries no `id`, `isSample`, `isActive`, or `sortOrder`. One read by `slug` and `isActive = true`, no transaction. An unknown and an inactive category give the identical `404` above; a `{slug}` that fails the path rules is `400`. Query parameters are ignored.
 
 **Consistency.** A list reads its `total` and its page as two statements, not in one transaction, so a write that commits between them can make `total` differ from the rows by that write. Reason: with Prisma 7.10 and `@prisma/adapter-pg`, the relation loads of one query run at the same time on a transaction's single connection, which `pg` 8.23 reports as deprecated and `pg` 9 removes (see `src/modules/catalog/repository.ts`). The consequence for the endpoints that must run in a transaction (CLAUDE.md rule 5) is item 8.2-14 in [section 8.2](#82-open-technical).
 

@@ -13,7 +13,9 @@ import { catalogNotFound } from "./errors";
 import { imageRef } from "./image";
 import {
   type CategoryRow,
+  type CategorySummaryRow,
   findActiveCategories,
+  findActiveCategoryBySlug,
   findActiveCategoryIdBySlug,
   findPublicStoreBySlug,
   findPublicStoreIdBySlug,
@@ -29,6 +31,7 @@ import {
 } from "./repository";
 import type {
   CategoryDto,
+  CategorySummaryDto,
   ListCategoriesQuery,
   ListProductReviewsQuery,
   ListProductsQuery,
@@ -47,6 +50,10 @@ import { isSoldOut } from "./visibility";
 
 export function toCategoryDto(row: CategoryRow): CategoryDto {
   return { id: row.id, name: row.name, slug: row.slug, isSample: row.isSample };
+}
+
+export function toCategorySummaryDto(row: CategorySummaryRow): CategorySummaryDto {
+  return { name: row.name, slug: row.slug };
 }
 
 export function toProductListItemDto(row: ProductListRow): ProductListItemDto {
@@ -121,6 +128,16 @@ export function toReviewDto(row: ReviewRow): ReviewDto {
 export async function listCategories(query: ListCategoriesQuery): Promise<Page<CategoryDto>> {
   const { rows, total } = await findActiveCategories(query);
   return { items: rows.map(toCategoryDto), page: query.page, pageSize: query.pageSize, total };
+}
+
+/**
+ * GET /categories/{slug}: the name and slug of an active category, else 404 (unknown and
+ * inactive alike, REQ-C-07). One read, no transaction (repository.ts).
+ */
+export async function getCategory(slug: string): Promise<CategorySummaryDto> {
+  const row = await findActiveCategoryBySlug(slug);
+  if (row === null) throw catalogNotFound();
+  return toCategorySummaryDto(row);
 }
 
 /**

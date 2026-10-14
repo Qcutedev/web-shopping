@@ -2,6 +2,7 @@
  * Public surface of the catalog module. Route handlers and pages import from here only.
  */
 export {
+  getCategory,
   getProduct,
   getStore,
   listCategories,
