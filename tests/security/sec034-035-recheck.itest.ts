@@ -370,12 +370,18 @@ describe("SEC-035 re-check: every failure path waits for the production floor", 
     await register(base, known);
     const bodies = new Set<string>();
     for (const email of [known, freshEmail("t-limit-unknown")]) {
-      // One address per attempt, so only the per-email rule refuses the sixth.
-      const runtime: Runtime = {
-        ...makeRuntime({ responseFloor: FLOOR, trustedProxy: { trustedProxyHops: 1 } }),
+      // Since SEC-032 the per-email rules are `sign-in-email` (address and email, 5 per 60 s,
+      // behind the per-address rule of the same size) and `sign-in-account` (email over all
+      // addresses, 60 per 300 s). A sixth attempt from a new address is no longer refused, so the
+      // account rule is reached with 12 addresses of 5 attempts each; the 61st is refused. The
+      // priming runs without the floor to stay fast; the refusal is measured with the floor on.
+      const shared = createRateLimiter();
+      const runtimeFor = (floor: Runtime["responseFloor"]): Runtime => ({
+        ...makeRuntime({ responseFloor: floor, trustedProxy: { trustedProxyHops: 1 } }),
         auth: base.auth,
-      };
-      const attempt = (i: number) =>
+        limiter: shared,
+      });
+      const attempt = (i: number, runtime: Runtime) =>
         handleSignIn(
           post("/api/v1/auth/sign-in", {
             body: { email, password: "x" },
@@ -383,8 +389,13 @@ describe("SEC-035 re-check: every failure path waits for the production floor", 
           }),
           runtime,
         );
-      for (let i = 0; i < 5; i += 1) expect((await attempt(i)).status).toBe(401);
-      const { response, ms } = await timed(() => attempt(5));
+      const priming = runtimeFor({ minimumMs: 0, jitterMs: 0 });
+      for (let i = 0; i < 60; i += 1) {
+        expect((await attempt(Math.floor(i / 5), priming)).status, `attempt ${String(i)}`).toBe(
+          401,
+        );
+      }
+      const { response, ms } = await timed(() => attempt(12, runtimeFor(FLOOR)));
       expect(response.status).toBe(429);
       expect(ms).toBeLessThan(FLOOR.minimumMs);
       bodies.add(await errorBody(response));
