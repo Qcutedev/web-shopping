@@ -8,6 +8,7 @@ import { Skeleton, SkeletonText } from "@/components/ui/skeleton";
 import { UserName, USER_NAME_CONTAINER_CLASS } from "@/components/user-name";
 import { fill } from "@/i18n/fill";
 import { th } from "@/i18n/th";
+import { stripIsolateControls } from "@/lib/bidi";
 import { categoryHref, ROUTES, storeHref } from "@/lib/routes";
 import type { ProductDetailDto } from "@/modules/catalog/schema";
 
@@ -21,7 +22,7 @@ const PDI = String.fromCodePoint(0x2069);
  * the cart task and is not on this page yet.
  */
 export function ProductDetailView({ product }: { product: ProductDetailDto }) {
-  const { images } = product;
+  const { images, title } = product;
   return (
     <div className="flex flex-col gap-6">
       <Breadcrumb
@@ -46,7 +47,7 @@ export function ProductDetailView({ product }: { product: ProductDetailDto }) {
                   <ProductImage
                     image={image}
                     alt={fill(th.catalog.product.imageAlt, {
-                      title: `${FSI}${product.title}${PDI}`,
+                      title: `${FSI}${stripIsolateControls(title)}${PDI}`,
                       index: index + 1,
                       count: images.length,
                     })}

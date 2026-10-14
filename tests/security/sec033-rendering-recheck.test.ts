@@ -389,13 +389,13 @@ describe("SEC-057 re-check: product titles in attributes and new places", () => 
   // OPEN (SEC-057 attribute part): FSI ... PDI is text-level. A PDI inside the title closes the
   // isolate early, and the override after it runs over the shop's words. `<bdi>` is not affected,
   // because CSS isolation does not depend on characters inside the text.
-  it.fails("a title holding PDI then RLO cannot close the alt isolate early", () => {
+  it("a title holding PDI then RLO cannot close the alt isolate early", () => {
     const [alt] = altsOf(detailWith(`Title${PDI}${RLO}Admin`, 1));
     const end = isolateEnd(alt ?? "", 0);
     expect((alt ?? "").slice(end + 1)).toBe(altSuffix(1, 1));
   });
 
-  it.fails("a title holding an unmatched isolate opener cannot swallow the shop's words", () => {
+  it("a title holding an unmatched isolate opener cannot swallow the shop's words", () => {
     const [alt] = altsOf(detailWith(`Title${LRI}Admin`, 1));
     const end = isolateEnd(alt ?? "", 0);
     expect(end).toBeGreaterThan(0);
