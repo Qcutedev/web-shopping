@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { CatalogInvalidFilter } from "@/components/catalog/catalog-load-error";
+import { applyPriceFilter } from "@/components/catalog/price-filter";
 import { parseListQuery } from "@/components/catalog/list-query";
 import { ProductGridSkeleton } from "@/components/catalog/product-grid";
 import { StoreSection } from "@/components/catalog/store-section";
@@ -35,7 +36,14 @@ async function StoreContent({
 }) {
   const parsed = slugParamsSchema.safeParse(await params);
   if (!parsed.success) notFound();
-  const query = parseListQuery(await searchParams);
+  const price = applyPriceFilter(await searchParams);
+  const query = parseListQuery(price.raw);
   if (query === null) return <CatalogInvalidFilter resetHref={storeHref(parsed.data.slug)} />;
-  return <StoreSection slug={parsed.data.slug} query={query} />;
+  return (
+    <StoreSection
+      slug={parsed.data.slug}
+      query={query}
+      filter={{ minText: price.minText, maxText: price.maxText, errors: price.errors }}
+    />
+  );
 }

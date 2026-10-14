@@ -3,6 +3,8 @@ import { Suspense } from "react";
 import { CatalogInvalidFilter } from "@/components/catalog/catalog-load-error";
 import { CategoryChips, CategoryChipsSkeleton } from "@/components/catalog/category-chips";
 import { hrefParamsOf, listHref } from "@/components/catalog/list-href";
+import { FilterForm } from "@/components/catalog/filter-form";
+import { applyPriceFilter } from "@/components/catalog/price-filter";
 import { parseListQuery } from "@/components/catalog/list-query";
 import { ProductGridSkeleton } from "@/components/catalog/product-grid";
 import { ProductListSection } from "@/components/catalog/product-list-section";
@@ -42,7 +44,8 @@ async function CategoryContent({
   const parsedSlug = slugParamsSchema.safeParse(await params);
   if (!parsedSlug.success) notFound();
   const slug = parsedSlug.data.slug;
-  const query = parseListQuery(await searchParams, { category: slug });
+  const price = applyPriceFilter(await searchParams);
+  const query = parseListQuery(price.raw, { category: slug });
   if (query === null) return <CatalogInvalidFilter resetHref={categoryHref(slug)} />;
 
   const base = categoryHref(slug);
@@ -53,6 +56,15 @@ async function CategoryContent({
       <Suspense fallback={<CategoryChipsSkeleton />}>
         <CategoryChips currentSlug={slug} />
       </Suspense>
+      <FilterForm
+        action={base}
+        resetHref={listHref(base, { q: sortParams.q, sort: query.sort }, 1)}
+        q={query.q}
+        sort={query.sort}
+        minText={price.minText}
+        maxText={price.maxText}
+        errors={price.errors}
+      />
       <SortLinks
         current={query.sort}
         hrefForSort={(sort) => listHref(base, { ...sortParams, sort }, 1)}

@@ -2,6 +2,8 @@ import Image from "next/image";
 import { notFound, unstable_rethrow } from "next/navigation";
 import { connection } from "next/server";
 import { CatalogLoadError } from "@/components/catalog/catalog-load-error";
+import { FilterForm } from "@/components/catalog/filter-form";
+import type { PriceFilterError } from "@/components/catalog/price-filter";
 import { hrefParamsOf, listHref } from "@/components/catalog/list-href";
 import { ProductListSection } from "@/components/catalog/product-list-section";
 import { SortLinks } from "@/components/catalog/sort-links";
@@ -13,8 +15,23 @@ import { getStore, listStoreProducts } from "@/modules/catalog";
 import type { ListProductsQuery, StoreDto } from "@/modules/catalog/schema";
 import { isAppError } from "@/server/errors";
 
+/** What the price filter form shows: the baht text as typed and any problems with it. */
+export interface StoreFilterState {
+  minText: string;
+  maxText: string;
+  errors: readonly PriceFilterError[];
+}
+
 /** Server Component: a public store and its visible products. Not public: the not-found page. */
-export async function StoreSection({ slug, query }: { slug: string; query: ListProductsQuery }) {
+export async function StoreSection({
+  slug,
+  query,
+  filter,
+}: {
+  slug: string;
+  query: ListProductsQuery;
+  filter?: StoreFilterState;
+}) {
   await connection();
   let store: StoreDto;
   try {
@@ -24,11 +41,19 @@ export async function StoreSection({ slug, query }: { slug: string; query: ListP
     if (isAppError(error) && error.code === "NOT_FOUND") notFound();
     return <CatalogLoadError retryHref={storeHref(slug)} />;
   }
-  return <StoreView store={store} query={query} />;
+  return <StoreView store={store} query={query} filter={filter} />;
 }
 
 /** Store header, order links, and the product list. The logo is decorative: the name sits beside it. */
-export function StoreView({ store, query }: { store: StoreDto; query: ListProductsQuery }) {
+export function StoreView({
+  store,
+  query,
+  filter = { minText: "", maxText: "", errors: [] },
+}: {
+  store: StoreDto;
+  query: ListProductsQuery;
+  filter?: StoreFilterState | undefined;
+}) {
   const base = storeHref(store.slug);
   return (
     <div className="flex flex-col gap-6">
@@ -64,6 +89,16 @@ export function StoreView({ store, query }: { store: StoreDto; query: ListProduc
       <SortLinks
         current={query.sort}
         hrefForSort={(sort) => listHref(base, hrefParamsOf(query, { sort }), 1)}
+      />
+      <FilterForm
+        action={base}
+        resetHref={listHref(base, { q: query.q, sort: query.sort, category: query.category }, 1)}
+        q={query.q}
+        sort={query.sort}
+        category={query.category}
+        minText={filter.minText}
+        maxText={filter.maxText}
+        errors={filter.errors}
       />
       <ProductListSection
         load={() => listStoreProducts(store.slug, query)}
