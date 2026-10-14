@@ -1,5 +1,5 @@
 /**
- * Every unique index of schema v1 (DATA_MODEL.md sections 21.3 and 21.4): the 18 unique
+ * Every unique index of schema v1 (DATA_MODEL.md sections 21.3, 21.4 and 21.7): the 19 unique
  * constraints Prisma manages, the three hand-written partial unique indexes, and the 21 primary
  * keys.
  *
@@ -83,7 +83,29 @@ const UNIQUE_INDEXES: Record<string, Scenario> = {
     const store = await createStore();
     return {
       rejects: { "a second store with the same slug": () => createStore({ slug: store.slug }) },
-      accepts: { "a second store with the same name": () => createStore({ name: store.name }) },
+      accepts: {
+        "a second store with a different name": () => createStore({ name: `${store.name} other` }),
+      },
+    };
+  },
+
+  Store_nameKey_key: async () => {
+    const store = await createStore();
+    const fullWidth = store.name.replace(/[!-~]/g, (c) =>
+      String.fromCharCode(c.charCodeAt(0) + 0xfee0),
+    );
+    return {
+      rejects: {
+        "a second store with the same name": () => createStore({ name: store.name }),
+        "the same name in another letter case": () =>
+          createStore({ name: store.name.toUpperCase() }),
+        "the same name in full-width form": () => createStore({ name: fullWidth }),
+        "the same name with extra white space": () =>
+          createStore({ name: `  ${store.name.replace(/ /g, "   ")} ` }),
+      },
+      accepts: {
+        "a second store with a different name": () => createStore({ name: `${store.name} other` }),
+      },
     };
   },
 
@@ -544,7 +566,7 @@ describe("every unique index of the database has cases in this file", () => {
   it("matches the unique indexes in the catalogue exactly, partial ones included", async () => {
     const inDatabase = await uniqueIndexNames(false);
 
-    expect(inDatabase).toHaveLength(21);
+    expect(inDatabase).toHaveLength(22);
     expect(Object.keys(UNIQUE_INDEXES).sort()).toEqual(inDatabase);
   });
 
