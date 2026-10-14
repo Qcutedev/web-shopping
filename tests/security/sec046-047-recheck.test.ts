@@ -217,7 +217,9 @@ describe("SEC-046 re-check: every library variable is refused by name, for that 
     ];
     expect([...found].sort()).toEqual([...LIBRARY_VARIABLES, ...inert].sort());
     expect(telemetryIdUses).toBe(0);
-  });
+    // 60 s: walks the library's dist folders; the 5 s default timed out under a full parallel run
+    // (sixty-fourth session). Assertions unchanged.
+  }, 60_000);
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -313,7 +315,9 @@ describe("SEC-047 re-check: bypass attempts against the strengthened floor", () 
       }
       expect(refused, form).toBeLessThanOrEqual(2);
     }
-  });
+    // 60 s: 100,000 secrets take about 2 s alone; the 5 s default timed out under a full
+    // parallel run (sixty-fourth session). Assertions and counts unchanged.
+  }, 60_000);
 
   it("the fixtures the commit introduced are accepted in production, and the old one is refused", () => {
     for (const value of [
