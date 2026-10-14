@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Actor } from "@/server/auth/actor";
 import { AppError } from "@/server/errors";
+import type { Logger } from "@/server/logger";
 
 import type { OrderRow } from "./mapping";
 import * as repository from "./repository";
@@ -29,6 +30,17 @@ vi.mock("./repository", () => ({
 }));
 
 const repo = vi.mocked(repository);
+
+function fakeLogger() {
+  const log = {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    child: vi.fn(),
+  };
+  return log as typeof log & Logger;
+}
 
 const ME: Actor = Object.freeze({
   userId: "user_me",
@@ -115,13 +127,55 @@ describe("failOverdueOrders (BR-20 timeout, D-028)", () => {
   it("fails each overdue order through the same failure transaction, reason TIMEOUT", async () => {
     repo.findOverdueOrderIds.mockResolvedValue(["o1", "o2", "o3"]);
     repo.failOrder.mockImplementation(async (id) => id !== "o2");
-    await expect(failOverdueOrders(15)).resolves.toEqual({ found: 3, failed: 2 });
+    await expect(failOverdueOrders(15)).resolves.toEqual({ found: 3, failed: 2, errored: 0 });
     expect(repo.findOverdueOrderIds).toHaveBeenCalledWith(15, 100);
     expect(repo.failOrder.mock.calls).toEqual([
       ["o1", "TIMEOUT", "TIMEOUT"],
       ["o2", "TIMEOUT", "TIMEOUT"],
       ["o3", "TIMEOUT", "TIMEOUT"],
     ]);
+  });
+
+  it("an order that throws does not stop the sweep: counted, logged by class only (CR-T032-01)", async () => {
+    const log = fakeLogger();
+    repo.findOverdueOrderIds.mockResolvedValue(["o1", "o2", "o3", "o4"]);
+    const timeout = Object.assign(new Error("row of Somchai 0812345678, 12 Sukhumvit"), {
+      name: "PrismaClientKnownRequestError",
+      code: "P2028",
+    });
+    repo.failOrder.mockImplementation(async (id) => {
+      if (id === "o1") throw timeout;
+      if (id === "o3") throw "not an error object 0899999999";
+      return true;
+    });
+
+    await expect(failOverdueOrders(15, 100, log)).resolves.toEqual({
+      found: 4,
+      failed: 2,
+      errored: 2,
+    });
+    expect(repo.failOrder.mock.calls.map(([id]) => id)).toEqual(["o1", "o2", "o3", "o4"]);
+    expect(log.error).toHaveBeenCalledTimes(2);
+    expect(log.error.mock.calls[0]?.[1]).toEqual({
+      component: "payment-timeout-sweep",
+      errorName: "PrismaClientKnownRequestError",
+      errorCode: "P2028",
+    });
+    expect(log.error.mock.calls[1]?.[1]).toEqual({
+      component: "payment-timeout-sweep",
+      errorName: undefined,
+      errorCode: undefined,
+    });
+    const written = JSON.stringify(log.error.mock.calls);
+    for (const leaked of ["0812345678", "Somchai", "Sukhumvit", "0899999999", "o1", "o3"]) {
+      expect(written).not.toContain(leaked);
+    }
+  });
+
+  it("a failure of the overdue lookup itself still rejects the run", async () => {
+    repo.findOverdueOrderIds.mockRejectedValue(new Error("connection lost"));
+    await expect(failOverdueOrders(15, 100, fakeLogger())).rejects.toThrow("connection lost");
+    expect(repo.failOrder).not.toHaveBeenCalled();
   });
 
   it("refuses a timeout that is not a whole number of minutes of at least 1", async () => {

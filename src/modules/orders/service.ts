@@ -13,9 +13,11 @@
  * (repository.ts) and does nothing when another path finished the order first.
  */
 import type { Actor } from "@/server/auth/actor";
+import { logger as defaultLogger, type Logger } from "@/server/logger";
 
 import type { PaymentFailureReason } from "@/modules/payments";
 
+import { errorLabel } from "./error-label";
 import { orderNotFound } from "./errors";
 import { toOrderDto } from "./mapping";
 import {
@@ -78,6 +80,11 @@ export interface SweepResult {
   found: number;
   /** Of those, how many this run failed (the others were paid or failed by another path first). */
   failed: number;
+  /**
+   * Of those, how many threw (a lock timeout, a lost connection). They stay `PENDING` and are
+   * tried again by the next run; the rest of the batch is not held up by them (CR-T032-01).
+   */
+  errored: number;
 }
 
 /**
@@ -85,18 +92,34 @@ export interface SweepResult {
  * BR-20 timeout), through the same guarded failure transaction as a decline, with the reason
  * `TIMEOUT`. An order younger than the timeout is never touched: the age is judged by the
  * database clock. One order at a time, oldest first, at most `batchSize` per run.
+ *
+ * An order whose failure transaction throws is counted in `errored`, logged with the error's
+ * class name and code only (never its message, which can hold a row's contents; SR-04, and never
+ * the order id), and skipped: the sweep goes on with the next order (CR-T032-01). Only the
+ * lookup of the overdue ids can make the whole run throw.
  */
 export async function failOverdueOrders(
   timeoutMinutes: number,
   batchSize: number = PAYMENT_SWEEP_BATCH_SIZE,
+  log: Logger = defaultLogger,
 ): Promise<SweepResult> {
   if (!Number.isSafeInteger(timeoutMinutes) || timeoutMinutes < 1) {
     throw new RangeError("failOverdueOrders: the timeout must be a whole number of minutes, >= 1.");
   }
   const ids = await findOverdueOrderIds(timeoutMinutes, batchSize);
   let failed = 0;
+  let errored = 0;
   for (const id of ids) {
-    if (await failOrder(id, "TIMEOUT", "TIMEOUT")) failed += 1;
+    try {
+      if (await failOrder(id, "TIMEOUT", "TIMEOUT")) failed += 1;
+    } catch (error) {
+      errored += 1;
+      log.error("Payment timeout sweep could not fail an order", {
+        component: "payment-timeout-sweep",
+        errorName: errorLabel(error, "name"),
+        errorCode: errorLabel(error, "code"),
+      });
+    }
   }
-  return { found: ids.length, failed };
+  return { found: ids.length, failed, errored };
 }

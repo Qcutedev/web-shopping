@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { StructuredLogger } from "@/server/logger";
 
+import * as service from "./service";
+
 import {
   runPaymentTimeoutSweep,
   startPaymentTimeoutSweepSchedule,
@@ -30,14 +32,31 @@ afterEach(() => {
 describe("runPaymentTimeoutSweep", () => {
   it("writes one counts-only line through security() for a run that worked", async () => {
     const log = fakeLogger();
-    const sweep = vi.fn().mockResolvedValue({ found: 2, failed: 1 });
-    await expect(runPaymentTimeoutSweep(15, log, sweep)).resolves.toEqual({ found: 2, failed: 1 });
+    const sweep = vi.fn().mockResolvedValue({ found: 2, failed: 1, errored: 1 });
+    await expect(runPaymentTimeoutSweep(15, log, sweep)).resolves.toEqual({
+      found: 2,
+      failed: 1,
+      errored: 1,
+    });
     expect(sweep).toHaveBeenCalledWith(15);
     expect(log.security).toHaveBeenCalledWith("info", "Payment timeout sweep ran", {
       component: "payment-timeout-sweep",
       overdueFound: 2,
       overdueFailed: 1,
+      overdueErrored: 1,
     });
+  });
+
+  it("by default sweeps through failOverdueOrders with the same logger", async () => {
+    const log = fakeLogger();
+    const failOverdueOrders = vi.mocked(service.failOverdueOrders);
+    failOverdueOrders.mockResolvedValue({ found: 1, failed: 0, errored: 1 });
+    await expect(runPaymentTimeoutSweep(15, log)).resolves.toEqual({
+      found: 1,
+      failed: 0,
+      errored: 1,
+    });
+    expect(failOverdueOrders).toHaveBeenCalledWith(15, undefined, log);
   });
 
   it("never throws; a failed run writes one error line with labels only", async () => {
@@ -54,7 +73,7 @@ describe("runPaymentTimeoutSweep", () => {
 describe("startPaymentTimeoutSweepSchedule (D-033 point 12)", () => {
   it("runs once at start, then every interval, and only one schedule per process", async () => {
     vi.useFakeTimers();
-    const sweep = vi.fn().mockResolvedValue({ found: 0, failed: 0 });
+    const sweep = vi.fn().mockResolvedValue({ found: 0, failed: 0, errored: 0 });
     const log = fakeLogger();
     expect(
       startPaymentTimeoutSweepSchedule({
@@ -79,8 +98,8 @@ describe("startPaymentTimeoutSweepSchedule (D-033 point 12)", () => {
     let release: () => void = () => undefined;
     const sweep = vi.fn(
       () =>
-        new Promise<{ found: number; failed: number }>((resolve) => {
-          release = () => resolve({ found: 0, failed: 0 });
+        new Promise<{ found: number; failed: number; errored: number }>((resolve) => {
+          release = () => resolve({ found: 0, failed: 0, errored: 0 });
         }),
     );
     startPaymentTimeoutSweepSchedule({

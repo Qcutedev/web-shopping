@@ -22,19 +22,18 @@
 import { PAYMENT_SWEEP_INTERVAL_MS } from "@/server/env";
 import { logger as defaultLogger, type StructuredLogger } from "@/server/logger";
 
+import { errorLabel as labelOf } from "./error-label";
 import { failOverdueOrders, type SweepResult } from "./service";
 
-function labelOf(error: unknown, key: "name" | "code"): string | undefined {
-  if (typeof error !== "object" || error === null) return undefined;
-  const value = (error as Record<string, unknown>)[key];
-  return typeof value === "string" && /^[A-Za-z0-9_.$-]{1,64}$/.test(value) ? value : undefined;
-}
-
-/** One run with its log line. Never throws. */
+/**
+ * One run with its log line. Never throws. An order that could not be failed does not stop the
+ * run (CR-T032-01): `failOverdueOrders` counts it in `errored` and logs its error class.
+ */
 export async function runPaymentTimeoutSweep(
   timeoutMinutes: number,
   log: StructuredLogger = defaultLogger,
-  sweep: (minutes: number) => Promise<SweepResult> = (minutes) => failOverdueOrders(minutes),
+  sweep: (minutes: number) => Promise<SweepResult> = (minutes) =>
+    failOverdueOrders(minutes, undefined, log),
 ): Promise<SweepResult | undefined> {
   try {
     const result = await sweep(timeoutMinutes);
@@ -42,6 +41,7 @@ export async function runPaymentTimeoutSweep(
       component: "payment-timeout-sweep",
       overdueFound: result.found,
       overdueFailed: result.failed,
+      overdueErrored: result.errored,
     });
     return result;
   } catch (error) {
