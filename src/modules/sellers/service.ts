@@ -24,6 +24,7 @@ import type { DbTransaction } from "@/server/db";
 import { forbidden, invalidStateTransition, unauthenticated } from "@/server/errors";
 
 import {
+  applicantInactive,
   applicantNotCustomer,
   applicationNotFound,
   openApplication,
@@ -222,6 +223,8 @@ function decided(outcome: DecisionOutcome): ApplicationDecisionDto {
       throw invalidStateTransition();
     case "applicant-not-customer":
       throw applicantNotCustomer();
+    case "applicant-inactive":
+      throw applicantInactive();
   }
 }
 
@@ -229,7 +232,9 @@ function decided(outcome: DecisionOutcome): ApplicationDecisionDto {
  * Approves a `PENDING` application: in one transaction the application becomes `APPROVED`, the
  * store is created with status `APPROVED` and a generated slug, the applicant's role becomes
  * `SELLER`, and an audit row is written. Not `PENDING`: 409 INVALID_STATE_TRANSITION. Applicant
- * no longer a `CUSTOMER`: 409 APPLICANT_NOT_CUSTOMER, nothing changes. Unknown id: 404.
+ * no longer a `CUSTOMER`: 409 APPLICANT_NOT_CUSTOMER, nothing changes. Applicant deactivated
+ * (`isActive = false`): 409 APPLICANT_INACTIVE, nothing changes and the application stays
+ * `PENDING` so an admin can reject it (D-040 point 1). Unknown id: 404.
  */
 export async function approveApplication(
   actor: Actor,

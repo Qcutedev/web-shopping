@@ -123,6 +123,64 @@ describe("approveApplication", () => {
     expect(diffSnapshots(before, await snapshotDatabase())).toEqual([]);
   });
 
+  it("is 409 APPLICANT_INACTIVE for a deactivated applicant, writes nothing, and the application can still be rejected (D-040)", async () => {
+    const reviewer = await admin();
+    const applicant = await createUser();
+    const application = await createSellerApplication({ userId: applicant.id });
+    await db.user.update({ where: { id: applicant.id }, data: { isActive: false } });
+    const before = await snapshotDatabase();
+    const error = await refusal(approveApplication(reviewer, application.id));
+    expect(error.status).toBe(409);
+    expect(error.code).toBe("CONFLICT");
+    expect(error.details).toEqual({ reason: "APPLICANT_INACTIVE" });
+    expect(diffSnapshots(before, await snapshotDatabase())).toEqual([]);
+    expect(
+      (await db.sellerApplication.findUniqueOrThrow({ where: { id: application.id } })).status,
+    ).toBe("PENDING");
+
+    const rejected = await rejectApplication(reviewer, application.id, { reason: "บัญชีถูกปิด" });
+    expect(rejected).toMatchObject({ application: { status: "REJECTED" }, store: null });
+    expect(await db.store.count({ where: { ownerId: applicant.id } })).toBe(0);
+    expect((await db.user.findUniqueOrThrow({ where: { id: applicant.id } })).role).toBe(
+      "CUSTOMER",
+    );
+  });
+
+  it("a deactivation that commits while the approval waits on the applicant row is seen: 409 APPLICANT_INACTIVE", async () => {
+    const reviewer = await admin();
+    const applicant = await createUser();
+    const application = await createSellerApplication({ userId: applicant.id });
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let locked: () => void = () => undefined;
+    const lockTaken = new Promise<void>((resolve) => {
+      locked = resolve;
+    });
+    // Holds the user row as a deactivation does, then commits isActive = false.
+    const deactivation = db.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: applicant.id }, data: { isActive: false } });
+      locked();
+      await held;
+    });
+    await lockTaken;
+    const approval = approveApplication(reviewer, application.id).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    release();
+    await deactivation;
+    const error = await approval;
+    expect(error).toBeInstanceOf(AppError);
+    expect((error as AppError).details).toEqual({ reason: "APPLICANT_INACTIVE" });
+    expect(await db.store.count({ where: { ownerId: applicant.id } })).toBe(0);
+    expect(
+      (await db.sellerApplication.findUniqueOrThrow({ where: { id: application.id } })).status,
+    ).toBe("PENDING");
+  });
+
   it("is 404 for an unknown id and 403 for a non-admin; nothing is written", async () => {
     const reviewer = await admin();
     expect((await refusal(approveApplication(reviewer, "no-such-application"))).code).toBe(

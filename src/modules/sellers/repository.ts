@@ -330,7 +330,24 @@ export type DecisionOutcome =
   | { kind: "decided"; row: DecisionRow }
   | { kind: "not-found" }
   | { kind: "not-pending" }
-  | { kind: "applicant-not-customer" };
+  | { kind: "applicant-not-customer" }
+  | { kind: "applicant-inactive" };
+
+/**
+ * Locks the applicant's user row (`FOR NO KEY UPDATE`, the lock submission takes) and reads its
+ * `isActive`. A deactivation is an update of the same row, so it either committed before this read
+ * or waits until the approval ends. Null when the user row is missing.
+ */
+async function lockApplicant(
+  tx: DbTransaction,
+  userId: string,
+): Promise<{ isActive: boolean } | null> {
+  const rows = await tx.$queryRaw<{ isActive: boolean }[]>`
+    SELECT "isActive" FROM "User"
+    WHERE "id" = ${userId}
+    FOR NO KEY UPDATE`;
+  return rows[0] ?? null;
+}
 
 /** Moves the locked application to `to` by the guarded statement; false when no row moved. */
 async function moveApplication(
@@ -352,13 +369,18 @@ async function moveApplication(
  * `PENDING` to `APPROVED` in one transaction (DATA_MODEL.md section 4.1):
  *
  *   1. lock the application (`FOR UPDATE`): none is `not-found`, not `PENDING` is `not-pending`;
- *   2. the guarded application update (`status = 'PENDING'`);
- *   3. the guarded role update `CUSTOMER` to `SELLER` (`WHERE role = 'CUSTOMER'`; section 7.6);
- *      zero rows rolls everything back as `applicant-not-customer`;
- *   4. the store is created with status `APPROVED`, the application's name, description, and
+ *   2. lock the applicant's user row (`FOR NO KEY UPDATE`): `isActive = false` is
+ *      `applicant-inactive` and nothing is written, so the application stays `PENDING` and can be
+ *      rejected (D-040 point 1; a store of a deactivated owner is hidden anyway, BR-27). A missing
+ *      user row (the foreign key does not allow it) is `applicant-not-customer`;
+ *   3. the guarded application update (`status = 'PENDING'`);
+ *   4. the guarded role update `CUSTOMER` to `SELLER` (`WHERE role = 'CUSTOMER'` and
+ *      `isActive = true`; section 7.6); zero rows rolls everything back as
+ *      `applicant-not-customer`;
+ *   5. the store is created with status `APPROVED`, the application's name, description, and
  *      contact phone, and a generated slug (`Store_ownerId_key` is the backstop against a second
  *      store);
- *   5. one `AuditLog` row (REQ-A-10), in the same transaction.
+ *   6. one `AuditLog` row (REQ-A-10), in the same transaction.
  *
  * A unique violation (a slug collision, which is all but impossible with 40 random bits) rolls
  * the transaction back and the whole approval is tried again with a new slug, at most
@@ -375,12 +397,15 @@ export async function approveApplicationRow(
         const application = await lockApplication(tx, applicationId);
         if (application === null) return { kind: "not-found" } as const;
         if (application.status !== "PENDING") return { kind: "not-pending" } as const;
+        const applicant = await lockApplicant(tx, application.userId);
+        if (applicant === null) return { kind: "applicant-not-customer" } as const;
+        if (!applicant.isActive) return { kind: "applicant-inactive" } as const;
         const reviewedAt = new Date();
         if (!(await moveApplication(tx, applicationId, "APPROVED", adminId, null, reviewedAt))) {
           return { kind: "not-pending" } as const;
         }
         const promoted = await tx.user.updateMany({
-          where: { id: application.userId, role: "CUSTOMER" },
+          where: { id: application.userId, role: "CUSTOMER", isActive: true },
           data: { role: "SELLER" },
         });
         if (promoted.count !== 1) throw new Rollback("applicant-not-customer");

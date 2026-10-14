@@ -9,6 +9,9 @@
  * - A second application while one is `PENDING`: `409 CONFLICT`, reason `OPEN_APPLICATION`.
  * - Approving an application whose applicant is no longer a `CUSTOMER`: `409 CONFLICT`, reason
  *   `APPLICANT_NOT_CUSTOMER`.
+ * - Approving an application whose applicant's account is deactivated (`isActive = false`):
+ *   `409 CONFLICT`, reason `APPLICANT_INACTIVE`; nothing changes and the application stays
+ *   `PENDING` so it can be rejected (D-040 point 1).
  * - A decision on an application that is not `PENDING`, including one that lost a race:
  *   `409 INVALID_STATE_TRANSITION` (state.ts).
  * - A write to a store that is not `APPROVED`: `403 SELLER_NOT_APPROVED` (DATA_MODEL.md section
@@ -18,6 +21,7 @@ import { type AppError, conflict, notFound, sellerNotApproved } from "@/server/e
 
 export const OPEN_APPLICATION = "OPEN_APPLICATION";
 export const APPLICANT_NOT_CUSTOMER = "APPLICANT_NOT_CUSTOMER";
+export const APPLICANT_INACTIVE = "APPLICANT_INACTIVE";
 
 export function applicationNotFound(): AppError {
   return notFound();
@@ -37,6 +41,10 @@ export function openApplication(cause?: unknown): AppError {
 
 export function applicantNotCustomer(): AppError {
   return conflict(APPLICANT_NOT_CUSTOMER);
+}
+
+export function applicantInactive(): AppError {
+  return conflict(APPLICANT_INACTIVE);
 }
 
 export function storeNotApproved(): AppError {

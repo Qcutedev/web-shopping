@@ -335,10 +335,25 @@ describe("approveApplication and rejectApplication", () => {
     ["not-found", "NOT_FOUND"],
     ["not-pending", "INVALID_STATE_TRANSITION"],
     ["applicant-not-customer", "CONFLICT"],
+    ["applicant-inactive", "CONFLICT"],
   ])("maps the outcome %s to %s", async (kind, code) => {
     repo.approveApplicationRow.mockResolvedValue({ kind });
     expect(await codeOf(approveApplication(ADMIN, "app_1"))).toBe(code);
     repo.rejectApplicationRow.mockResolvedValue({ kind });
     expect(await codeOf(rejectApplication(ADMIN, "app_1", { reason: "x" }))).toBe(code);
+  });
+
+  it.each([
+    ["applicant-not-customer", "APPLICANT_NOT_CUSTOMER"],
+    ["applicant-inactive", "APPLICANT_INACTIVE"],
+  ])("gives the outcome %s the CONFLICT reason %s (D-040 point 1)", async (kind, reason) => {
+    repo.approveApplicationRow.mockResolvedValue({ kind });
+    const error = await approveApplication(ADMIN, "app_1").then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(AppError);
+    expect((error as AppError).status).toBe(409);
+    expect((error as AppError).details).toEqual({ reason });
   });
 });
