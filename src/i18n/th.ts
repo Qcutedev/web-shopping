@@ -82,6 +82,76 @@ export const th = {
     loadFailedTitle: "ไม่สามารถแสดงข้อมูลได้",
     retry: "ลองอีกครั้ง",
   },
+  // Proposals (T-021 storefront pages): wording written by the frontend agent, not yet approved
+  // by the owner. A name in braces is a placeholder filled with `fill`.
+  catalog: {
+    loading: "กำลังโหลดสินค้า",
+    productListLabel: "รายการสินค้า",
+    soldOut: "สินค้าหมด",
+    noImage: "ไม่มีรูปภาพสินค้า",
+    breadcrumbLabel: "เส้นทางนำทาง",
+    home: {
+      newestTitle: "สินค้ามาใหม่",
+      categoriesTitle: "หมวดหมู่สินค้า",
+      viewAll: "ดูสินค้าทั้งหมด",
+      emptyTitle: "ยังไม่มีสินค้าในขณะนี้",
+      emptyDescription: "กรุณากลับมาดูใหม่อีกครั้งภายหลัง",
+    },
+    categories: {
+      label: "หมวดหมู่",
+      all: "ทั้งหมด",
+      empty: "ยังไม่มีหมวดหมู่",
+    },
+    sort: {
+      label: "เรียงตาม",
+      newest: "มาใหม่",
+      price_asc: "ราคาต่ำไปสูง",
+      price_desc: "ราคาสูงไปต่ำ",
+    },
+    search: {
+      title: "ค้นหาสินค้า",
+      // {q} is the text the visitor typed.
+      resultsFor: "ผลการค้นหา “{q}”",
+      // {total} is the number of products found.
+      count: "พบสินค้า {total} รายการ",
+      emptyTitle: "ไม่พบสินค้าที่ตรงกับการค้นหา",
+      emptyDescription: "ลองใช้คำอื่น หรือดูสินค้าทั้งหมดของเรา",
+      // Heading when no search text is given: the whole catalogue.
+      allTitle: "สินค้าทั้งหมด",
+    },
+    category: {
+      // {name} is the category name.
+      title: "หมวดหมู่ {name}",
+      emptyTitle: "ยังไม่มีสินค้าในหมวดหมู่นี้",
+      emptyDescription: "ลองดูหมวดหมู่อื่น หรือสินค้าทั้งหมดของเรา",
+      pageEmptyTitle: "ไม่มีสินค้าในหน้านี้",
+      pageEmptyAction: "กลับไปหน้าแรกของรายการ",
+    },
+    store: {
+      title: "ร้านค้า",
+      emptyTitle: "ร้านนี้ยังไม่มีสินค้า",
+      emptyDescription: "กรุณากลับมาดูใหม่อีกครั้งภายหลัง",
+    },
+    filterInvalidTitle: "ตัวกรองไม่ถูกต้อง",
+    filterInvalid: "ค่าที่ใช้ค้นหาหรือเรียงสินค้าไม่ถูกต้อง กรุณาเริ่มใหม่อีกครั้ง",
+    product: {
+      description: "รายละเอียดสินค้า",
+      category: "หมวดหมู่",
+      store: "ร้านค้า",
+      gallery: "รูปภาพสินค้า",
+      // {title} is the product title, {index} the picture number, {count} the number of pictures.
+      imageAlt: "{title} รูปที่ {index} จาก {count}",
+      thumbnailLabel: "ดูรูปที่ {index}",
+      reviewsTitle: "รีวิวจากผู้ซื้อ",
+      // {rating} is the mean rating with one decimal, {count} the number of reviews.
+      ratingSummary: "คะแนน {rating} จาก 5 ({count} รีวิว)",
+      // {rating} is a whole number from 1 to 5.
+      reviewRating: "ให้คะแนน {rating} จาก 5",
+      noComment: "ไม่มีข้อความรีวิว",
+      reviewsEmpty: "ยังไม่มีรีวิวสำหรับสินค้านี้",
+      reviewsFailed: "ไม่สามารถแสดงรีวิวได้ในขณะนี้",
+    },
+  },
   pagination: {
     label: "การแบ่งหน้า",
     previous: "หน้าก่อนหน้า",

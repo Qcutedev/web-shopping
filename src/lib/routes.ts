@@ -16,6 +16,20 @@ export const ROUTES = {
   accountAddresses: "/account/addresses",
 } as const;
 
+/**
+ * Catalog page paths. A slug is percent-encoded into the path so it can never change the path it
+ * is put in; the catalog schema decodes it again on the way in (V11).
+ */
+export function productHref(slug: string): string {
+  return `/products/${encodeURIComponent(slug)}`;
+}
+export function categoryHref(slug: string): string {
+  return `/categories/${encodeURIComponent(slug)}`;
+}
+export function storeHref(slug: string): string {
+  return `/stores/${encodeURIComponent(slug)}`;
+}
+
 /** Name of the query parameter that carries the page to return to after signing in. */
 export const SIGN_IN_NEXT_PARAM = "next";
 
