@@ -328,7 +328,7 @@ describe("T-032 review: the Idempotency-Key header (section 1.3)", () => {
 // ---------------------------------------------------------------------------------------------
 
 describe("SEC-055: nothing fails an unpaid order", () => {
-  it.fails("the start-up hook starts the payment timeout sweep", () => {
+  it("the start-up hook starts the payment timeout sweep", () => {
     const hook = read("src/instrumentation.ts");
     expect(hook).toMatch(/startPaymentTimeoutSweepSchedule\(/);
   });

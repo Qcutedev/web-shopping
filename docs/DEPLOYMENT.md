@@ -160,7 +160,7 @@ A change of the major version (for example 18 to 19) is not an image update: Pos
 - PostgreSQL, a current supported major version.
 - A persistent volume for uploads until object storage is integrated.
 - HTTPS terminated by the host or a reverse proxy.
-- Something that runs two jobs with no visitor present: the expired-session purge and the payment timeout sweep. **NOT IMPLEMENTED**; see "Scheduled work". If the recommended in-process timer is chosen, the server process must stay running when there is no traffic: a host that stops or sleeps an idle container would stop the jobs without any error.
+- Something that runs two jobs with no visitor present: the expired-session purge and the payment timeout sweep. Both run as in-process timers started by `src/instrumentation.ts` (the sweep: **IMPLEMENTED and wired, not yet run on a deployment**); see "Scheduled work". If the recommended in-process timer is chosen, the server process must stay running when there is no traffic: a host that stops or sleeps an idle container would stop the jobs without any error.
 - Server logs and database backups stored only where the rules in "Log retention and access" and "Database backups" can be met.
 
 ### Reverse proxy conditions (Planned; required by SECURITY.md SR-01 and SR-05)
@@ -267,7 +267,7 @@ What `LOG_LEVEL` reaches (code changed after the measurements of 2026-10-12, Nex
 
 Where each validated variable is read (checked against `src` on 2026-10-13):
 
-- `PAYMENT_TIMEOUT_MINUTES`: validated, but not used by any code yet. The sweep that reads it lands with T-032.
+- `PAYMENT_TIMEOUT_MINUTES`: read once at start by `src/instrumentation.ts`, which passes it to the payment timeout sweep schedule (`src/modules/orders/timeout-sweep.ts`). A change needs a restart.
 - `TRUSTED_PROXY_HOPS`, `TRUSTED_CLIENT_IP_HEADER`, and the origin of `APP_URL`: read through `getEnv()` by the auth route layer (`src/server/auth/routes.ts`) and by `src/server/public-get.ts`.
 - `DATABASE_URL`: the database layer (`src/server/db/client.ts`) takes it from `readDatabaseUrl()` of `src/server/env.ts` on first use, so the production refusals apply there too (CR-23, SEC-029). Importing the module still reads nothing (D-033 point 1).
 - `AUTH_SECRET`: read through `readAuthSecret()` by the auth layer on first use, and by `getEnv()` at start.
@@ -474,7 +474,7 @@ Running it again with a new email creates a further admin. The output names the 
 | Interval | Planned: every hour. One day is the owner's limit; the hourly run is the margin DATA_MODEL.md section 6.1 asks for, so that one late or failed run does not break the limit | **Every minute. Decided by the owner (D-033 point 12)**: an unpaid order is failed within about 16 minutes. It is the constant `PAYMENT_SWEEP_INTERVAL_MS` (60,000) in `src/server/env.ts`, not a setting |
 | Who writes the function | auth agent, T-015 | backend-api agent, T-032 (D-023 point 6: one service function that a script and the checkout path can call) |
 | What a stopped job causes | Addresses and browser details of abandoned sessions stay in the database past the one-day limit. Nobody sees an error | Unpaid orders stay `PENDING`, and the stock they took at checkout stays unavailable to other customers until something fails them. Nobody sees an error |
-| State | **NOT IMPLEMENTED** (T-015) | **NOT IMPLEMENTED** (T-032). The timeout setting `PAYMENT_TIMEOUT_MINUTES` and the interval constant exist since T-011; nothing reads them yet |
+| State | **NOT IMPLEMENTED** (T-015) | **IMPLEMENTED and wired** (T-032): `src/instrumentation.ts` starts `startPaymentTimeoutSweepSchedule` after environment validation, in the Node.js runtime, never in the build phase and not with `NODE_ENV=test`. It runs once at start, then every 60 s (`PAYMENT_SWEEP_INTERVAL_MS`), one schedule per process, no overlapping runs, timer unref'd. Each run writes one `security()` info line with counts (`component: payment-timeout-sweep`), or an error line with the error class. **Several instances each run it**: harmless (guarded transaction) but wasteful. Not yet run on a deployment |
 
 The scheduler is chosen and built in T-015, before the sweep function exists. Whatever is chosen must take the sweep as a second job in T-032 without a new decision.
 

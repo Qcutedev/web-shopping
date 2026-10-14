@@ -148,6 +148,59 @@ describe("register: a valid environment", () => {
   });
 });
 
+describe("register: scheduled work", () => {
+  function mockSchedules() {
+    const purge = vi.fn();
+    const sweep = vi.fn();
+    vi.doMock("./server/auth/session-purge", () => ({ startSessionPurgeSchedule: purge }));
+    vi.doMock("./modules/orders", () => ({ startPaymentTimeoutSweepSchedule: sweep }));
+    return { purge, sweep };
+  }
+  afterEach(() => {
+    vi.doUnmock("./server/auth/session-purge");
+    vi.doUnmock("./modules/orders");
+  });
+
+  it("starts the payment timeout sweep with the validated timeout when NODE_ENV is not test", async () => {
+    stubEnvironment({ NODE_ENV: "development", PAYMENT_TIMEOUT_MINUTES: "7" });
+    record("at once");
+    const { purge, sweep } = mockSchedules();
+    expect(await run()).toBeUndefined();
+    expect(purge).toHaveBeenCalledTimes(1);
+    expect(sweep.mock.calls).toEqual([[{ timeoutMinutes: 7 }]]);
+  });
+
+  it("starts the sweep with the default timeout when the variable is unset", async () => {
+    stubEnvironment({ NODE_ENV: "development" });
+    record("at once");
+    const { sweep } = mockSchedules();
+    expect(await run()).toBeUndefined();
+    expect(sweep.mock.calls).toEqual([[{ timeoutMinutes: 15 }]]);
+  });
+
+  it("starts no schedule when NODE_ENV is test", async () => {
+    stubEnvironment({ NODE_ENV: "test" });
+    record("at once");
+    const { purge, sweep } = mockSchedules();
+    expect(await run()).toBeUndefined();
+    expect(purge).not.toHaveBeenCalled();
+    expect(sweep).not.toHaveBeenCalled();
+  });
+
+  it("starts no schedule in the build phase, outside Node.js, or with an invalid environment", async () => {
+    const { purge, sweep } = mockSchedules();
+    record("at once");
+    stubEnvironment({ NODE_ENV: "development", NEXT_PHASE: "phase-production-build" });
+    expect(await run()).toBeUndefined();
+    stubEnvironment({ NODE_ENV: "development", NEXT_RUNTIME: "edge" });
+    expect(await run()).toBeUndefined();
+    stubEnvironment({ NODE_ENV: "development", APP_URL: undefined });
+    expect(await run()).toBeInstanceOf(Error);
+    expect(purge).not.toHaveBeenCalled();
+    expect(sweep).not.toHaveBeenCalled();
+  });
+});
+
 describe("register: an invalid environment ends the process", () => {
   it("writes the line that names the variables, sets exit code 1, exits from the write callback, and rethrows", async () => {
     stubEnvironment({ APP_URL: undefined, PAYMENT_TIMEOUT_MINUTES: "Zq7canary-soon" });

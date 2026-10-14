@@ -6,7 +6,8 @@
  * First it validates the environment (src/server/env.ts), so that a missing or invalid variable
  * is reported at start, by name and rule and never by value, instead of at some later request.
  * Then, and only with a valid environment, it starts the scheduled removal of expired sessions
- * (T-015, src/server/auth/session-purge.ts; not in a process with NODE_ENV=test).
+ * (T-015, src/server/auth/session-purge.ts) and the payment timeout sweep (T-032,
+ * src/modules/orders/timeout-sweep.ts); neither starts in a process with NODE_ENV=test.
  *
  * Where it does not run:
  *
@@ -53,6 +54,11 @@ export async function register(): Promise<void> {
       if (env.nodeEnv !== "test") {
         const { startSessionPurgeSchedule } = await import("./server/auth/session-purge");
         startSessionPurgeSchedule();
+        // SEC-055 (D-028, D-033 point 12): fails orders still unpaid after the timeout, once now
+        // and every minute. One schedule per process is enforced inside the module. The import
+        // goes through the orders module: only modules reach the database client (rule 7).
+        const { startPaymentTimeoutSweepSchedule } = await import("./modules/orders");
+        startPaymentTimeoutSweepSchedule({ timeoutMinutes: env.paymentTimeoutMinutes });
       }
     } catch (error) {
       process.exitCode = 1;

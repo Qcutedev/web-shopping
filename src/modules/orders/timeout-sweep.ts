@@ -15,9 +15,9 @@
  * error's class name and code when it failed. The lines hold counts only, never an order's
  * contents (SR-04).
  *
- * Not wired yet: the start-up hook (src/instrumentation.ts, devops) must call
- * `startPaymentTimeoutSweepSchedule({ timeoutMinutes: env.paymentTimeoutMinutes })` beside the
- * session purge. Until it does, an overdue order is failed only when something calls the sweep.
+ * Wired in src/instrumentation.ts, beside the session purge, with
+ * `startPaymentTimeoutSweepSchedule({ timeoutMinutes: env.paymentTimeoutMinutes })`. It starts
+ * in the Node.js runtime of a running server, never in the build phase and never with NODE_ENV=test.
  */
 import { PAYMENT_SWEEP_INTERVAL_MS } from "@/server/env";
 import { logger as defaultLogger, type StructuredLogger } from "@/server/logger";
