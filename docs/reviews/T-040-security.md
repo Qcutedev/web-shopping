@@ -42,6 +42,8 @@ Not in scope, not built: the admin endpoints that expose approve and reject (T-0
 
 Full entry in [../SECURITY.md](../SECURITY.md). Any approved seller can take another store's exact display name, or one that claims to be the marketplace, as often as it likes; nothing is reviewed, rate-limited, or recorded (`AuditLog` gets no row; `Store` keeps only the current name). Look-alike letters of other scripts pass the name rule, so an exact-match uniqueness check alone would not stop copies. Reproduction: `tests/security/t040-sellers.itest.ts` describe "SEC-058": the documented case (20 renames, all 200, the other store's exact name, no audit row) and one `it.fails` that, flipped, fails with `expected 200 not to be 200`. Owner decides among: normalised uniqueness, an audit row per rename, a rename limit, reserved names, or written acceptance.
 
+Update 2026-10-15: the owner chose (a), (b), and (d) in D-041; fixed and re-checked the same day, see [SEC-058-recheck.md](SEC-058-recheck.md) (SEC-059 and SEC-060 new, Low).
+
 ### Observations (not findings)
 
 1. **Deadlock hazard for later tasks.** `requireApprovedStoreForWrite` takes `FOR SHARE`. Two seller transactions that both hold it and then `UPDATE "Store"` (for example a counter or `updatedAt`) deadlock (lock upgrade). Product inserts and updates take only `FOR KEY SHARE` on the store through the foreign key, which is compatible. T-041, T-042, T-043 must not update the store row after this call, or must take `FOR NO KEY UPDATE` instead. Recorded in SECURITY.md residual risks.
