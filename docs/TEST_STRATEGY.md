@@ -369,6 +369,19 @@ Measured earlier the same day, on the suite of 12 files and 417 tests, and not m
 
 Not constraints, and without cases of their own: the 8 enum types (a value outside an enum cannot be written through the typed client) and the non-unique indexes.
 
+### Cart integration tests (T-031, CR-T031-01)
+
+`tests/integration/cart/` calls the three cart route modules in process against the worker's real PostgreSQL, with a real session cookie from the sign-in route (helpers in `support.ts`). Two files:
+
+| File | Covers |
+| --- | --- |
+| `endpoints.test.ts` | 401 for every endpoint with nothing stored; foreign Origin 403; empty cart; grouping by store and server-computed totals in satang; current price and fee at read time; sold-out and hidden lines flagged and left out of totals; GET writes nothing (snapshot of every table except `Session`, stored 95 above stock stays 95); POST 201 then 200, stock untouched, lowering to stock, stored 95 plus 5 is 400 (CR-T031-05), sold out 409, hidden like missing 404 for six hidden conditions, OWN_STORE 409 with `cartItemId` null (also with an older line, CR-T031-03), seller hidden own product 404 (CR-T031-07), quantity 0, negative, fractional, above the cap, string, null, huge, bounds 1 and 99, unknown keys; PATCH set not add, lowering, sold out 409, hidden 409 even at stock 0 (BR-38), invalid quantities and keys; foreign line on PATCH and DELETE is 404 identical to an unknown id, with and without a cart of the intruder, and the owner's line is unchanged; DELETE of sold-out and hidden lines; id with U+0000 or over 200 characters |
+| `concurrency.test.ts` | N parallel first adds give one cart and one summed line; first adds of different products; two adds to one line sum; 50 + 50 gives one 400 and a line of 50; six adds of 30 store 90 with three 400s; PATCH with DELETE; GET with adds; two users; product hard-deleted while a POST waits (P2003 maps to 404 `resource: product`, no cart row left); product hard-deleted while a PATCH waits (`updateManyAndReturn` matches no row, 404 with empty details); refused writes leave no cart row and no changed line |
+
+Not covered here: the 429 and the response floor (no rate limit on the cart), real browser behaviour (E2E, T-060), and the checkout reading of a cart (T-032, CC-04 and CC-05).
+
+The route handlers await Next's `connection()`, which throws outside a Next request scope. `tests/integration/setup/worker-env.ts` replaces only that function with a no-op for every integration file; the rest of `next/server` is the real module.
+
 End-to-end tests use their own database, separate from every integration database. Whether Playwright runs with one worker or isolates data per worker is decided in T-060.
 
 ## Environment requirements

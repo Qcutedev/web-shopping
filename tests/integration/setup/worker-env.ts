@@ -8,9 +8,17 @@
  * It points DATABASE_URL at the database of this worker. If the global setup did not run, or the
  * worker id is not one a database was created for, it throws, and no client is ever created.
  */
-import { inject } from "vitest";
+import { inject, vi } from "vitest";
 
 import { workerDatabaseUrl } from "../../helpers/test-database-url";
+
+// `handleRequest` (src/server/request-frame.ts) awaits Next's `connection()` first, which throws
+// outside a Next request scope, as in these in-process handler calls. Only `connection` is
+// replaced, with a no-op as at request time; the rest of `next/server` is the real module.
+vi.mock("next/server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/server")>()),
+  connection: () => Promise.resolve(),
+}));
 
 const database = inject("integrationDatabase");
 if (database === undefined) {
