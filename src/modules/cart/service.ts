@@ -109,6 +109,8 @@ interface WriteOutcome {
   storedQuantity: number;
   requestedQuantity: number;
   product: WriteProductRow;
+  /** Read inside the transaction, so nothing of the response is read after the commit (CR-T031-06). */
+  imageKey: string | null;
   created: boolean;
 }
 
@@ -118,16 +120,18 @@ export interface AddCartItemResult {
   created: boolean;
 }
 
-/** The response line of a successful write, from what the transaction read and stored. */
-async function toWriteLine(outcome: WriteOutcome): Promise<CartWriteLineDto> {
-  const imageKey = await findFirstImageKey(outcome.product.id);
+/**
+ * The response line of a successful write, from what the transaction read and stored. Pure: it
+ * reads nothing, so once the write has committed the answer cannot fail (CR-T031-06).
+ */
+function toWriteLine(outcome: WriteOutcome): CartWriteLineDto {
   const line = priceLine({
     id: outcome.lineId,
     productId: outcome.product.id,
     storedQuantity: outcome.storedQuantity,
     slug: outcome.product.slug,
     title: outcome.product.title,
-    imageKey,
+    imageKey: outcome.imageKey,
     priceSatang: outcome.product.priceSatang,
     stock: outcome.product.stock,
     visible: true,
@@ -183,13 +187,14 @@ export async function addCartItem(
         storedQuantity: line.quantity,
         requestedQuantity,
         product,
+        imageKey: await findFirstImageKey(tx, product.id),
         created: existing === null,
       };
     },
   );
   // createCart is true, so the transaction always has a cart to lock.
   if (outcome === null) throw new Error("addCartItem: the cart row was not created.");
-  return { line: await toWriteLine(outcome), created: outcome.created };
+  return { line: toWriteLine(outcome), created: outcome.created };
 }
 
 /** PATCH /cart/items/{itemId}: sets the quantity of the actor's own line. */
@@ -241,6 +246,7 @@ async function setOwnedLine(
     storedQuantity: stored.quantity,
     requestedQuantity,
     product,
+    imageKey: await findFirstImageKey(tx, product.id),
     created: false,
   };
 }

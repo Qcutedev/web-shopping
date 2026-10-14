@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { type DbTransaction, Prisma } from "@/server/db";
 
-import { insertLine, setLineQuantity } from "./repository";
+import { findFirstImageKey, insertLine, setLineQuantity } from "./repository";
 
 vi.mock("@/server/db", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/server/db")>();
@@ -16,6 +16,8 @@ vi.mock("@/server/db", async (importOriginal) => {
 
 const tx = {
   cartItem: { create: vi.fn(), updateManyAndReturn: vi.fn() },
+  productImage: { findFirst: vi.fn() },
+  upload: { findUnique: vi.fn() },
 };
 const TX = tx as unknown as DbTransaction;
 const LINE_SELECT = { id: true, productId: true, quantity: true };
@@ -51,6 +53,29 @@ describe("setLineQuantity (CR-T031-02)", () => {
   it("returns null, not a P2025 error, when a product delete removed the line", async () => {
     tx.cartItem.updateManyAndReturn.mockResolvedValue([]);
     await expect(setLineQuantity(TX, "cart_me", "line_1", 4)).resolves.toBeNull();
+  });
+});
+
+describe("findFirstImageKey (CR-T031-06)", () => {
+  it("reads the first picture through the transaction, scalars only, one statement at a time", async () => {
+    tx.productImage.findFirst.mockResolvedValue({ uploadId: "upload_1" });
+    tx.upload.findUnique.mockResolvedValue({ storageKey: "img/p1.webp" });
+    await expect(findFirstImageKey(TX, "product_1")).resolves.toBe("img/p1.webp");
+    expect(tx.productImage.findFirst).toHaveBeenCalledWith({
+      where: { productId: "product_1" },
+      select: { uploadId: true },
+      orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
+    });
+    expect(tx.upload.findUnique).toHaveBeenCalledWith({
+      where: { id: "upload_1" },
+      select: { storageKey: true },
+    });
+  });
+
+  it("is null for a product without pictures, and reads no upload", async () => {
+    tx.productImage.findFirst.mockResolvedValue(null);
+    await expect(findFirstImageKey(TX, "product_1")).resolves.toBeNull();
+    expect(tx.upload.findUnique).not.toHaveBeenCalled();
   });
 });
 

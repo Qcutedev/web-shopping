@@ -362,6 +362,49 @@ describe("addCartItem", () => {
   });
 });
 
+describe("the picture of a write's response (CR-T031-06)", () => {
+  /** Runs the callback like the real transaction and records whether it threw before committing. */
+  function trackRollback(): { rolledBack: boolean } {
+    const state = { rolledBack: false };
+    repo.inCartTransaction.mockImplementation(async (_userId, _options, work) => {
+      try {
+        return await work(TX, CART_ID);
+      } catch (error) {
+        state.rolledBack = true;
+        throw error;
+      }
+    });
+    return state;
+  }
+
+  it("reads the image key inside the add's transaction and answers with it", async () => {
+    repo.findFirstImageKey.mockResolvedValue("k1");
+    const result = await addCartItem(CUSTOMER, { productId: "product_1", quantity: 1 });
+    expect(repo.findFirstImageKey).toHaveBeenCalledWith(TX, "product_1");
+    expect(result.line.image).toEqual({ key: "k1", url: "/api/files/k1" });
+  });
+
+  it("rolls the add back when the image read fails, so a retry cannot add twice", async () => {
+    const state = trackRollback();
+    repo.findFirstImageKey.mockRejectedValue(new Error("connection lost"));
+    await expect(addCartItem(CUSTOMER, { productId: "product_1", quantity: 1 })).rejects.toThrow(
+      "connection lost",
+    );
+    expect(state.rolledBack).toBe(true);
+  });
+
+  it("reads the image key inside the quantity change's transaction", async () => {
+    const state = trackRollback();
+    repo.findLineInCart.mockResolvedValue({ id: "line_1", productId: "product_1", quantity: 2 });
+    repo.findFirstImageKey.mockRejectedValue(new Error("connection lost"));
+    await expect(updateCartItem(CUSTOMER, "line_1", { quantity: 3 })).rejects.toThrow(
+      "connection lost",
+    );
+    expect(repo.findFirstImageKey).toHaveBeenCalledWith(TX, "product_1");
+    expect(state.rolledBack).toBe(true);
+  });
+});
+
 describe("updateCartItem", () => {
   beforeEach(() => {
     repo.findLineInCart.mockResolvedValue({ id: "line_1", productId: "product_1", quantity: 2 });

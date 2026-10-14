@@ -94,16 +94,6 @@ export async function readFlatShippingFee(): Promise<number> {
   return row.flatShippingFeeSatang;
 }
 
-/** Storage key of the product's first picture, or null. Read after a write has committed. */
-export async function findFirstImageKey(productId: string): Promise<string | null> {
-  const image = await db.productImage.findFirst({
-    where: { productId },
-    select: { upload: { select: { storageKey: true } } },
-    orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
-  });
-  return image?.upload.storageKey ?? null;
-}
-
 // ---------------------------------------------------------------------------------------------
 // Writes (one transaction each)
 // ---------------------------------------------------------------------------------------------
@@ -157,6 +147,29 @@ export async function findVisibleProduct(
     where: { AND: [VISIBLE_PRODUCT_WHERE, { id: productId }] },
     select: WRITE_PRODUCT_SELECT,
   });
+}
+
+/**
+ * Storage key of the product's first picture, or null. Read inside the write's transaction, before
+ * it commits, so that a failed read rolls the write back instead of answering 500 for a stored
+ * write that a retry would add again (CR-T031-06). Two scalar statements, awaited one after the
+ * other, instead of one relation load (DATA_MODEL.md section 7.8).
+ */
+export async function findFirstImageKey(
+  tx: DbTransaction,
+  productId: string,
+): Promise<string | null> {
+  const image = await tx.productImage.findFirst({
+    where: { productId },
+    select: { uploadId: true },
+    orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
+  });
+  if (image === null) return null;
+  const upload = await tx.upload.findUnique({
+    where: { id: image.uploadId },
+    select: { storageKey: true },
+  });
+  return upload?.storageKey ?? null;
 }
 
 export interface LineRow {
