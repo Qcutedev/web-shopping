@@ -73,6 +73,21 @@ Observation for frontend and auth, not security: the proxy sends anonymous visit
 
 Stale text fixed in this review, because each said `getAuthRuntime()` throws before the `try`: SECURITY.md SEC-048 re-check evidence and the `AUTH_SECRET` residual-risk item; `reviews/SEC-046-047-recheck.md` lines 15 and 83, marked superseded, and line 33, dated as pre-CR-83.
 
+## Addendum 2026-10-14: GET /api/v1/categories/{slug} (CR-T021-05, commit b829f77)
+
+Reviewed by reading `src/app/api/v1/categories/[slug]/route.ts`, `getCategory` in `src/modules/catalog/service.ts`, `findActiveCategoryBySlug` in `src/modules/catalog/repository.ts`, `slugParamsSchema` in `src/modules/catalog/schema.ts`, and API_CONTRACTS 5.2. No finding.
+
+| Area | Result | Evidence |
+| --- | --- | --- |
+| Auth | Public by contract. The handler reads no session and no header; it runs inside `handlePublicGet` like its six siblings. | Static case in `tests/security/t020-t018-catalog-shell.test.ts` |
+| Input | The path slug goes through the shared `slugParamsSchema` (decode once, 1 to 200 characters, storable text). A broken escape, U+0000, 201 characters, a lone surrogate, and an empty slug are each `400 VALIDATION_ERROR` before any read, with no echo and no log line. Query parameters are ignored and reach no query. | Same file, refused-request cases and the hostile-query case |
+| Query | Exactly one `category.findFirst` with `where: { slug, isActive: true }` and `select: { name, slug }`. No write, no raw SQL, nothing from the client but the validated slug. | Same file, "one category read by slug and isActive" |
+| Info leak | The answer is exactly `{ name, slug }`; the stored `id`, `isSample`, `sortOrder`, and `isActive` stay out. A database failure is a 500 without the error text, one log line with the class name only. | Same file |
+| Enumeration | An unknown and an inactive slug give the same 404 body after the same single read. The active categories are already public through `GET /categories`, so a found slug reveals nothing new. | Same file, the shared 404 case |
+| Rate limit | None, like every catalog read (API_CONTRACTS 5.2.1). One indexed lookup by unique slug per request, cheaper than the list reads; covered by the existing residual-risk item on public catalog reads in SECURITY.md. | Code reading |
+
+The route guard ("exactly the catalog route files") was red at HEAD 7daf187 because this route was not listed; it now lists seven routes.
+
 ## Checks run
 
 | Command | Result |
@@ -90,6 +105,9 @@ Stale text fixed in this review, because each said `getAuthRuntime()` throws bef
 | `pnpm audit` | 2 high, exit 1: `braces` (SEC-010) and `deepmerge-ts` <8.0.0 (GHSA-ggr8-5vv4-36mx) through the Prisma CLI's `@prisma/config` (SEC-010, amended 2026-10-12). `mysql2` is gone since the SEC-036 override. |
 | Byte scan of the two new test files | 0 bytes outside printable ASCII, tab, CR, and LF; no backslash-u escape |
 | `gitleaks`, `trufflehog` | Not installed; no secret scan was run. The new files hold invented canaries only. |
+| 2026-10-14 addendum: `pnpm vitest run tests/security/t020-t018-catalog-shell.test.ts` | 1 file, 79 passed, exit 0 |
+| 2026-10-14 addendum: `pnpm test` | 122 files, 5 failed, 3384 passed, 5 expected fail, exit 1. None of the five is in this file. Four come from another agent's uncommitted work in the tree at the time (`category-heading.tsx` and its test start with a U+FEFF byte-order mark, `storefront-pages.test.tsx:232` holds a literal U+202E, and `catalog-views.test.tsx` expects text without the new isolate marks). The fifth, the SEC-047 random-value case in `sec046-047-recheck.test.ts`, passed when its file was rerun. |
+| 2026-10-14 addendum: `prettier --check`, `eslint` on the test file; byte scan | exit 0, exit 0; 0 bytes outside printable ASCII, tab, CR, LF |
 
 ## Not verified
 

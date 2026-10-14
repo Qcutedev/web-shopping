@@ -6,7 +6,7 @@
  * special characters are built with String.fromCodePoint.
  *
  * No database. The database client is replaced by a recorder that answers every read with a
- * fixed row and records what was asked. These cases therefore prove what the six catalog route
+ * fixed row and records what was asked. These cases therefore prove what the seven catalog route
  * handlers ask the database for and what they hand out, through the real route files, the real
  * frame (`handlePublicGet`, `handleRequest`), the real schemas, service, repository, and
  * envelope helpers. They do not prove what PostgreSQL returns for those conditions; that is
@@ -183,6 +183,16 @@ const ROUTES: CatalogRoute[] = [
     productQuery: false,
     path: () => "/api/v1/categories",
     load: async () => (await import("@/app/api/v1/categories/route")).GET as Handler,
+  },
+  {
+    // Added 2026-10-14 (CR-T021-05, commit b829f77); review addendum in
+    // docs/reviews/T-020-T-018-security.md.
+    name: "GET /categories/{slug}",
+    list: false,
+    takesSlug: true,
+    productQuery: false,
+    path: (slug) => `/api/v1/categories/${slug}`,
+    load: async () => (await import("@/app/api/v1/categories/[slug]/route")).GET as Handler,
   },
   {
     name: "GET /products",
@@ -424,7 +434,7 @@ describe("T-020 review: every catalog read asks for visible rows only and hands 
     expect(PUBLIC_STORE_WHERE).toEqual({ status: "APPROVED", owner: { isActive: true } });
   });
 
-  it("the recorded queries still carry the full rule after six requests (no caller mutated the shared object)", async () => {
+  it("the recorded queries still carry the full rule after one request per route (no caller mutated the shared object)", async () => {
     const before = JSON.stringify(VISIBLE_PRODUCT_WHERE);
     for (const route of ROUTES) await call(route);
     expect(JSON.stringify(VISIBLE_PRODUCT_WHERE)).toBe(before);
@@ -459,6 +469,26 @@ describe("T-020 review: every catalog read asks for visible rows only and hands 
     const item = (reviews.body as { data: Record<string, unknown>[] }).data[0] ?? {};
     expect(Object.keys(item).sort()).toEqual(["comment", "createdAt", "id", "rating"]);
   });
+
+  it("GET /categories/{slug}: one category read by slug and isActive, answer is exactly { name, slug }", async () => {
+    const answer = await call(routeNamed("GET /categories/{slug}"), {
+      slug: "c-1",
+      query: HOSTILE_QUERY,
+    });
+    expect(answer.status).toBe(200);
+    expect((answer.body as { data: unknown }).data).toEqual({ name: "Category one", slug: "c-1" });
+    // The stored id, isSample, sortOrder, and isActive stay out of the answer.
+    expect(answer.text).not.toContain("cat-1");
+    expect(answer.text).not.toContain("sortOrder");
+    expect(answer.text).not.toContain("isSample");
+    expect(recorder.calls).toEqual([
+      {
+        model: "category",
+        method: "findFirst",
+        args: { where: { slug: "c-1", isActive: true }, select: { name: true, slug: true } },
+      },
+    ]);
+  });
 });
 
 describe("T-020 review: a refused request reads nothing and repeats nothing of the input", () => {
@@ -492,6 +522,19 @@ describe("T-020 review: a refused request reads nothing and repeats nothing of t
     ["GET /stores/{slug}/products", "valid slug, invalid query", { query: `sort=${INPUT_CANARY}` }],
     ["GET /products/{slug}/reviews", "valid slug, pageSize 51", { query: "pageSize=51" }],
     ["GET /categories", "page given twice", { query: "page=1&page=2" }],
+    ["GET /categories/{slug}", "slug broken escape", { slug: `${INPUT_CANARY}%E0%B8` }],
+    ["GET /categories/{slug}", "slug with U+0000 once decoded", { slug: `${INPUT_CANARY}%00` }],
+    [
+      "GET /categories/{slug}",
+      "slug of 201 characters",
+      { slug: `${INPUT_CANARY}${"a".repeat(187)}` },
+    ],
+    [
+      "GET /categories/{slug}",
+      "slug lone surrogate",
+      { slug: `${INPUT_CANARY}${String.fromCharCode(0xd800)}` },
+    ],
+    ["GET /categories/{slug}", "slug empty", { slug: "" }],
   ];
   for (const [routeName, label, options] of cases) {
     it(`${routeName}, ${label}: 400 VALIDATION_ERROR before any database read, input not echoed, nothing logged`, async () => {
@@ -552,6 +595,7 @@ describe("T-020 review: a hidden row and an unknown row get one answer", () => {
       ["GET /stores/{slug}", {}],
       ["GET /stores/{slug}/products", {}],
       ["GET /products", { query: "category=c-1" }],
+      ["GET /categories/{slug}", { slug: "c-1" }],
     ] as const) {
       recorder.calls.length = 0;
       const answer = await call(routeNamed(name), options);
@@ -630,11 +674,12 @@ function posix(path: string): string {
 }
 
 describe("T-020 review: the catalog route files are thin", () => {
-  // The six public catalog routes, named one by one. Every other route file under
+  // The seven public catalog routes, named one by one (GET /categories/{slug} added 2026-10-14). Every other route file under
   // src/app/api/v1 outside auth/ must be listed in REVIEWED_NON_CATALOG_ROUTES, so a new route
   // still fails here until a review has looked at it (T-030 added the three /me routes; their
   // static checks are in tests/security/t030-me-routes.test.ts).
   const CATALOG_ROUTE_PATHS = [
+    "src/app/api/v1/categories/[slug]/route.ts",
     "src/app/api/v1/categories/route.ts",
     "src/app/api/v1/products/[slug]/reviews/route.ts",
     "src/app/api/v1/products/[slug]/route.ts",
@@ -661,7 +706,7 @@ describe("T-020 review: the catalog route files are thin", () => {
   ).filter((path) => !posix(path).startsWith("src/app/api/v1/auth/"));
   const catalogRoutes = nonAuthRoutes.filter((path) => CATALOG_ROUTE_PATHS.includes(posix(path)));
 
-  it("there are exactly the six catalog route files", () => {
+  it("there are exactly the seven catalog route files", () => {
     expect(catalogRoutes.map(posix).sort()).toEqual([...CATALOG_ROUTE_PATHS].sort());
   });
 
