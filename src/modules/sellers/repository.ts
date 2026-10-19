@@ -26,6 +26,7 @@ import {
   type StoreStatusValue,
 } from "./state";
 import { containsReservedName, isStoreNameKeyViolation, RESERVED_STORE_NAMES } from "./store-name";
+import { isUniqueIndexViolation, STORE_OWNER_INDEX, STORE_SLUG_INDEX } from "./unique-index";
 
 export const SELLER_TRANSACTION_OPTIONS = { maxWait: 5_000, timeout: 10_000 } as const;
 
@@ -387,6 +388,10 @@ export async function updateOwnStore(
  * row) waits until the caller's transaction ends, so the store cannot become `SUSPENDED` between
  * this check and the caller's write (DATA_MODEL.md section 7.7, step 8 of section 1.8). False
  * means the write must be refused with `403 SELLER_NOT_APPROVED`.
+ *
+ * Never follow it with an update of the same `Store` row in the same transaction: two callers
+ * holding `FOR SHARE` on one row and then both updating it deadlock (CR-T040-04; see
+ * `requireApprovedStoreForWrite`).
  */
 export async function lockStoreIfApproved(
   tx: DbTransaction,
@@ -496,15 +501,18 @@ async function moveApplication(
  *      `isActive = true`; section 7.6); zero rows rolls everything back as
  *      `applicant-not-customer`;
  *   6. the store is created with status `APPROVED`, the application's name, description, and
- *      contact phone, and a generated slug (`Store_ownerId_key` is the backstop against a second
- *      store). A name whose key another store has (approved since the application was submitted)
- *      is refused by `Store_nameKey_key`; the error leaves the callback, everything is rolled back,
- *      and the outcome is `store-name-taken` with the application still `PENDING` (D-041 point 1);
+ *      contact phone, and a generated slug. A name whose key another store has (approved since the
+ *      application was submitted) is refused by `Store_nameKey_key`; the error leaves the callback,
+ *      everything is rolled back, and the outcome is `store-name-taken` with the application still
+ *      `PENDING` (D-041 point 1). `Store_ownerId_key` is the backstop against a second store: its
+ *      violation (a `CUSTOMER` who already owns a store row) rolls everything back as
+ *      `applicant-not-customer`, without a retry (CR-T040-02);
  *   7. one `AuditLog` row (REQ-A-10), in the same transaction.
  *
- * Any other unique violation (a slug collision, which is all but impossible with 40 random bits)
- * rolls the transaction back and the whole approval is tried again with a new slug, at most
- * APPROVAL_SLUG_ATTEMPTS times; after that the error is passed on (500, nothing stored).
+ * Only a `Store_slug_key` violation (a slug collision, all but impossible with 40 random bits)
+ * rolls the transaction back and tries the whole approval again with a new slug, at most
+ * APPROVAL_SLUG_ATTEMPTS times; after that, and for any other error, the error is passed on (500,
+ * nothing stored).
  */
 export async function approveApplicationRow(
   applicationId: string,
@@ -574,7 +582,16 @@ export async function approveApplicationRow(
     } catch (error) {
       if (error instanceof Rollback) return { kind: "applicant-not-customer" };
       if (isStoreNameKeyViolation(error)) return { kind: "store-name-taken" };
-      if (isUniqueViolation(error) && attempt < APPROVAL_SLUG_ATTEMPTS) continue;
+      // The applicant already owns a store row although the role was CUSTOMER (BR-06; the data
+      // model forbids it): the same refusal as a role that is no longer CUSTOMER, not a retry and
+      // not a 500 (CR-T040-02).
+      if (isUniqueIndexViolation(error, STORE_OWNER_INDEX)) {
+        return { kind: "applicant-not-customer" };
+      }
+      // Only a slug collision is worth another attempt with a new slug (CR-T040-02).
+      if (isUniqueIndexViolation(error, STORE_SLUG_INDEX) && attempt < APPROVAL_SLUG_ATTEMPTS) {
+        continue;
+      }
       throw error;
     }
   }

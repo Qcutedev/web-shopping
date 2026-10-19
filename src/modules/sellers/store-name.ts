@@ -30,7 +30,8 @@
  * beyond the constraint name and the PostgreSQL code (DATA_MODEL.md section 21.5; SR-04).
  */
 import { th } from "@/i18n/th";
-import { Prisma } from "@/server/db";
+
+import { isUniqueIndexViolation } from "./unique-index";
 
 /**
  * Text a store name may not contain, compared by key (so `ADMIN`, `Ａｄｍｉｎ`, and ` admin ` are all
@@ -89,27 +90,12 @@ export function containsReservedName(nameKey: string, reservedKeys: readonly str
 /** The unique index on the generated `Store.nameKey` (migration `20261015090000_store_name_key`). */
 export const STORE_NAME_KEY_INDEX = "Store_nameKey_key";
 
-/** PostgreSQL's `unique_violation`. */
-const UNIQUE_VIOLATION_SQLSTATE = "23505";
-
-function field(value: unknown, key: string): unknown {
-  if (typeof value !== "object" || value === null) return undefined;
-  return Object.hasOwn(value, key) ? (value as Record<string, unknown>)[key] : undefined;
-}
-
 /**
  * True when `error` is the unique index `Store_nameKey_key` refusing a write through the model API
  * (`P2002`, `meta.driverAdapterError.cause.constraint.index` and `cause.originalCode` `23505`;
  * DATA_MODEL.md section 21.5). Any other unique violation (slug, owner, logo) is false, so it keeps
- * its own handling. Reads only those two labels of `meta`.
+ * its own handling. Reads only those two labels of `meta` (`isUniqueIndexViolation`).
  */
 export function isStoreNameKeyViolation(error: unknown): boolean {
-  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") {
-    return false;
-  }
-  const cause = field(field(error.meta, "driverAdapterError"), "cause");
-  return (
-    field(field(cause, "constraint"), "index") === STORE_NAME_KEY_INDEX &&
-    field(cause, "originalCode") === UNIQUE_VIOLATION_SQLSTATE
-  );
+  return isUniqueIndexViolation(error, STORE_NAME_KEY_INDEX);
 }

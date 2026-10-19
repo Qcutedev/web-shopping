@@ -212,6 +212,14 @@ export async function updateOwnStore(
  * (403, from the session's actor), then share-locks the store row while it is still `APPROVED`
  * and owned by the actor, so a suspension cannot commit before the caller's write does
  * (DATA_MODEL.md section 7.7). Returns the store id to scope the write by.
+ *
+ * Deadlock warning (CR-T040-04): the lock is `FOR SHARE`. The caller must not update or delete
+ * the `Store` row itself later in the same transaction. Two such transactions on one store would
+ * each hold the share lock and wait for the other to release it before the update; PostgreSQL
+ * then aborts one of them with a deadlock error (a 500). Writes to other tables that only
+ * reference the store (products, uploads, stock) are safe. A task that must change the store row
+ * takes a stronger lock first instead (as `updateOwnStore` does with `FOR UPDATE` or
+ * `FOR NO KEY UPDATE`) and does not call this helper.
  */
 export async function requireApprovedStoreForWrite(
   tx: DbTransaction,
