@@ -569,6 +569,45 @@ export async function readJsonBody(
 }
 
 /**
+ * The largest byte limit `readRawBodyBytes` accepts: 8 MiB. It exists for the upload reader
+ * (src/modules/uploads), whose limit is one file of 5 MB plus the multipart framing, and stays
+ * far below the 41 MiB that SR-05 item 6 allows one upload request. It also keeps every limit
+ * within the seven decimal digits that `contentLengthAllows` compares.
+ */
+export const MAX_RAW_BODY_LIMIT_BYTES = 8_388_608;
+
+/**
+ * Reads a request body as bytes under a byte limit, for the upload module only (SR-05 item 1:
+ * bodies are read through helpers in this file and the upload module). The same two-step
+ * enforcement as `readJsonBody` (SR-05 items 3, 8, 9, and 10): a `Content-Length` that exceeds
+ * `maxBytes` or is not a plain decimal number is 413 before a byte is read; the stream is then
+ * read by `readBytesUpTo`, which stops as soon as the count passes the limit (413), holds memory
+ * in proportion to the limit, bounds the number of reads, and answers a body that stops arriving
+ * with `requestBodyAborted` (a client error, provisional with docs/API_CONTRACTS.md item
+ * 8.2-13).
+ *
+ * It does not judge the content type: the caller has already called `assertContentType` (step 2
+ * of section 1.8) and parses the bytes itself. A `maxBytes` that is not a positive integer of at
+ * most MAX_RAW_BODY_LIMIT_BYTES is a programming error and throws a TypeError first. A body that
+ * was already read is a server fault. A request without a body gives zero bytes.
+ */
+export async function readRawBodyBytes(request: Request, maxBytes: number): Promise<Uint8Array> {
+  if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_RAW_BODY_LIMIT_BYTES) {
+    throw new TypeError(
+      `readRawBodyBytes: maxBytes must be an integer from 1 to ${MAX_RAW_BODY_LIMIT_BYTES}.`,
+    );
+  }
+  if (!contentLengthAllows(request, maxBytes)) throw payloadTooLarge();
+  if (request.bodyUsed) {
+    throw new TypeError("readRawBodyBytes: the request body was already read.");
+  }
+  if (request.body === null) return new Uint8Array(0);
+  const bytes = await readBytesUpTo(request.body, maxBytes);
+  if (bytes === undefined) throw payloadTooLarge();
+  return bytes;
+}
+
+/**
  * The cause of the 500 that `parseInput` throws when the schema throws. The log records only
  * its class name (SEC-048), so the name itself says what went wrong. What the schema threw is
  * kept as its `cause`, in memory only.
