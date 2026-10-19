@@ -18,7 +18,12 @@
  *
  * Nothing here logs: the rows hold names and phone numbers (SECURITY.md SR-04).
  */
-import { db, type DbTransaction, Prisma } from "@/server/db";
+import {
+  db,
+  type DbTransaction,
+  isUniqueViolation as isAnyUniqueViolation,
+  Prisma,
+} from "@/server/db";
 
 import {
   applicationSourceStates,
@@ -37,9 +42,9 @@ function isKnownError(error: unknown, code: string): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === code;
 }
 
-/** P2002: a unique constraint refused the write. */
+/** P2002: a unique constraint refused the write (the shared helper, CR-T040-05). */
 export function isUniqueViolation(error: unknown): boolean {
-  return isKnownError(error, "P2002");
+  return isAnyUniqueViolation(error);
 }
 
 /** P2003: a foreign key refused the write. */
@@ -391,7 +396,8 @@ export async function updateOwnStore(
  *
  * Never follow it with an update of the same `Store` row in the same transaction: two callers
  * holding `FOR SHARE` on one row and then both updating it deadlock (CR-T040-04; see
- * `requireApprovedStoreForWrite`).
+ * `requireApprovedStoreForWrite`). A write of the `Store` row itself uses
+ * `lockStoreForRowWriteIfApproved` instead (CR-T040-06).
  */
 export async function lockStoreIfApproved(
   tx: DbTransaction,
@@ -402,6 +408,41 @@ export async function lockStoreIfApproved(
     SELECT "id" FROM "Store"
     WHERE "id" = ${storeId} AND "ownerId" = ${userId} AND "status" = 'APPROVED'
     FOR SHARE`;
+  return rows.length === 1;
+}
+
+/**
+ * How a writer of the `Store` row locks it (CR-T040-06). `FOR NO KEY UPDATE` for a change that
+ * leaves every unique key column alone; `FOR UPDATE` for a change of a column under a unique
+ * index (`name`, through the generated `nameKey`), because PostgreSQL takes that lock for such an
+ * update anyway and upgrading to it later can deadlock with `FOR KEY SHARE` holders.
+ */
+export type StoreRowLock = "FOR NO KEY UPDATE" | "FOR UPDATE";
+
+/**
+ * The variant of `lockStoreIfApproved` for a transaction that will update the `Store` row itself
+ * (CR-T040-06): the same condition (the store belongs to `userId` and is `APPROVED`), with a lock
+ * that the later update of the same row does not have to upgrade, so two such writers queue
+ * instead of deadlocking. A suspension (an update of the row) still waits until the caller ends.
+ * False means the write must be refused with `403 SELLER_NOT_APPROVED`. The two statements differ
+ * only in the fixed lock clause; nothing of a request reaches the SQL text.
+ */
+export async function lockStoreForRowWriteIfApproved(
+  tx: DbTransaction,
+  storeId: string,
+  userId: string,
+  lock: StoreRowLock,
+): Promise<boolean> {
+  const rows =
+    lock === "FOR UPDATE"
+      ? await tx.$queryRaw<{ id: string }[]>`
+          SELECT "id" FROM "Store"
+          WHERE "id" = ${storeId} AND "ownerId" = ${userId} AND "status" = 'APPROVED'
+          FOR UPDATE`
+      : await tx.$queryRaw<{ id: string }[]>`
+          SELECT "id" FROM "Store"
+          WHERE "id" = ${storeId} AND "ownerId" = ${userId} AND "status" = 'APPROVED'
+          FOR NO KEY UPDATE`;
   return rows.length === 1;
 }
 

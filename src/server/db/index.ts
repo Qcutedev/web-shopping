@@ -24,6 +24,17 @@ export {
 } from "./connection-target";
 
 /**
+ * Recognising a unique-constraint violation by its index name (CR-T040-05; DATA_MODEL.md section
+ * 21.5). Reads only the index name and the SQLSTATE of the error, never the conflicting value.
+ */
+export {
+  isRawUniqueIndexViolation,
+  isUniqueIndexViolation,
+  isUniqueViolation,
+  UNIQUE_VIOLATION_SQLSTATE,
+} from "./unique-violation";
+
+/**
  * `Prisma` carries the raw-query helpers (`Prisma.sql`, `Prisma.join`), the error classes
  * (`Prisma.PrismaClientKnownRequestError`), and every generated input and result type.
  */

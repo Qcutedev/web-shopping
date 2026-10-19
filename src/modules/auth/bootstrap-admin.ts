@@ -38,7 +38,7 @@
  */
 import { generateRandomString, hashPassword } from "better-auth/crypto";
 
-import { db, Prisma, Role } from "@/server/db";
+import { db, isUniqueViolation, Prisma, Role } from "@/server/db";
 
 import { signUpBodySchema } from "./schema";
 
@@ -171,10 +171,6 @@ function classify(existing: ExistingAccount): BootstrapAdminOutcome {
 /** The library's id format (`generateId` of better-auth: 32 characters of a-z, A-Z, 0-9). */
 function libraryId(): string {
   return generateRandomString(32, "a-z", "A-Z", "0-9");
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 }
 
 /**

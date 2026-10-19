@@ -32,6 +32,7 @@ vi.mock("@/modules/sellers/service", () => ({
   getOwnApplication: vi.fn(),
   getOwnStore: vi.fn(),
   rejectApplication: vi.fn(),
+  requireApprovedStoreForStoreRowWrite: vi.fn(),
   requireApprovedStoreForWrite: vi.fn(),
   submitApplication: vi.fn(),
   updateOwnStore: vi.fn(),

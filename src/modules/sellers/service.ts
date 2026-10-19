@@ -17,6 +17,7 @@
  *   approveApplication       admin (T-050 exposes it)      ADMIN
  *   rejectApplication        admin (T-050 exposes it)      ADMIN
  *   requireApprovedStoreForWrite   helper for later seller writes (T-041, T-042)
+ *   requireApprovedStoreForStoreRowWrite   the same for a write of the Store row (CR-T040-06)
  */
 import { imageRef } from "@/modules/catalog/image";
 import { type Actor, requireApprovedSeller, requireRole } from "@/server/auth/actor";
@@ -42,6 +43,7 @@ import {
   findLatestApplication,
   findOwnStore,
   insertApplication,
+  lockStoreForRowWriteIfApproved,
   lockStoreIfApproved,
   rejectApplicationRow,
   type StoreRow,
@@ -217,9 +219,9 @@ export async function updateOwnStore(
  * the `Store` row itself later in the same transaction. Two such transactions on one store would
  * each hold the share lock and wait for the other to release it before the update; PostgreSQL
  * then aborts one of them with a deadlock error (a 500). Writes to other tables that only
- * reference the store (products, uploads, stock) are safe. A task that must change the store row
- * takes a stronger lock first instead (as `updateOwnStore` does with `FOR UPDATE` or
- * `FOR NO KEY UPDATE`) and does not call this helper.
+ * reference the store (products, uploads, stock) are safe. A write that must change the store row
+ * calls `requireApprovedStoreForStoreRowWrite` below instead (CR-T040-06), which makes the same
+ * check under a lock the later update does not have to upgrade.
  */
 export async function requireApprovedStoreForWrite(
   tx: DbTransaction,
@@ -227,6 +229,32 @@ export async function requireApprovedStoreForWrite(
 ): Promise<{ storeId: string }> {
   const { storeId } = requireApprovedSeller(actor);
   if (!(await lockStoreIfApproved(tx, storeId, actor.userId))) throw storeNotApproved();
+  return { storeId };
+}
+
+/**
+ * The variant of `requireApprovedStoreForWrite` for a seller write that updates the `Store` row
+ * itself later in the same transaction (CR-T040-06), as the first statement of that transaction:
+ * the same refusals (403 FORBIDDEN for a caller who is not a `SELLER`, 403 SELLER_NOT_APPROVED
+ * unless the store is `APPROVED`, judged from the session's actor and again under the lock), but
+ * the store row is locked `FOR NO KEY UPDATE`, or `FOR UPDATE` when `changesUniqueKey` is set
+ * (the update changes `name`, and so the unique `nameKey`). Two such writers on one store queue
+ * one behind the other instead of deadlocking, and a suspension waits until the caller ends.
+ * Returns the store id to scope the write by.
+ *
+ * `updateOwnStore` predates this helper and takes the same two locks itself (`lockOwnStore`),
+ * because it also reads the current name under the lock.
+ */
+export async function requireApprovedStoreForStoreRowWrite(
+  tx: DbTransaction,
+  actor: Actor,
+  options: { changesUniqueKey: boolean },
+): Promise<{ storeId: string }> {
+  const { storeId } = requireApprovedSeller(actor);
+  const lock = options.changesUniqueKey ? "FOR UPDATE" : "FOR NO KEY UPDATE";
+  if (!(await lockStoreForRowWriteIfApproved(tx, storeId, actor.userId, lock))) {
+    throw storeNotApproved();
+  }
   return { storeId };
 }
 

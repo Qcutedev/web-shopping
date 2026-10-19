@@ -15,6 +15,7 @@ import {
   getOwnApplication,
   getOwnStore,
   rejectApplication,
+  requireApprovedStoreForStoreRowWrite,
   requireApprovedStoreForWrite,
   submitApplication,
   toApplicationDto,
@@ -28,6 +29,7 @@ const repo = vi.hoisted(() => ({
   findOwnStore: vi.fn(),
   updateOwnStore: vi.fn(),
   lockStoreIfApproved: vi.fn(),
+  lockStoreForRowWriteIfApproved: vi.fn(),
   approveApplicationRow: vi.fn(),
   rejectApplicationRow: vi.fn(),
 }));
@@ -302,6 +304,48 @@ describe("requireApprovedStoreForWrite", () => {
       "SELLER_NOT_APPROVED",
     );
     expect(repo.lockStoreIfApproved).not.toHaveBeenCalled();
+  });
+});
+
+describe("requireApprovedStoreForStoreRowWrite (CR-T040-06)", () => {
+  const TX = {} as DbTransaction;
+
+  it.each([
+    [false, "FOR NO KEY UPDATE"],
+    [true, "FOR UPDATE"],
+  ] as const)("changesUniqueKey %s takes %s on the session's store", async (changes, lock) => {
+    repo.lockStoreForRowWriteIfApproved.mockResolvedValue(true);
+    await expect(
+      requireApprovedStoreForStoreRowWrite(TX, SELLER, { changesUniqueKey: changes }),
+    ).resolves.toEqual({ storeId: "store_own" });
+    expect(repo.lockStoreForRowWriteIfApproved).toHaveBeenCalledWith(
+      TX,
+      "store_own",
+      SELLER.userId,
+      lock,
+    );
+    expect(repo.lockStoreIfApproved).not.toHaveBeenCalled();
+  });
+
+  it("is 403 SELLER_NOT_APPROVED when the store is no longer approved", async () => {
+    repo.lockStoreForRowWriteIfApproved.mockResolvedValue(false);
+    expect(
+      await codeOf(requireApprovedStoreForStoreRowWrite(TX, SELLER, { changesUniqueKey: false })),
+    ).toBe("SELLER_NOT_APPROVED");
+  });
+
+  it("refuses a customer, an admin, and a suspended seller without a query", async () => {
+    const options = { changesUniqueKey: false };
+    expect(await codeOf(requireApprovedStoreForStoreRowWrite(TX, CUSTOMER, options))).toBe(
+      "FORBIDDEN",
+    );
+    expect(await codeOf(requireApprovedStoreForStoreRowWrite(TX, ADMIN, options))).toBe(
+      "FORBIDDEN",
+    );
+    expect(await codeOf(requireApprovedStoreForStoreRowWrite(TX, SUSPENDED_SELLER, options))).toBe(
+      "SELLER_NOT_APPROVED",
+    );
+    expect(repo.lockStoreForRowWriteIfApproved).not.toHaveBeenCalled();
   });
 });
 
