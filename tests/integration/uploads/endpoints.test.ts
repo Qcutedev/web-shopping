@@ -16,7 +16,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { GET as getFileRoute } from "@/app/api/files/[key]/route";
 import { PATCH as patchStoreRoute } from "@/app/api/v1/seller/store/route";
 import { POST as postUploadRoute } from "@/app/api/v1/seller/uploads/route";
-import { createUpload, LocalDiskStorage, MAX_UPLOAD_FILE_BYTES } from "@/modules/uploads";
+import {
+  cleanUpExpiredOrphans,
+  createUpload,
+  LocalDiskStorage,
+  MAX_UNATTACHED_UPLOADS_PER_STORE,
+  MAX_UPLOAD_FILE_BYTES,
+} from "@/modules/uploads";
 import {
   ascii,
   fileBody,
@@ -28,7 +34,13 @@ import {
 } from "@/modules/uploads/test-fixtures";
 import { db } from "@/server/db";
 
-import { createUpload as createUploadRow } from "../../helpers/factories";
+import {
+  createOrderItemRow,
+  createProduct,
+  createProductImage,
+  createSellerOrderRow,
+  createUpload as createUploadRow,
+} from "../../helpers/factories";
 import { APP_ORIGIN, APP_URL, resetProcessRateLimiter, stubAuthEnvironment } from "../auth/support";
 import { errorCode, json, request as jsonRequest, signedIn } from "../sellers/support";
 
@@ -547,5 +559,304 @@ describe("GET /api/files/{key}", () => {
     await unlink(join(uploadDir, data.key.slice(0, 2), data.key));
     const response = await getFileRoute(fileRequest(data.key), fileContext(data.key));
     expect(response.status).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// SEC-065: the cap on unattached uploads, orphans not served, the cleanup
+// ---------------------------------------------------------------------------------------------
+
+const HOUR_MS = 3_600_000;
+
+async function uploadedKey(cookie: string): Promise<string> {
+  const response = await postUploadRoute(uploadRequest(fileBody(jpegBytes()), { cookie }));
+  expect(response.status).toBe(201);
+  return (await json<{ data: { key: string } }>(response)).data.key;
+}
+
+async function setAge(storageKey: string, hours: number): Promise<{ id: string }> {
+  return db.upload.update({
+    where: { storageKey },
+    data: { createdAt: new Date(Date.now() - hours * HOUR_MS) },
+    select: { id: true },
+  });
+}
+
+/** `count` unattached `Upload` rows of the store, written directly (no bytes). */
+async function fillStore(storeId: string, count: number, hoursOld = 0): Promise<string[]> {
+  const ids: string[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const row = await createUploadRow({
+      storeId,
+      createdAt: new Date(Date.now() - hoursOld * HOUR_MS),
+    });
+    ids.push(row.id);
+  }
+  return ids;
+}
+
+function fileOf(key: string): string {
+  return join(key.slice(0, 2), key);
+}
+
+describe("SEC-065: a store's cap on uploads nothing references", () => {
+  it("a store at the cap is refused 409 UPLOAD_LIMIT before the body is read, and nothing is stored", async () => {
+    const seller = await signedIn("SELLER");
+    await fillStore(seller.storeId ?? "", MAX_UNATTACHED_UPLOADS_PER_STORE);
+    const before = await state();
+    const body = watchedBody(fileBody(jpegBytes()));
+    const response = await postUploadRoute(uploadRequest(body.stream, { cookie: seller.cookie }));
+    expect(response.status).toBe(409);
+    const { error } = await json<{ error: { code: string; details: unknown } }>(response);
+    expect(error).toMatchObject({ code: "CONFLICT", details: { reason: "UPLOAD_LIMIT" } });
+    expect(body.pulled()).toBe(false);
+    await storedNothing(before);
+  });
+
+  it("the service refuses at the cap too, inside the transaction (the early check passed over)", async () => {
+    const seller = await signedIn("SELLER");
+    await fillStore(seller.storeId ?? "", MAX_UNATTACHED_UPLOADS_PER_STORE);
+    const before = await state();
+    const actor = {
+      userId: seller.userId,
+      role: "SELLER" as const,
+      storeId: seller.storeId,
+      storeStatus: "APPROVED" as const,
+    };
+    await expect(
+      createUpload(
+        actor,
+        { contentType: "image/jpeg", bytes: jpegBytes() },
+        { storage: new LocalDiskStorage(uploadDir) },
+      ),
+    ).rejects.toMatchObject({ code: "CONFLICT", status: 409, details: { reason: "UPLOAD_LIMIT" } });
+    await storedNothing(before);
+  });
+
+  it("product pictures, the logo, and order pictures do not count; each attach frees one place", async () => {
+    const seller = await signedIn("SELLER");
+    const storeId = seller.storeId ?? "";
+    const [forPicture, forLogo, forOrder] = await fillStore(
+      storeId,
+      MAX_UNATTACHED_UPLOADS_PER_STORE,
+    );
+    await createProductImage({
+      productId: (await createProduct({ storeId })).id,
+      uploadId: forPicture ?? "",
+    });
+    await db.store.update({ where: { id: storeId }, data: { logoUploadId: forLogo ?? "" } });
+    await createOrderItemRow({
+      sellerOrderId: (await createSellerOrderRow({ storeId })).id,
+      productImageUploadId: forOrder ?? "",
+    });
+    for (let i = 0; i < 3; i += 1) await uploadedKey(seller.cookie);
+    const refused = await postUploadRoute(
+      uploadRequest(fileBody(jpegBytes()), { cookie: seller.cookie }),
+    );
+    expect(refused.status).toBe(409);
+  });
+
+  it("another store's uploads never count against the caller's store", async () => {
+    const full = await signedIn("SELLER");
+    const other = await signedIn("SELLER");
+    await fillStore(full.storeId ?? "", MAX_UNATTACHED_UPLOADS_PER_STORE);
+    expect(
+      (await postUploadRoute(uploadRequest(fileBody(jpegBytes()), { cookie: full.cookie }))).status,
+    ).toBe(409);
+    await uploadedKey(other.cookie);
+  });
+
+  it("orphans past the grace period count until the cleanup deletes them", async () => {
+    const seller = await signedIn("SELLER");
+    await fillStore(seller.storeId ?? "", MAX_UNATTACHED_UPLOADS_PER_STORE, 25);
+    expect(
+      (await postUploadRoute(uploadRequest(fileBody(jpegBytes()), { cookie: seller.cookie })))
+        .status,
+    ).toBe(409);
+    await cleanUpExpiredOrphans({ storage: new LocalDiskStorage(uploadDir), maxBatches: 1_000 });
+    expect(await db.upload.count({ where: { storeId: seller.storeId ?? "" } })).toBe(0);
+    await uploadedKey(seller.cookie);
+  });
+
+  it("parallel uploads of one store cannot pass the cap: one place left, three tries, one stored", async () => {
+    const seller = await signedIn("SELLER");
+    const storeId = seller.storeId ?? "";
+    await fillStore(storeId, MAX_UNATTACHED_UPLOADS_PER_STORE - 1);
+    const filesBefore = await filesUnder(uploadDir);
+    const actor = {
+      userId: seller.userId,
+      role: "SELLER" as const,
+      storeId,
+      storeStatus: "APPROVED" as const,
+    };
+    const results = await Promise.allSettled(
+      [0, 1, 2].map(() =>
+        createUpload(
+          actor,
+          { contentType: "image/jpeg", bytes: jpegBytes(50_000) },
+          { storage: new LocalDiskStorage(uploadDir) },
+        ),
+      ),
+    );
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    for (const r of results.filter((x) => x.status === "rejected")) {
+      expect((r as PromiseRejectedResult).reason).toMatchObject({
+        code: "CONFLICT",
+        details: { reason: "UPLOAD_LIMIT" },
+      });
+    }
+    expect(await db.upload.count({ where: { storeId } })).toBe(MAX_UNATTACHED_UPLOADS_PER_STORE);
+    expect((await filesUnder(uploadDir)).length).toBe(filesBefore.length + 1);
+  });
+});
+
+describe("SEC-065: GET /api/files/{key} for uploads nothing references", () => {
+  async function status(key: string): Promise<number> {
+    return (await getFileRoute(fileRequest(key), fileContext(key))).status;
+  }
+
+  it("is served inside the grace period, and 404 after it, the same 404 as an unknown key", async () => {
+    const seller = await signedIn("SELLER");
+    const key = await uploadedKey(seller.cookie);
+    await setAge(key, 23);
+    expect(await status(key)).toBe(200);
+    await setAge(key, 25);
+    const response = await getFileRoute(fileRequest(key), fileContext(key));
+    expect(response.status).toBe(404);
+    const unknown = "f".repeat(32);
+    const unknownResponse = await getFileRoute(fileRequest(unknown), fileContext(unknown));
+    const shape = async (r: Response) => {
+      const { error } = await json<{ error: { code: string; message: string; details: unknown } }>(
+        r,
+      );
+      return [error.code, error.message, error.details];
+    };
+    expect(await shape(response)).toEqual(await shape(unknownResponse));
+  });
+
+  it("past the grace period, an upload that a product picture, a logo, or only an order item references is served", async () => {
+    const seller = await signedIn("SELLER");
+    const storeId = seller.storeId ?? "";
+    const picture = await uploadedKey(seller.cookie);
+    const logo = await uploadedKey(seller.cookie);
+    const ordered = await uploadedKey(seller.cookie);
+    const pictureRow = await setAge(picture, 25);
+    const logoRow = await setAge(logo, 25);
+    const orderedRow = await setAge(ordered, 25);
+    await createProductImage({
+      productId: (await createProduct({ storeId })).id,
+      uploadId: pictureRow.id,
+    });
+    await db.store.update({ where: { id: storeId }, data: { logoUploadId: logoRow.id } });
+    await createOrderItemRow({
+      sellerOrderId: (await createSellerOrderRow({ storeId })).id,
+      productImageUploadId: orderedRow.id,
+    });
+    for (const key of [picture, logo, ordered]) expect(await status(key)).toBe(200);
+  });
+});
+
+describe("SEC-065: the orphan cleanup", () => {
+  it("deletes expired orphans, row and bytes, and keeps everything else", async () => {
+    const seller = await signedIn("SELLER");
+    const storeId = seller.storeId ?? "";
+    const [expired, fresh, picture, logo, ordered] = [
+      await uploadedKey(seller.cookie),
+      await uploadedKey(seller.cookie),
+      await uploadedKey(seller.cookie),
+      await uploadedKey(seller.cookie),
+      await uploadedKey(seller.cookie),
+    ];
+    await setAge(expired, 25);
+    await setAge(fresh, 23);
+    const pictureRow = await setAge(picture, 25);
+    const logoRow = await setAge(logo, 25);
+    const orderedRow = await setAge(ordered, 25);
+    await createProductImage({
+      productId: (await createProduct({ storeId })).id,
+      uploadId: pictureRow.id,
+    });
+    await db.store.update({ where: { id: storeId }, data: { logoUploadId: logoRow.id } });
+    await createOrderItemRow({
+      sellerOrderId: (await createSellerOrderRow({ storeId })).id,
+      productImageUploadId: orderedRow.id,
+    });
+
+    const result = await cleanUpExpiredOrphans({
+      storage: new LocalDiskStorage(uploadDir),
+      maxBatches: 1_000,
+    });
+    expect(result.rowsDeleted).toBeGreaterThanOrEqual(1);
+
+    expect(await db.upload.findUnique({ where: { storageKey: expired } })).toBeNull();
+    const files = await filesUnder(uploadDir);
+    expect(files).not.toContain(fileOf(expired));
+    for (const key of [fresh, picture, logo, ordered]) {
+      expect(await db.upload.findUnique({ where: { storageKey: key } })).not.toBeNull();
+      expect(files).toContain(fileOf(key));
+    }
+  });
+
+  it("skips an upload that a transaction is attaching at that moment, which keeps its row and bytes", async () => {
+    const seller = await signedIn("SELLER");
+    const storeId = seller.storeId ?? "";
+    const key = await uploadedKey(seller.cookie);
+    const row = await setAge(key, 25);
+    const product = await createProduct({ storeId });
+
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let attached: () => void = () => undefined;
+    const attachedSignal = new Promise<void>((resolve) => {
+      attached = resolve;
+    });
+    const attach = db.$transaction(
+      async (tx) => {
+        await tx.productImage.create({
+          data: { productId: product.id, uploadId: row.id, sortOrder: 0 },
+        });
+        attached();
+        await gate;
+      },
+      { maxWait: 5_000, timeout: 20_000 },
+    );
+    await attachedSignal;
+    try {
+      await cleanUpExpiredOrphans({ storage: new LocalDiskStorage(uploadDir), maxBatches: 1_000 });
+    } finally {
+      release();
+    }
+    await attach;
+    expect(await db.upload.findUnique({ where: { storageKey: key } })).not.toBeNull();
+    expect(await filesUnder(uploadDir)).toContain(fileOf(key));
+    expect((await getFileRoute(fileRequest(key), fileContext(key))).status).toBe(200);
+  });
+
+  it("a file whose deletion fails stays without a row, is never served, and the run goes on", async () => {
+    const seller = await signedIn("SELLER");
+    const key = await uploadedKey(seller.cookie);
+    await setAge(key, 25);
+    const storage = new LocalDiskStorage(uploadDir);
+    const warn: unknown[][] = [];
+    const failing = {
+      put: storage.put.bind(storage),
+      get: storage.get.bind(storage),
+      delete: async (k: string) => {
+        if (k === key) throw Object.assign(new Error("EPERM"), { code: "EPERM" });
+        await storage.delete(k);
+      },
+    };
+    const result = await cleanUpExpiredOrphans({
+      storage: failing,
+      log: { warn: (...args: unknown[]) => warn.push(args) },
+      maxBatches: 1_000,
+    });
+    expect(result.filesFailed).toBeGreaterThanOrEqual(1);
+    expect(warn).toContainEqual([expect.any(String), { storageKey: key }]);
+    expect(await db.upload.findUnique({ where: { storageKey: key } })).toBeNull();
+    expect(await filesUnder(uploadDir)).toContain(fileOf(key));
+    expect((await getFileRoute(fileRequest(key), fileContext(key))).status).toBe(404);
   });
 });

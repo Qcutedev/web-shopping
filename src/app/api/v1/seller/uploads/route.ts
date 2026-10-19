@@ -7,11 +7,18 @@
  * Order of checks (section 1.8): 1 `Origin` (403), 2 `Content-Type` `multipart/form-data` (415),
  * 3 the session (401), 4 the role `SELLER` and an `APPROVED` store (403 FORBIDDEN, or
  * 403 SELLER_NOT_APPROVED for a suspended store; D-032 point 1), 5 the `uploads` rate limit
- * (429), and only then 6 and 7, the body (reader.ts: 413, 400, 415), then the service (403
- * SELLER_NOT_APPROVED again under the store row's lock). Nothing of the body is read, held, or
- * stored for a request refused at steps 1 to 5 (SECURITY.md SR-05 item 5).
+ * (429), 5b the store's cap of unattached uploads (409 CONFLICT `UPLOAD_LIMIT`, SEC-065), and
+ * only then 6 and 7, the body (reader.ts: 413, 400, 415), then the service (403
+ * SELLER_NOT_APPROVED again under the store row's lock, and the cap again under the store's upload
+ * lock). Nothing of the body is read, held, or stored for a request refused at steps 1 to 5b
+ * (SECURITY.md SR-05 item 5).
  */
-import { createUpload, getUploadStorage, readUploadRequest } from "@/modules/uploads";
+import {
+  assertUploadAllowance,
+  createUpload,
+  getUploadStorage,
+  readUploadRequest,
+} from "@/modules/uploads";
 import { requireApprovedSeller } from "@/server/auth/actor";
 import { recordSecurityEvent } from "@/server/auth/security-events";
 import { requireActor } from "@/server/auth/session";
@@ -50,6 +57,8 @@ export async function POST(request: Request): Promise<Response> {
       });
       throw rateLimited(limit.retryAfterSeconds);
     }
+    // SEC-065: a store at its cap of unattached uploads is refused before the body is read.
+    await assertUploadAllowance(actor);
     const image = await readUploadRequest(request);
     return created(await createUpload(actor, image, { storage, log }), { requestId });
   });

@@ -65,6 +65,27 @@ export const FILE_CACHE_CONTROL = "no-store";
  */
 export const INVALID_MULTIPART_FIELD_CODE = "invalid_multipart";
 
+/**
+ * Section 5.8 "Lifetime" and DATA_MODEL.md section 8: an upload that no product picture, no store
+ * logo, and no order item references becomes an orphan this long after it was created. An orphan
+ * is no longer served (404) and the cleanup (cleanup.ts) deletes its row and its bytes (SEC-065).
+ * Judged by the database clock.
+ */
+export const ORPHAN_GRACE_PERIOD_SECONDS = 24 * 60 * 60;
+
+/**
+ * **Provisional (SEC-065, owner to rule).** The most uploads that nothing references one store
+ * may hold, whatever their age: an orphan past the grace period counts until the cleanup has
+ * deleted it, so the disk one store can fill without attaching anything is bounded by this
+ * number times MAX_UPLOAD_FILE_BYTES (250 MiB) even when no cleanup runs. One more upload is
+ * refused with `409 CONFLICT`, reason UPLOAD_LIMIT_REASON. Attaching an upload, or the cleanup,
+ * frees the allowance.
+ */
+export const MAX_UNATTACHED_UPLOADS_PER_STORE = 50;
+
+/** **Provisional (SEC-065).** `details.reason` of the 409 when the store is at the cap. */
+export const UPLOAD_LIMIT_REASON = "UPLOAD_LIMIT";
+
 /** The validated file of an upload request, ready for the service. */
 export interface ValidatedImage {
   /** The type the leading bytes show; the declared type and the extension agree with it. */

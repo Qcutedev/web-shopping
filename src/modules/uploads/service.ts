@@ -3,11 +3,13 @@
  * 6.7, 7.7, and 8).
  *
  *   function      access (section 1.8)   check here
+ *   assertUploadAllowance  seller        SELLER with an APPROVED store; the early cap check
  *   createUpload  seller                 SELLER with an APPROVED store, from the session's actor;
  *                                        again under the store row's share lock; and the insert
  *                                        carries the condition itself
  *   openFile      public                 none: pictures are public by design; the key must match
- *                                        the pattern and belong to a registered upload
+ *                                        the pattern and belong to a registered upload that is
+ *                                        not an expired orphan (SEC-065)
  *
  * The owner of an upload is the caller's store, taken from the session (`actor.storeId` with
  * `actor.userId`), never from the request (CLAUDE.md rule 6). Uploading attaches nothing.
@@ -18,12 +20,19 @@ import { type Actor, requireApprovedSeller } from "@/server/auth/actor";
 import { db } from "@/server/db";
 import type { Logger } from "@/server/logger";
 
-import { fileNotFound, uploadStoreNotApproved } from "./errors";
-import { findUploadByKey, insertUploadIfStoreApproved } from "./repository";
+import { fileNotFound, uploadLimitReached, uploadStoreNotApproved } from "./errors";
+import {
+  countUnreferencedUploads,
+  findUploadByKey,
+  insertUploadIfStoreApproved,
+  lockStoreUploads,
+} from "./repository";
 import {
   isStorageKey,
   isUploadContentType,
+  MAX_UNATTACHED_UPLOADS_PER_STORE,
   MAX_UPLOAD_FILE_BYTES,
+  ORPHAN_GRACE_PERIOD_SECONDS,
   type UploadContentType,
   type UploadDto,
   type ValidatedImage,
@@ -41,6 +50,20 @@ export interface UploadDependencies {
 }
 
 /**
+ * POST /seller/uploads, after the rate limit and before a byte of the body is read (SEC-065): a
+ * store that already holds MAX_UNATTACHED_UPLOADS_PER_STORE uploads nothing references is refused
+ * with 409 CONFLICT `UPLOAD_LIMIT`, so the server does not read a body it would refuse. Scoped by
+ * the session's store id. Not authoritative: two requests can both pass it, and `createUpload`
+ * judges the cap again under the store's upload lock.
+ */
+export async function assertUploadAllowance(actor: Actor): Promise<void> {
+  const { storeId } = requireApprovedSeller(actor);
+  if ((await countUnreferencedUploads(storeId)) >= MAX_UNATTACHED_UPLOADS_PER_STORE) {
+    throw uploadLimitReached();
+  }
+}
+
+/**
  * POST /seller/uploads, after the handler read and checked the file (reader.ts). In one
  * transaction (CLAUDE.md rule 5):
  *
@@ -48,9 +71,13 @@ export interface UploadDependencies {
  *      403 SELLER_NOT_APPROVED unless the caller's store is `APPROVED`; the store row is then
  *      share-locked, so a suspension waits until this upload commits or rolls back (step 8 of
  *      section 1.8). The `Store` row is never updated or deleted after it (CR-T040-04);
- *   2. the bytes are stored under a new generated key. A store that was suspended before step 1
- *      therefore never gets a byte stored;
- *   3. the guarded insert of the `Upload` row (`insertUploadIfStoreApproved`); zero rows is
+ *   2. the store's upload lock (`lockStoreUploads`, an advisory lock, no row lock), then the count
+ *      of its uploads nothing references: at MAX_UNATTACHED_UPLOADS_PER_STORE or more, 409
+ *      CONFLICT `UPLOAD_LIMIT` and nothing is stored (SEC-065). The lock makes parallel uploads of
+ *      one store count one after the other, so the cap holds exactly;
+ *   3. the bytes are stored under a new generated key. A store that was suspended before step 1,
+ *      or that is at its cap, therefore never gets a byte stored;
+ *   4. the guarded insert of the `Upload` row (`insertUploadIfStoreApproved`); zero rows is
  *      403 SELLER_NOT_APPROVED.
  *
  * When anything fails after the bytes were stored (the insert, the commit), they are deleted
@@ -80,6 +107,10 @@ export async function createUpload(
   try {
     await db.$transaction(async (tx) => {
       const { storeId } = await requireApprovedStoreForWrite(tx, actor);
+      await lockStoreUploads(tx, storeId);
+      if ((await countUnreferencedUploads(storeId, tx)) >= MAX_UNATTACHED_UPLOADS_PER_STORE) {
+        throw uploadLimitReached();
+      }
       await deps.storage.put(storageKey, image.bytes);
       stored = true;
       const inserted = await insertUploadIfStoreApproved(tx, {
@@ -116,13 +147,15 @@ export interface OpenedFile {
 /**
  * GET /api/files/{key}: the stored bytes of a registered upload. 404 NOT_FOUND, identical in
  * every case, for a key that does not match the pattern (checked first; nothing is read), a key
- * with no `Upload` row, and a row whose bytes are missing or have another length than recorded.
- * The last two are operator matters and write one warn line with the key.
+ * with no `Upload` row, an expired orphan (nothing references it and it is older than
+ * ORPHAN_GRACE_PERIOD_SECONDS; SEC-065, nothing is read and nothing is logged), and a row whose
+ * bytes are missing or have another length than recorded. The last two are operator matters and
+ * write one warn line with the key.
  */
 export async function openFile(key: string, deps: UploadDependencies): Promise<OpenedFile> {
   if (!isStorageKey(key)) throw fileNotFound();
-  const row = await findUploadByKey(key);
-  if (row === null) throw fileNotFound();
+  const row = await findUploadByKey(key, ORPHAN_GRACE_PERIOD_SECONDS);
+  if (row === null || row.expiredOrphan) throw fileNotFound();
   if (!isUploadContentType(row.contentType)) {
     deps.log?.warn("A registered upload has a type that is not allowed", { storageKey: key });
     throw fileNotFound();

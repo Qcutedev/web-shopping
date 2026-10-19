@@ -15,10 +15,14 @@
  * - A declared type, an extension, or leading bytes that are not one allowed type, or that do not
  *   agree with each other: `415 UNSUPPORTED_MEDIA_TYPE`.
  * - The store is not `APPROVED` when the row is written: `403 SELLER_NOT_APPROVED`.
- * - A file key that does not match the pattern, has no upload, or has no bytes: `404 NOT_FOUND`.
+ * - The store holds MAX_UNATTACHED_UPLOADS_PER_STORE uploads nothing references (SEC-065):
+ *   `409 CONFLICT`, reason `UPLOAD_LIMIT` (provisional).
+ * - A file key that does not match the pattern, has no upload, has no bytes, or belongs to an
+ *   orphan past the grace period: `404 NOT_FOUND`.
  */
 import {
   type AppError,
+  conflict,
   notFound,
   payloadTooLarge,
   sellerNotApproved,
@@ -26,7 +30,7 @@ import {
   validationError,
 } from "@/server/errors";
 
-import { INVALID_MULTIPART_FIELD_CODE, UPLOAD_FIELD_NAME } from "./schema";
+import { INVALID_MULTIPART_FIELD_CODE, UPLOAD_FIELD_NAME, UPLOAD_LIMIT_REASON } from "./schema";
 
 export function malformedMultipart(message: string): AppError {
   return validationError([{ path: "", code: INVALID_MULTIPART_FIELD_CODE, message }]);
@@ -69,6 +73,14 @@ export function unsupportedImage(): AppError {
 
 export function uploadStoreNotApproved(): AppError {
   return sellerNotApproved();
+}
+
+/**
+ * The store already holds MAX_UNATTACHED_UPLOADS_PER_STORE uploads that nothing references
+ * (SEC-065): `409 CONFLICT`, reason UPLOAD_LIMIT_REASON (provisional). Says nothing of the count.
+ */
+export function uploadLimitReached(): AppError {
+  return conflict(UPLOAD_LIMIT_REASON);
 }
 
 export function fileNotFound(): AppError {

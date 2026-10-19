@@ -39,15 +39,24 @@ const insertMock = vi.fn(async () => {
   calls.push("insert");
   return true;
 });
-const findMock = vi.fn(
-  async (): Promise<{ contentType: string; sizeBytes: number } | null> => null,
-);
+type FoundRow = { contentType: string; sizeBytes: number; expiredOrphan: boolean } | null;
+const findMock = vi.fn<(...args: unknown[]) => Promise<FoundRow>>(async () => null);
+const quotaLockMock = vi.fn<(...args: unknown[]) => Promise<void>>(async () => {
+  calls.push("quota-lock");
+});
+const countMock = vi.fn<(...args: unknown[]) => Promise<number>>(async () => {
+  calls.push("count");
+  return 0;
+});
 vi.mock("./repository", () => ({
   insertUploadIfStoreApproved: (...args: unknown[]) => insertMock(...(args as [])),
-  findUploadByKey: () => findMock(),
+  findUploadByKey: (...args: unknown[]) => findMock(...args),
+  lockStoreUploads: (...args: unknown[]) => quotaLockMock(...args),
+  countUnreferencedUploads: (...args: unknown[]) => countMock(...args),
 }));
 
-const { createUpload, openFile } = await import("./service");
+const { assertUploadAllowance, createUpload, openFile } = await import("./service");
+const { MAX_UNATTACHED_UPLOADS_PER_STORE, ORPHAN_GRACE_PERIOD_SECONDS } = await import("./schema");
 const { jpegBytes } = await import("./test-fixtures");
 
 const KEY = "0123456789abcdef0123456789abcdef";
@@ -81,9 +90,13 @@ beforeEach(() => {
   calls.length = 0;
   lockMock.mockClear();
   insertMock.mockClear();
+  quotaLockMock.mockClear();
+  countMock.mockClear();
   findMock.mockReset();
   findMock.mockResolvedValue(null);
 });
+
+const servable = { expiredOrphan: false };
 
 const IMAGE = { contentType: "image/jpeg" as const, bytes: jpegBytes(100) };
 
@@ -128,9 +141,61 @@ describe("createUpload: permission checks", () => {
     });
   });
 
-  it("locks the store first, then stores the bytes, then inserts the row, in one transaction", async () => {
+  it("locks the store first, then the store's uploads, counts, stores the bytes, then inserts the row, in one transaction", async () => {
     await createUpload(seller(), IMAGE, { storage: fakeStorage(), newKey: () => KEY });
-    expect(calls).toEqual(["begin", "lock", "put", "insert", "commit"]);
+    expect(calls).toEqual(["begin", "lock", "quota-lock", "count", "put", "insert", "commit"]);
+    // The lock and the count are of the store the store lock returned, inside the transaction.
+    expect(quotaLockMock).toHaveBeenCalledWith({ tx: true }, "store-1");
+    expect(countMock).toHaveBeenCalledWith("store-1", { tx: true });
+  });
+});
+
+describe("SEC-065: the cap on uploads nothing references", () => {
+  it("refuses at the cap inside the transaction: 409 UPLOAD_LIMIT, nothing stored, rolled back", async () => {
+    countMock.mockImplementationOnce(async () => {
+      calls.push("count");
+      return MAX_UNATTACHED_UPLOADS_PER_STORE;
+    });
+    const storage = fakeStorage();
+    await expect(createUpload(seller(), IMAGE, { storage })).rejects.toMatchObject({
+      code: "CONFLICT",
+      status: 409,
+      details: { reason: "UPLOAD_LIMIT" },
+    });
+    expect(calls).toEqual(["begin", "lock", "quota-lock", "count", "rollback"]);
+    expect(storage.put).not.toHaveBeenCalled();
+    expect(storage.delete).not.toHaveBeenCalled();
+  });
+
+  it("accepts one below the cap", async () => {
+    countMock.mockResolvedValueOnce(MAX_UNATTACHED_UPLOADS_PER_STORE - 1);
+    await expect(createUpload(seller(), IMAGE, { storage: fakeStorage() })).resolves.toMatchObject({
+      contentType: "image/jpeg",
+    });
+  });
+
+  it("the early check counts the session's store and refuses at the cap", async () => {
+    countMock.mockResolvedValueOnce(MAX_UNATTACHED_UPLOADS_PER_STORE);
+    await expect(assertUploadAllowance(seller())).rejects.toMatchObject({
+      code: "CONFLICT",
+      details: { reason: "UPLOAD_LIMIT" },
+    });
+    expect(countMock).toHaveBeenLastCalledWith("store-1");
+    countMock.mockResolvedValueOnce(MAX_UNATTACHED_UPLOADS_PER_STORE - 1);
+    await expect(assertUploadAllowance(seller())).resolves.toBeUndefined();
+  });
+
+  it.each([
+    [
+      "a customer",
+      { userId: "u", role: "CUSTOMER", storeId: null, storeStatus: null },
+      "FORBIDDEN",
+    ],
+    ["an admin", { userId: "u", role: "ADMIN", storeId: null, storeStatus: null }, "FORBIDDEN"],
+    ["a seller of a suspended store", seller("SUSPENDED"), "SELLER_NOT_APPROVED"],
+  ] as const)("the early check refuses %s without counting", async (_name, actor, code) => {
+    await expect(assertUploadAllowance(actor as Actor)).rejects.toMatchObject({ code });
+    expect(countMock).not.toHaveBeenCalled();
   });
 });
 
@@ -158,7 +223,16 @@ describe("createUpload: refusals inside the transaction", () => {
     await expect(
       createUpload(seller(), IMAGE, { storage, newKey: () => KEY }),
     ).rejects.toMatchObject({ code: "SELLER_NOT_APPROVED", status: 403 });
-    expect(calls).toEqual(["begin", "lock", "put", "insert", "rollback", "delete"]);
+    expect(calls).toEqual([
+      "begin",
+      "lock",
+      "quota-lock",
+      "count",
+      "put",
+      "insert",
+      "rollback",
+      "delete",
+    ]);
     expect(storage.delete).toHaveBeenCalledWith(KEY);
   });
 
@@ -229,24 +303,41 @@ describe("openFile", () => {
   });
 
   it("serves the bytes with the recorded type and size", async () => {
-    findMock.mockResolvedValueOnce({ contentType: "image/png", sizeBytes: 64 });
+    findMock.mockResolvedValueOnce({ contentType: "image/png", sizeBytes: 64, ...servable });
     const file = await openFile(KEY, { storage: fakeStorage(jpegBytes(64)) });
     expect(file.contentType).toBe("image/png");
     expect(file.sizeBytes).toBe(64);
     expect(new Uint8Array(await new Response(file.body).arrayBuffer())).toHaveLength(64);
+    expect(findMock).toHaveBeenCalledWith(KEY, ORPHAN_GRACE_PERIOD_SECONDS);
+  });
+
+  it("SEC-065: is 404 for an expired orphan, without reading storage or logging", async () => {
+    const warn = vi.fn();
+    const storage = fakeStorage(jpegBytes(64));
+    findMock.mockResolvedValueOnce({
+      contentType: "image/jpeg",
+      sizeBytes: 64,
+      expiredOrphan: true,
+    });
+    await expect(openFile(KEY, { storage, log: { warn } })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      status: 404,
+    });
+    expect(storage.get).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it("is 404 with a warn line when the bytes are missing or have another length", async () => {
     const warn = vi.fn();
-    findMock.mockResolvedValueOnce({ contentType: "image/jpeg", sizeBytes: 64 });
+    findMock.mockResolvedValueOnce({ contentType: "image/jpeg", sizeBytes: 64, ...servable });
     await expect(
       openFile(KEY, { storage: fakeStorage(null), log: { warn } }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
-    findMock.mockResolvedValueOnce({ contentType: "image/jpeg", sizeBytes: 10 });
+    findMock.mockResolvedValueOnce({ contentType: "image/jpeg", sizeBytes: 10, ...servable });
     await expect(
       openFile(KEY, { storage: fakeStorage(jpegBytes(64)), log: { warn } }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
-    findMock.mockResolvedValueOnce({ contentType: "text/html", sizeBytes: 64 });
+    findMock.mockResolvedValueOnce({ contentType: "text/html", sizeBytes: 64, ...servable });
     await expect(
       openFile(KEY, { storage: fakeStorage(jpegBytes(64)), log: { warn } }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });

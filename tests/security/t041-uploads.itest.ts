@@ -188,7 +188,10 @@ describe("SEC-065 an upload that nothing references stays on disk and public for
     return key;
   }
 
-  it("(documented) an unattached upload 25 hours old still has its row and is still served", async () => {
+  // Changed by backend-api with the SEC-065 fix (2026-10-19), for the security re-check: this case
+  // documented the flaw and asserted status 200. The row assertions are unchanged; the status is
+  // now the fixed behaviour (404), because the row stays until the cleanup job runs.
+  it("(documented) an unattached upload 25 hours old keeps its row until the cleanup runs, and is not served", async () => {
     const key = await orphanOlderThanGrace();
     const row = await db.upload.findUniqueOrThrow({
       where: { storageKey: key },
@@ -197,10 +200,10 @@ describe("SEC-065 an upload that nothing references stays on disk and public for
     expect(row.productImage).toBeNull();
     expect(row.logoOfStore).toBeNull();
     expect(row.orderItems).toEqual([]);
-    expect((await getFile(key)).status).toBe(200);
+    expect((await getFile(key)).status).toBe(404);
   });
 
-  it.fails("an unattached upload past the grace period is no longer served", async () => {
+  it("an unattached upload past the grace period is no longer served", async () => {
     const key = await orphanOlderThanGrace();
     expect((await getFile(key)).status).toBe(404);
   });
