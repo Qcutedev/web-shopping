@@ -126,8 +126,13 @@ const PROBES: readonly string[] = [
   "Shop ABC",
   cp(0x0e23, 0x0e49, 0x0e32, 0x0e19) + " ABC", // Thai "shop" with a tone mark
   cp(0x0e01, 0x0e31, 0x0e48), // base, vowel mark, tone mark
-  `a${cp(0x0301).repeat(3)}`, // three combining marks: at the limit
-  `a${cp(0x0301).repeat(4)}`, // four: over NAME_MAX_MARK_RUN
+  `a${cp(0x0301).repeat(3)}`, // one mark three times: refused since D-042 point 2 (SEC-060)
+  `a${cp(0x0301).repeat(4)}`, // one mark four times: repeated and over NAME_MAX_MARK_RUN
+  `a${cp(0x0301, 0x0302, 0x0303)}`, // three distinct combining marks: at the limit
+  `a${cp(0x0301, 0x0302, 0x0303, 0x0304)}`, // four distinct: over NAME_MAX_MARK_RUN only
+  cp(0x0e40, 0x0e40, 0x0e01), // doubled sara e (D-042 point 2)
+  cp(0x0e40, 0xfe0f, 0x0e40, 0x0e01), // sara e, U+FE0F, sara e: accepted today (SEC-061)
+  `a${cp(0x2800)}b`, // braille pattern blank (D-042 point 2)
   `a${cp(0x200b).repeat(3)}b`,
   `a${cp(0x200b).repeat(4)}b`,
   `${cp(0x202e)}abc`, // right-to-left override

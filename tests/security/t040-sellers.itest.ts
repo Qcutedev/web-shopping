@@ -16,8 +16,11 @@
  *     re-check cases of 2026-10-15 cover name variants, races, the audit chain, reserved names,
  *     and what a refusal reveals);
  *   - SEC-059 (reserved names match the whole name only) and SEC-060 (Thai and blank look-alike
- *     copies get a different key), each a case for the D-042 behaviour and an `it.fails` that
- *     the security agent flips on re-check.
+ *     copies get a different key), each a case for the D-042 behaviour and a case that was an
+ *     `it.fails` until the re-check of 2026-10-19 (docs/reviews/SEC-059-060-recheck.md);
+ *   - that re-check's own cases, and SEC-061 to SEC-063 (bypasses of the D-042 rules: a variation
+ *     selector between two sara e, a narrow space inside a word, Thai look-alike letters), each a
+ *     documented case and an `it.fails`.
  */
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -686,7 +689,7 @@ describe("SEC-059 the reserved-name rule matches the whole name only", () => {
     expect(diffSnapshots(before, await snapshot())).toEqual([]);
   });
 
-  it.fails("a name made of the marketplace name and 'Official' is refused", async () => {
+  it("a name made of the marketplace name and 'Official' is refused", async () => {
     const seller = await signedIn("SELLER");
     const response = await renameRequest(seller.cookie, { name: `${th.site.name} Official` });
     expect(response.status).toBe(409);
@@ -713,20 +716,290 @@ describe("SEC-060 visually identical Thai and blank variants get a different key
     }
   });
 
+  // D-042 point 2 refuses the copies at validation, so the secure answer is 400, not the 409 this
+  // case asserted while it was an `it.fails` (re-check 2026-10-19).
+  it("a store cannot take a copy that differs only by a doubled Thai letter or mark, or a blank", async () => {
+    const original = cp(0x0e41, 0x0e21, 0x0e48, 0x0e28, 0x0e23, 0x0e35) + " 060b";
+    await createStore({ name: original });
+    for (const copy of [
+      cp(0x0e40, 0x0e40, 0x0e21, 0x0e48, 0x0e28, 0x0e23, 0x0e35) + " 060b",
+      cp(0x0e41, 0x0e21, 0x0e48, 0x0e48, 0x0e28, 0x0e23, 0x0e35) + " 060b",
+      original.replace(" ", cp(0x2800)),
+    ]) {
+      const seller = await signedIn("SELLER");
+      const response = await renameRequest(seller.cookie, { name: copy });
+      expect(response.status, copy).toBe(400);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Re-check of SEC-059 and SEC-060 after D-042 (commits c09207a, e0fddea, 2324ee9), 2026-10-19.
+// Review: docs/reviews/SEC-059-060-recheck.md.
+
+const HAIR_SPACE = cp(0x200a);
+const THIN_SPACE = cp(0x2009);
+const NARROW_NBSP = cp(0x202f);
+const VS15 = cp(0xfe0e);
+const SARA_E = cp(0x0e40);
+const SARA_AE = cp(0x0e41);
+/** "admin" in Thai, as RESERVED_STORE_NAMES lists it: sara ae, o ang, do dek, mo ma, sara i, no nu. */
+const THAI_ADMIN = cp(0x0e41, 0x0e2d, 0x0e14, 0x0e21, 0x0e34, 0x0e19);
+/** "official" in Thai: tho thahan, sara aa, ngo ngu, ko kai, sara aa, ro rua. */
+const THAI_OFFICIAL = cp(0x0e17, 0x0e32, 0x0e07, 0x0e01, 0x0e32, 0x0e23);
+
+/** Every name whose answer is not one of the refusals in `refused`, with its answer. */
+async function accepted(
+  names: readonly string[],
+  send: (name: string) => Promise<Response>,
+  refused: readonly string[],
+): Promise<string[]> {
+  const through: string[] = [];
+  for (const name of names) {
+    const result = await answer(await send(name));
+    if (!refused.includes(result)) through.push(`${JSON.stringify(name)} -> ${result}`);
+  }
+  return through;
+}
+
+describe("SEC-059 re-check (D-042 point 1): a name that contains a reserved entry is refused", () => {
+  it("the reserved list still holds the Thai entries this re-check builds on", () => {
+    expect(RESERVED_STORE_NAMES).toEqual(expect.arrayContaining([THAI_ADMIN, THAI_OFFICIAL]));
+    expect(th.site.name).toContain(SARA_AE);
+  });
+
+  it("punctuation, symbols, width, case, zero-width, and joined words around or inside a reserved entry: 409 STORE_NAME_RESERVED on rename and application; nothing changes", async () => {
+    const site = th.site.name;
+    const forms = [
+      "Admin.",
+      "A.d.m.i.n",
+      "ad-min",
+      "Ad_min",
+      `${cp(0x2605)}Admin${cp(0x2605)}`, // black star
+      "ShopAdmin",
+      "Best Admin Team",
+      "Official Support",
+      `${site} Official`,
+      `${site}Shop`,
+      `${site.slice(0, 2)}.${site.slice(2)}`,
+      cp(0xff21, 0xff24, 0xff2d, 0xff29, 0xff2e, 0x20, 0x53, 0x68, 0x6f, 0x70), // full-width
+      `ad${ZWSP}min shop`,
+      `adm${VS16}in shop`,
+      `Sup${ZWJ}port desk`,
+      `${cp(0x0e23, 0x0e49, 0x0e32, 0x0e19)}${THAI_ADMIN}${cp(0x0e02, 0x0e32, 0x0e22, 0x0e14, 0x0e35)}`,
+      `${cp(0x0e23, 0x0e49, 0x0e32, 0x0e19, 0x0e04, 0x0e49, 0x0e32)}-${THAI_OFFICIAL}!`,
+      `${cp(0x0e23, 0x0e49, 0x0e32, 0x0e19)}${site}`,
+    ];
+    const seller = await signedIn("SELLER");
+    const applicant = await signedIn();
+    const before = await snapshot();
+    expect(
+      await accepted(forms, (name) => renameRequest(seller.cookie, { name }), [
+        "409 CONFLICT STORE_NAME_RESERVED",
+      ]),
+    ).toEqual([]);
+    expect(
+      await accepted(forms, (name) => applyRequest(applicant.cookie, name), [
+        "409 CONFLICT STORE_NAME_RESERVED",
+      ]),
+    ).toEqual([]);
+    expect(diffSnapshots(before, await snapshot())).toEqual([]);
+  });
+
+  it("documented behaviour (D-042 point 1, accepted side effect): ordinary names that contain an entry are refused too", async () => {
+    const seller = await signedIn("SELLER");
+    for (const name of [
+      "Badminton Pro",
+      "Unofficial Fan Shop",
+      // "agricultural produce": contains the Thai entry for "official" across a word boundary.
+      `${cp(0x0e1c, 0x0e25, 0x0e1c, 0x0e25, 0x0e34, 0x0e15)}${THAI_OFFICIAL}${cp(0x0e40, 0x0e01, 0x0e29, 0x0e15, 0x0e23)}`,
+    ]) {
+      expect(await answer(await renameRequest(seller.cookie, { name })), name).toBe(
+        "409 CONFLICT STORE_NAME_RESERVED",
+      );
+    }
+  });
+
+  it("an entry split by an ordinary space is not matched (by design) and the name is accepted", async () => {
+    const seller = await signedIn("SELLER");
+    expect(await answer(await renameRequest(seller.cookie, { name: "Pad Mint 059" }))).toBe("200");
+  });
+});
+
+describe("SEC-060 re-check (D-042 point 2): look-alike name text is refused at validation", () => {
+  it("doubled sara e (direct and with U+200B to U+200D between), a repeated mark (adjacent, across another mark, across U+200B or U+FE0F), U+2800, and U+1D159: 400 on rename and application; nothing changes", async () => {
+    const tail = cp(0x0e21, 0x0e48, 0x0e28, 0x0e23, 0x0e35) + " 060c";
+    const copies = [
+      `${SARA_E}${SARA_E}${tail}`,
+      `${SARA_E}${ZWSP}${SARA_E}${tail}`,
+      `${SARA_E}${ZWNJ}${SARA_E}${tail}`,
+      `${SARA_E}${ZWJ}${SARA_E}${tail}`,
+      `${SARA_E}${ZWSP}${ZWNJ}${ZWJ}${SARA_E}${tail}`,
+      cp(0x0e01, 0x0e48, 0x0e48) + " 060c",
+      cp(0x0e01, 0x0e38, 0x0e48, 0x0e48) + " 060c",
+      cp(0x0e01, 0x0e48, 0x0e38, 0x0e48) + " 060c",
+      cp(0x0e01, 0x0e48, 0x200b, 0x0e48) + " 060c",
+      cp(0x0e01, 0x0e48, 0xfe0f, 0x0e48) + " 060c",
+      `Shop${cp(0x2800)}060c`,
+      `Shop${cp(0x1d159)}060c`,
+      `${cp(0x2800)}Shop 060c`,
+    ];
+    const seller = await signedIn("SELLER");
+    const applicant = await signedIn();
+    const before = await snapshot();
+    expect(
+      await accepted(copies, (name) => renameRequest(seller.cookie, { name }), [
+        "400 VALIDATION_ERROR undefined",
+      ]),
+    ).toEqual([]);
+    expect(
+      await accepted(copies, (name) => applyRequest(applicant.cookie, name), [
+        "400 VALIDATION_ERROR undefined",
+      ]),
+    ).toEqual([]);
+    expect(diffSnapshots(before, await snapshot())).toEqual([]);
+  });
+
+  it("documented behaviour (wider than D-042 point 2, which names Thai tone marks): any repeated combining mark is refused, Latin included", async () => {
+    const seller = await signedIn("SELLER");
+    for (const name of [`Cafe${cp(0x0301, 0x0301)} 060d`, `A${cp(0x20dd, 0x20dd)} 060d`]) {
+      expect(await answer(await renameRequest(seller.cookie, { name })), name).toBe(
+        "400 VALIDATION_ERROR undefined",
+      );
+    }
+  });
+
+  it("ordinary Thai names with up to three distinct marks still pass", async () => {
+    const seller = await signedIn("SELLER");
+    for (const name of [
+      cp(0x0e19, 0x0e49, 0x0e33, 0x0e1e, 0x0e23, 0x0e34, 0x0e01, 0x0e41, 0x0e21, 0x0e48) + " 060e", // nam phrik mae
+      cp(0x0e08, 0x0e31, 0x0e19, 0x0e17, 0x0e23, 0x0e4c) + " 060e", // chan with thanthakhat
+      `${SARA_AE}${cp(0x0e21, 0x0e48)} 060e`,
+    ]) {
+      expect(await answer(await renameRequest(seller.cookie, { name })), name).toBe("200");
+    }
+  });
+});
+
+describe("SEC-061 a variation selector between two sara e passes the name rule, and the key drops it", () => {
+  it("documented behaviour: sara e, U+FE0F or U+FE0E, sara e is accepted where sara ae is reserved or taken", async () => {
+    const victim = `${SARA_AE}${cp(0x0e21, 0x0e48, 0x0e28, 0x0e23, 0x0e35)} 061`;
+    await createStore({ name: victim });
+    const seller = await signedIn("SELLER");
+    for (const name of [
+      THAI_ADMIN.replace(SARA_AE, `${SARA_E}${VS16}${SARA_E}`),
+      th.site.name.replace(SARA_AE, `${SARA_E}${VS15}${SARA_E}`),
+      victim.replace(SARA_AE, `${SARA_E}${VS16}${SARA_E}`),
+    ]) {
+      expect(await answer(await renameRequest(seller.cookie, { name })), name).toBe("200");
+    }
+  });
+
   it.fails(
-    "a store cannot take a copy that differs only by a doubled Thai letter or mark, or a blank",
+    "a copy of a reserved or existing name made with sara e, a variation selector, sara e is refused",
     async () => {
-      const original = cp(0x0e41, 0x0e21, 0x0e48, 0x0e28, 0x0e23, 0x0e35) + " 060b";
-      await createStore({ name: original });
-      for (const copy of [
-        cp(0x0e40, 0x0e40, 0x0e21, 0x0e48, 0x0e28, 0x0e23, 0x0e35) + " 060b",
-        cp(0x0e41, 0x0e21, 0x0e48, 0x0e48, 0x0e28, 0x0e23, 0x0e35) + " 060b",
-        original.replace(" ", cp(0x2800)),
-      ]) {
-        const seller = await signedIn("SELLER");
-        const response = await renameRequest(seller.cookie, { name: copy });
-        expect(response.status, copy).toBe(409);
-      }
+      const victim = `${SARA_AE}${cp(0x0e21, 0x0e48, 0x0e28, 0x0e23, 0x0e35)} 061b`;
+      await createStore({ name: victim });
+      const seller = await signedIn("SELLER");
+      expect(
+        await accepted(
+          [
+            THAI_ADMIN.replace(SARA_AE, `${SARA_E}${VS16}${SARA_E}`),
+            th.site.name.replace(SARA_AE, `${SARA_E}${VS15}${SARA_E}`),
+            victim.replace(SARA_AE, `${SARA_E}${VS16}${SARA_E}`),
+          ],
+          (name) => renameRequest(seller.cookie, { name }),
+          [
+            "400 VALIDATION_ERROR undefined",
+            "409 CONFLICT STORE_NAME_RESERVED",
+            "409 CONFLICT STORE_NAME_TAKEN",
+          ],
+        ),
+      ).toEqual([]);
     },
   );
+});
+
+describe("SEC-062 a narrow space inside a word becomes an ordinary space in the key", () => {
+  it("documented behaviour: a hair, thin, or narrow no-break space inside a reserved word or a store name is accepted", async () => {
+    await createStore({ name: "Famous 062" });
+    const seller = await signedIn("SELLER");
+    const site = th.site.name;
+    for (const name of [
+      `Ad${HAIR_SPACE}min`,
+      `Offi${THIN_SPACE}cial Store`,
+      `Sup${NARROW_NBSP}port`,
+      `${site.slice(0, 4)}${HAIR_SPACE}${site.slice(4)}`,
+      `Fam${HAIR_SPACE}ous 062`,
+    ]) {
+      expect(await answer(await renameRequest(seller.cookie, { name })), name).toBe("200");
+    }
+  });
+
+  it.fails(
+    "a reserved word or a store name with a narrow space inside a word is refused",
+    async () => {
+      await createStore({ name: "Famous 062b" });
+      const seller = await signedIn("SELLER");
+      const site = th.site.name;
+      expect(
+        await accepted(
+          [
+            `Ad${HAIR_SPACE}min`,
+            `Offi${THIN_SPACE}cial Store`,
+            `Sup${NARROW_NBSP}port`,
+            `${site.slice(0, 4)}${HAIR_SPACE}${site.slice(4)}`,
+            `Fam${HAIR_SPACE}ous 062b`,
+          ],
+          (name) => renameRequest(seller.cookie, { name }),
+          [
+            "400 VALIDATION_ERROR undefined",
+            "409 CONFLICT STORE_NAME_RESERVED",
+            "409 CONFLICT STORE_NAME_TAKEN",
+          ],
+        ),
+      ).toEqual([]);
+    },
+  );
+});
+
+describe("SEC-063 Thai look-alike letters make a copy that the key and the reserved match miss", () => {
+  // lakkhangyao U+0E45 for sara aa U+0E32; kho khuat U+0E03 for kho khai U+0E02; kho khon U+0E05
+  // for kho khwai U+0E04. NFKC keeps each pair apart.
+  const victim = cp(0x0e02, 0x0e32, 0x0e22, 0x0e04, 0x0e49, 0x0e32) + " 063";
+
+  it("documented behaviour: each copy is accepted", async () => {
+    await createStore({ name: victim });
+    const seller = await signedIn("SELLER");
+    for (const name of [
+      THAI_OFFICIAL.replaceAll(cp(0x0e32), cp(0x0e45)),
+      victim.replaceAll(cp(0x0e32), cp(0x0e45)),
+      victim.replace(cp(0x0e02), cp(0x0e03)),
+      victim.replace(cp(0x0e04), cp(0x0e05)),
+    ]) {
+      expect(await answer(await renameRequest(seller.cookie, { name })), name).toBe("200");
+    }
+  });
+
+  it.fails("a copy made with a Thai look-alike letter is refused", async () => {
+    const original = cp(0x0e02, 0x0e32, 0x0e22, 0x0e04, 0x0e49, 0x0e32) + " 063b";
+    await createStore({ name: original });
+    const seller = await signedIn("SELLER");
+    expect(
+      await accepted(
+        [
+          THAI_OFFICIAL.replaceAll(cp(0x0e32), cp(0x0e45)),
+          original.replaceAll(cp(0x0e32), cp(0x0e45)),
+          original.replace(cp(0x0e02), cp(0x0e03)),
+          original.replace(cp(0x0e04), cp(0x0e05)),
+        ],
+        (name) => renameRequest(seller.cookie, { name }),
+        [
+          "400 VALIDATION_ERROR undefined",
+          "409 CONFLICT STORE_NAME_RESERVED",
+          "409 CONFLICT STORE_NAME_TAKEN",
+        ],
+      ),
+    ).toEqual([]);
+  });
 });

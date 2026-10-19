@@ -170,6 +170,10 @@ describe("SEC-042 re-check: no run of more than three marks, whatever kind of ma
 
   it("a run at the start of the name counts too, and surrounding spaces are trimmed first", () => {
     expect(accepted(`${cp(0x0301, 0x0301, 0x0301, 0x0301)}Admin`)).toBe(false);
+    // The same with distinct marks, so the run limit is what refuses it (one mark repeated is
+    // refused on its own since D-042 point 2; re-check 2026-10-19).
+    expect(accepted(`${cp(0x0301, 0x0302, 0x0303, 0x0304)}Admin`)).toBe(false);
+    expect(accepted(`${cp(0x0301, 0x0302, 0x0303)}Admin`)).toBe(true);
     expect(accepted(`  Admin${cp(0x0301, 0x0302, 0x0303)}  `)).toBe(true);
     expect(accepted(`  Admin${cp(0x0301, 0x0302, 0x0303, 0x0304)}  `)).toBe(false);
   });
