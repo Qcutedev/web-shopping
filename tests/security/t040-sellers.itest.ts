@@ -16,7 +16,8 @@
  *     re-check cases of 2026-10-15 cover name variants, races, the audit chain, reserved names,
  *     and what a refusal reveals);
  *   - SEC-059 (reserved names match the whole name only) and SEC-060 (Thai and blank look-alike
- *     copies get a different key), each a documented case and an `it.fails`.
+ *     copies get a different key), each a case for the D-042 behaviour and an `it.fails` that
+ *     the security agent flips on re-check.
  */
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -277,7 +278,8 @@ describe("T-040 review: logo reuse rule (D-040 point 2)", () => {
 
 describe("SEC-058 store names are not unique, and renames leave no record", () => {
   it("fixed (D-041): of 20 alternating renames the 10 to another store's exact name are 409 STORE_NAME_TAKEN, and each of the 10 others writes one audit row", async () => {
-    const famous = await createStore({ name: "Official Shop" });
+    // Not a reserved word: since D-042 a name containing "official" is STORE_NAME_RESERVED instead.
+    const famous = await createStore({ name: "Famous Shop" });
     const seller = await signedIn("SELLER");
     const storeId = seller.storeId as string;
     const original = (await db.store.findUniqueOrThrow({ where: { id: storeId } })).name;
@@ -287,7 +289,7 @@ describe("SEC-058 store names are not unique, and renames leave no record", () =
       const response = await patchStoreRoute(
         request("PATCH", "/api/v1/seller/store", {
           cookie: seller.cookie,
-          body: { name: i % 2 === 0 ? `Name ${i}` : "Official Shop" },
+          body: { name: i % 2 === 0 ? `Name ${i}` : "Famous Shop" },
         }),
       );
       if (i % 2 === 0) {
@@ -318,17 +320,17 @@ describe("SEC-058 store names are not unique, and renames leave no record", () =
   });
 
   it("a store cannot take the exact name of another store", async () => {
-    await createStore({ name: "Official Shop Two" });
+    await createStore({ name: "Famous Shop Two" });
     const seller = await signedIn("SELLER");
     const response = await patchStoreRoute(
       request("PATCH", "/api/v1/seller/store", {
         cookie: seller.cookie,
-        body: { name: "Official Shop Two" },
+        body: { name: "Famous Shop Two" },
       }),
     );
     expect(response.status).not.toBe(200);
     const mine = await db.store.findUniqueOrThrow({ where: { id: seller.storeId as string } });
-    expect(mine.name).not.toBe("Official Shop Two");
+    expect(mine.name).not.toBe("Famous Shop Two");
   });
 });
 
@@ -673,11 +675,15 @@ describe("SEC-058 re-check (d): reserved names in other forms are refused", () =
 });
 
 describe("SEC-059 the reserved-name rule matches the whole name only", () => {
-  it("documented behaviour: the marketplace name with 'Official', and 'Admin.', are accepted", async () => {
+  it("fixed (D-042 point 1): the marketplace name with 'Official', 'Admin.', and 'Official Support' are 409 STORE_NAME_RESERVED; nothing changes", async () => {
     const seller = await signedIn("SELLER");
+    const before = await snapshot();
     for (const name of [`${th.site.name} Official`, "Admin.", "Official Support"]) {
-      expect(await answer(await renameRequest(seller.cookie, { name })), name).toBe("200");
+      expect(await answer(await renameRequest(seller.cookie, { name })), name).toBe(
+        "409 CONFLICT STORE_NAME_RESERVED",
+      );
     }
+    expect(diffSnapshots(before, await snapshot())).toEqual([]);
   });
 
   it.fails("a name made of the marketplace name and 'Official' is refused", async () => {
@@ -695,11 +701,15 @@ describe("SEC-060 visually identical Thai and blank variants get a different key
     cp(0x0e41, 0x0e21, 0x0e48, 0x0e28, 0x0e23, 0x0e35, 0x2800, 0x0030, 0x0036, 0x0030), // braille blank
   ];
 
-  it("documented behaviour: each copy passes the name rule and is accepted as a rename", async () => {
+  it("fixed (D-042 point 2): each copy fails the name rule, 400 VALIDATION_ERROR; nothing changes", async () => {
     await createStore({ name: victim });
     for (const copy of copies) {
       const seller = await signedIn("SELLER");
-      expect(await answer(await renameRequest(seller.cookie, { name: copy })), copy).toBe("200");
+      const before = await snapshot();
+      expect(await answer(await renameRequest(seller.cookie, { name: copy })), copy).toBe(
+        "400 VALIDATION_ERROR undefined",
+      );
+      expect(diffSnapshots(before, await snapshot())).toEqual([]);
     }
   });
 

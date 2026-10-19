@@ -105,9 +105,26 @@ describe("POST /api/v1/seller/application: store names (SEC-058, D-041)", () => 
     expect(diffSnapshots(before, await snapshotDatabase(NO_SESSIONS))).toEqual([]);
   });
 
-  it("accepts a name that only contains a reserved word (exact key match only)", async () => {
+  it("is 409 STORE_NAME_RESERVED for a name that contains a reserved word after punctuation is stripped (D-042 point 1); nothing is created", async () => {
     const user = await signedIn();
-    const response = await apply(user.cookie, "Admin Supplies ร้านแอดมินขายดี");
+    const before = await snapshotDatabase(NO_SESSIONS);
+    for (const storeName of [
+      "Admin Supplies ร้านแอดมินขายดี",
+      "Admin.",
+      "A.d.m.i.n",
+      `${th.site.name} Official`,
+      "ร้านแอดมินขายดี",
+    ]) {
+      expect(await reasonOf(await apply(user.cookie, storeName)), storeName).toBe(
+        "409 CONFLICT STORE_NAME_RESERVED",
+      );
+    }
+    expect(diffSnapshots(before, await snapshotDatabase(NO_SESSIONS))).toEqual([]);
+  });
+
+  it("accepts a name whose reserved-looking letters are split by a space (one-word entries do not match across a space)", async () => {
+    const user = await signedIn();
+    const response = await apply(user.cookie, "Pad Mint Kitchen");
     expect(response.status).toBe(201);
   });
 
@@ -168,11 +185,25 @@ describe("approveApplication: store names (SEC-058, D-041)", () => {
     expect(diffSnapshots(before, await snapshotDatabase())).toEqual([]);
   });
 
-  it("approves a name that only contains a reserved word (exact key match only)", async () => {
+  it("is 409 STORE_NAME_RESERVED for an application whose name contains a reserved word (D-042 point 1); nothing is written and it stays PENDING", async () => {
     const reviewer = adminActor((await createAdmin()).id);
+    // Written directly, as an application submitted before D-042 would be.
     const application = await createSellerApplication({ storeName: "Official Goods Thailand" });
+    const before = await snapshotDatabase();
+    const error = await refusal(approveApplication(reviewer, application.id));
+    expect(error.status).toBe(409);
+    expect(error.details).toEqual({ reason: "STORE_NAME_RESERVED" });
+    expect(diffSnapshots(before, await snapshotDatabase())).toEqual([]);
+    expect(
+      (await db.sellerApplication.findUniqueOrThrow({ where: { id: application.id } })).status,
+    ).toBe("PENDING");
+  });
+
+  it("approves a name that contains no reserved word", async () => {
+    const reviewer = adminActor((await createAdmin()).id);
+    const application = await createSellerApplication({ storeName: "Goods Thailand Plus" });
     const result = await approveApplication(reviewer, application.id);
-    expect(result.store?.name).toBe("Official Goods Thailand");
+    expect(result.store?.name).toBe("Goods Thailand Plus");
   });
 });
 
@@ -195,7 +226,7 @@ describe("PATCH /api/v1/seller/store: store names and the rename audit (SEC-058,
   it("is 409 STORE_NAME_RESERVED for a reserved name; nothing changes, no audit row", async () => {
     const seller = await signedIn("SELLER");
     const before = await snapshotDatabase(NO_SESSIONS);
-    for (const name of ["Admin", th.site.name, "แอดมิน"]) {
+    for (const name of ["Admin", th.site.name, "แอดมิน", "Admin.", "Official Support"]) {
       expect(await reasonOf(await rename(seller.cookie, { name }))).toBe(
         "409 CONFLICT STORE_NAME_RESERVED",
       );
