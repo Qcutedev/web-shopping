@@ -95,6 +95,23 @@ function longestRun(text: string): number {
   return longest;
 }
 
+/** True when one combining mark occurs twice within one run (D-042 point 2, SEC-060). */
+function repeatsMarkInRun(text: string): boolean {
+  let seen = new Set<number>();
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0;
+    if (!isRunCharacter(code)) {
+      seen = new Set<number>();
+      continue;
+    }
+    if (/\p{M}/u.test(char)) {
+      if (seen.has(code)) return true;
+      seen.add(code);
+    }
+  }
+  return false;
+}
+
 /** Deterministic pseudo-random numbers (mulberry32), so a failure can be replayed. */
 function random(seed: number): () => number {
   let a = seed;
@@ -114,10 +131,12 @@ describe("SEC-042 re-check: no run of more than three marks, whatever kind of ma
   it.each([
     ["Mn, Latin acute and friends", 0x41, [0x0301, 0x0302, 0x0303, 0x0304]],
     ["Mn, Thai vowels and tone marks", 0x0e01, [0x0e34, 0x0e48, 0x0e38, 0x0e4c]],
-    ["Mc, Devanagari visarga", 0x0915, [0x0903, 0x0903, 0x0903, 0x0903]],
-    ["Me, enclosing circle", 0x41, [0x20dd, 0x20dd, 0x20dd, 0x20dd]],
-    ["Me, keycap after a digit", 0x31, [0x20e3, 0x20e3, 0x20e3, 0x20e3]],
-    ["Mn outside the BMP, musical tremolo", 0x41, [0x1d167, 0x1d167, 0x1d167, 0x1d167]],
+    // Distinct marks of one kind: one mark twice in a run is refused on its own since D-042 point
+    // 2 (SEC-060), so a repeated mark would not test the run limit.
+    ["Mc, Devanagari visarga and vowel signs", 0x0915, [0x0903, 0x093e, 0x093f, 0x0940]],
+    ["Me, enclosing circle and friends", 0x41, [0x20dd, 0x20de, 0x20df, 0x20e0]],
+    ["Me, keycap after a digit", 0x31, [0x20e3, 0x20e2, 0x20e4, 0x20dd]],
+    ["Mn outside the BMP, musical tremolo", 0x41, [0x1d167, 0x1d168, 0x1d169, 0x1d17b]],
     ["Mn, combining half marks", 0x41, [0xfe20, 0xfe21, 0xfe22, 0xfe23]],
     ["Mn, extended diacriticals", 0x41, [0x1ab0, 0x1dc0, 0x1ab1, 0x1dc1]],
     ["variation selectors and joiners", 0x41, [0xfe0f, 0x200d, 0xfe0e, 0x200c]],
@@ -155,7 +174,7 @@ describe("SEC-042 re-check: no run of more than three marks, whatever kind of ma
     expect(accepted(`  Admin${cp(0x0301, 0x0302, 0x0303, 0x0304)}  `)).toBe(false);
   });
 
-  it("3,000 random names: accepted exactly when no run is longer than three", () => {
+  it("3,000 random names: accepted exactly when no run is longer than three and no run repeats a mark", () => {
     const alphabet = [
       0x41, 0x0e01, 0x20, 0x0301, 0x0336, 0x0e48, 0x0e34, 0x200b, 0x200c, 0x200d, 0xfe0e, 0xfe0f,
       0x20dd, 0x0903, 0x1d167,
@@ -170,7 +189,7 @@ describe("SEC-042 re-check: no run of more than three marks, whatever kind of ma
       }
       codes.push(0x41);
       const name = cp(...codes);
-      const expected = longestRun(name) <= NAME_MAX_MARK_RUN;
+      const expected = longestRun(name) <= NAME_MAX_MARK_RUN && !repeatsMarkInRun(name);
       if (!expected) refused += 1;
       expect(accepted(name), JSON.stringify(codes)).toBe(expected);
     }

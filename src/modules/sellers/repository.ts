@@ -25,7 +25,7 @@ import {
   type ApplicationStatusValue,
   type StoreStatusValue,
 } from "./state";
-import { isStoreNameKeyViolation, RESERVED_STORE_NAMES } from "./store-name";
+import { containsReservedName, isStoreNameKeyViolation, RESERVED_STORE_NAMES } from "./store-name";
 
 export const SELLER_TRANSACTION_OPTIONS = { maxWait: 5_000, timeout: 10_000 } as const;
 
@@ -64,29 +64,48 @@ class Rollback<K extends string> extends Error {
 export interface StoreNameCheck {
   /** Another store (or, on a rename, this one) already has a name with the same key. */
   taken: boolean;
-  /** The key equals the key of an entry of `RESERVED_STORE_NAMES`. */
+  /**
+   * The key contains the key of an entry of `RESERVED_STORE_NAMES`, punctuation and symbols
+   * removed (`containsReservedName`; SEC-059, D-042 point 1).
+   */
   reserved: boolean;
 }
 
 /**
  * Compares `name` with the stored keys and with the reserved names, by the database's own
- * normalisation (`store_name_key`): one statement, bound parameters only. Nothing is locked; a
- * store created after this read is caught by `Store_nameKey_key` at approval.
+ * normalisation (`store_name_key`): one statement, bound parameters only. The database returns
+ * the name's key and the reserved keys; the contains-match runs on them in `containsReservedName`
+ * (PostgreSQL's regular expressions have no Unicode punctuation class). The keys are held only in
+ * this function and never logged. Nothing is locked; a store created after this read is caught by
+ * `Store_nameKey_key` at approval.
  */
 export async function checkStoreName(
   client: Pick<DbTransaction, "$queryRaw">,
   name: string,
 ): Promise<StoreNameCheck> {
   const reservedNames = [...RESERVED_STORE_NAMES];
-  const rows = await client.$queryRaw<StoreNameCheck[]>`
+  const rows = await client.$queryRaw<
+    { taken: unknown; nameKey: unknown; reservedKeys: unknown }[]
+  >`
     SELECT
       EXISTS (SELECT 1 FROM "Store" WHERE "nameKey" = store_name_key(${name})) AS "taken",
-      store_name_key(${name}) IN (
+      store_name_key(${name}) AS "nameKey",
+      ARRAY(
         SELECT store_name_key(x) FROM unnest(${reservedNames}::text[]) AS x
-      ) AS "reserved"`;
+      ) AS "reservedKeys"`;
   const row = rows[0];
-  // One row always; a missing one would be a driver fault, and refusing is the safe answer.
-  return { taken: row?.taken !== false, reserved: row?.reserved !== false };
+  // One row always; a missing row or an unexpected shape would be a driver fault, and refusing is
+  // the safe answer.
+  const nameKey = row?.nameKey;
+  const reservedKeys: unknown = row?.reservedKeys;
+  const reserved =
+    typeof nameKey === "string" &&
+    Array.isArray(reservedKeys) &&
+    reservedKeys.length === reservedNames.length &&
+    reservedKeys.every((key): key is string => typeof key === "string")
+      ? containsReservedName(nameKey, reservedKeys)
+      : true;
+  return { taken: row?.taken !== false, reserved };
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -15,8 +15,9 @@
  * - A store name whose key (DATA_MODEL.md section 21.7) another store already has, on the
  *   application, the approval, and a rename: `409 CONFLICT`, reason `STORE_NAME_TAKEN` (SEC-058,
  *   D-041 point 1). Nothing changes; a refused approval leaves the application `PENDING`.
- * - A store name whose key equals that of a reserved name (`RESERVED_STORE_NAMES`), on the same
- *   three: `409 CONFLICT`, reason `STORE_NAME_RESERVED` (D-041 point 3). Nothing changes.
+ * - A store name whose key, punctuation and symbols removed, contains a reserved name
+ *   (`RESERVED_STORE_NAMES`, `containsReservedName`), on the same three: `409 CONFLICT`, reason
+ *   `STORE_NAME_RESERVED` (D-041 point 3, widened by D-042 point 1). Nothing changes.
  * - A decision on an application that is not `PENDING`, including one that lost a race:
  *   `409 INVALID_STATE_TRANSITION` (state.ts).
  * - A write to a store that is not `APPROVED`: `403 SELLER_NOT_APPROVED` (DATA_MODEL.md section

@@ -35,11 +35,16 @@ export const EMAIL_MAX = 254;
  *     selectors U+FE0E (text style) and U+FE0F (emoji style) (SEC-039). This refuses U+034F,
  *     U+17B4, U+17B5, U+180B to U+180F, the Hangul fillers U+115F, U+1160, U+3164, U+FFA0, and the
  *     variation selectors U+FE00 to U+FE0D and U+E0100 to U+E01EF, which map one-to-one onto
- *     bytes and so could carry hidden data in a name.
+ *     bytes and so could carry hidden data in a name;
+ *   - the blank look-alikes U+2800 (braille pattern blank) and U+1D159 (musical symbol null
+ *     notehead), which are symbols, not white space, so the store name key keeps them: U+2800 in
+ *     place of a space made a second store name that reads like the first (SEC-060, D-042 point
+ *     2). The other blank-drawn code points are refused above (the Hangul fillers and U+034F are
+ *     default-ignorable, the rest are `Cf`) or are white space, which the key collapses.
  *
  * The exceptions are written first as a negative lookahead; the source uses escapes only.
  */
-const NAME_FORBIDDEN_CHAR = String.raw`(?![\u200B-\u200D\uFE0E\uFE0F])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}\p{Cn}\p{Co}\p{Default_Ignorable_Code_Point}]`;
+const NAME_FORBIDDEN_CHAR = String.raw`(?:(?![\u200B-\u200D\uFE0E\uFE0F])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}\p{Cn}\p{Co}\p{Default_Ignorable_Code_Point}]|[\u2800\u{1D159}])`;
 
 /**
  * A character that is visibly drawn: a letter, number, punctuation, or symbol, but not one of the
@@ -63,14 +68,32 @@ export const NAME_MAX_MARK_RUN = 3;
 const NAME_MARK_OR_KEPT_INVISIBLE = String.raw`[\p{M}\u200B-\u200D]`;
 
 /**
- * Matches a whole name that contains no forbidden character, at least one visible one, and no
- * run of more than NAME_MAX_MARK_RUN combining marks or kept invisible characters. Every
- * later free-text name field (store name, address name) uses the same rule. The source is
- * written with escapes only, so this file never contains one of these characters itself
+ * SEC-060 (owner, D-042 point 2): one combining mark twice in one run of marks and kept invisible
+ * characters, adjacent or not ("mai ek, mai ek", "sara u, mai ek, mai ek", "mai ek, U+200B, mai
+ * ek"). Renderers draw the second copy on top of the first, so the name reads like the one with a
+ * single mark while the store name key differs (NFKC only reorders marks, it does not merge
+ * them). No word of Thai or of another script needs one mark twice on one base. The gap is
+ * bounded by NAME_MAX_MARK_RUN, which keeps the check linear; a longer run is refused anyway.
+ */
+const NAME_REPEATED_MARK = String.raw`(?<repeatedMark>\p{M})${NAME_MARK_OR_KEPT_INVISIBLE}{0,${NAME_MAX_MARK_RUN}}\k<repeatedMark>`;
+
+/**
+ * SEC-060 (owner, D-042 point 2): two Thai sara e (U+0E40), directly or with kept invisible
+ * characters between them. Most Thai fonts draw them exactly like one sara ae (U+0E41), a
+ * well-known Thai spoof; correct Thai spelling never has two sara e in a row.
+ */
+const NAME_DOUBLED_SARA_E = String.raw`\u0E40[\u200B-\u200D]{0,${NAME_MAX_MARK_RUN}}\u0E40`;
+
+/**
+ * Matches a whole name that contains no forbidden character, at least one visible one, no run of
+ * more than NAME_MAX_MARK_RUN combining marks or kept invisible characters, no combining mark
+ * repeated within one run, and no doubled sara e. Every free-text name field (sign-up name,
+ * profile name, address fields, store name and description lines) uses the same rule. The source
+ * is written with escapes only, so this file never contains one of these characters itself
  * (SEC-040; tests/security/sec037-038-recheck.test.ts checks every non-test file under src).
  */
 export const NAME_ALLOWED_TEXT = new RegExp(
-  String.raw`^(?![\s\S]*?${NAME_MARK_OR_KEPT_INVISIBLE}{${NAME_MAX_MARK_RUN + 1}})(?=[\s\S]*?${NAME_VISIBLE_CHAR})(?:(?!${NAME_FORBIDDEN_CHAR})[\s\S])*$`,
+  String.raw`^(?![\s\S]*?${NAME_MARK_OR_KEPT_INVISIBLE}{${NAME_MAX_MARK_RUN + 1}})(?![\s\S]*?${NAME_REPEATED_MARK})(?![\s\S]*?${NAME_DOUBLED_SARA_E})(?=[\s\S]*?${NAME_VISIBLE_CHAR})(?:(?!${NAME_FORBIDDEN_CHAR})[\s\S])*$`,
   "u",
 );
 
