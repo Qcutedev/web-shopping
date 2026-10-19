@@ -13,7 +13,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inspect } from "node:util";
 
@@ -241,12 +241,22 @@ describe("SEC-042 combining marks stack on one base without limit", () => {
 const CANARY = "Zq7SECRETcanary";
 const GOOD_SECRET = `${CANARY}-a8f3k2m9q1w7e5r0t6y4u2i8o3p1`;
 const APP_URL = "https://shop.example.test";
+/** Required in production since c817572 (T-041); absolute on every platform. Set in every
+ * fixture: it is valid in every NODE_ENV and changes no other rule. */
+const UPLOAD_DIR = resolve("/srv/shop-uploads");
 const DATABASE_URL = "postgresql://shop:Zq7dbPw@db.example.test:5432/shop?schema=public";
 
 function source(
   overrides: Record<string, string | undefined> = {},
 ): Record<string, string | undefined> {
-  return { NODE_ENV: "development", APP_URL, DATABASE_URL, AUTH_SECRET: GOOD_SECRET, ...overrides };
+  return {
+    NODE_ENV: "development",
+    APP_URL,
+    DATABASE_URL,
+    AUTH_SECRET: GOOD_SECRET,
+    UPLOAD_DIR,
+    ...overrides,
+  };
 }
 function production(overrides: Record<string, string | undefined> = {}) {
   return source({ NODE_ENV: "production", TRUSTED_PROXY_HOPS: "1", ...overrides });

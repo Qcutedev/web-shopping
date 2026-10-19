@@ -13,7 +13,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -34,6 +34,9 @@ const cp = (...codes: number[]): string => String.fromCodePoint(...codes);
 const CANARY = "Zq7SECRETcanary";
 const GOOD_SECRET = `${CANARY}-a8f3k2m9q1w7e5r0t6y4u2i8o3p1`;
 const APP_URL = "https://shop.example.test";
+/** Required in production since c817572 (T-041); absolute on every platform. Set in every
+ * fixture: it is valid in every NODE_ENV and changes no other rule. */
+const UPLOAD_DIR = resolve("/srv/shop-uploads");
 const DATABASE_URL = "postgresql://shop:Zq7dbPw@db.example.test:5432/shop?schema=public";
 const LIBRARY_DEFAULT_SECRET = "better-auth-secret-12345678901234567890";
 const INTEGRATION_SECRET = "integration-test-secret-0123456789-abcdefghij";
@@ -53,7 +56,14 @@ const LIBRARY_VARIABLES = [
 ] as const;
 
 function source(overrides: Record<string, string | undefined> = {}) {
-  return { NODE_ENV: "development", APP_URL, DATABASE_URL, AUTH_SECRET: GOOD_SECRET, ...overrides };
+  return {
+    NODE_ENV: "development",
+    APP_URL,
+    DATABASE_URL,
+    AUTH_SECRET: GOOD_SECRET,
+    UPLOAD_DIR,
+    ...overrides,
+  };
 }
 function production(overrides: Record<string, string | undefined> = {}) {
   return source({ NODE_ENV: "production", TRUSTED_PROXY_HOPS: "1", ...overrides });
@@ -93,6 +103,7 @@ function startUpLog(overrides: Record<string, string>): { error: unknown; lines:
     DATABASE_URL,
     AUTH_SECRET: GOOD_SECRET,
     TRUSTED_PROXY_HOPS: "0",
+    UPLOAD_DIR,
     TRUSTED_CLIENT_IP_HEADER: "",
     PAYMENT_TIMEOUT_MINUTES: "",
     LOG_LEVEL: "",

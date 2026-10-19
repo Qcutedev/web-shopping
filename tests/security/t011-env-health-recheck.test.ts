@@ -22,6 +22,8 @@
  * Part of `pnpm test` (project "security"). Run alone with:
  *   pnpm exec vitest run --project security
  */
+import { resolve } from "node:path";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { register } from "../../src/instrumentation";
@@ -40,6 +42,8 @@ const TEST_PLACEHOLDER = "local_test_only_not_a_secret";
 /** Stands for a real password. If it shows up in an error or a log line, a value leaked. */
 const REAL = "QZXVrealpassword";
 const HOST = "qzxvdb.internal";
+/** Required in production since c817572 (T-041); absolute on every platform. */
+const UPLOAD_DIR = resolve("/srv/shop-uploads");
 
 const url = (password: string, rest = ""): string =>
   `postgresql://marketplace:${password}@${HOST}:5432/marketplace${rest}`;
@@ -52,6 +56,7 @@ function production(overrides: Record<string, string | undefined> = {}) {
     AUTH_SECRET: "Zq7canary-auth-secret-Kd2Xw9Lm4Rt6Pn3b",
     DATABASE_URL: url(REAL),
     TRUSTED_PROXY_HOPS: "0",
+    UPLOAD_DIR,
     ...overrides,
   };
 }
@@ -179,6 +184,7 @@ describe("SEC-009 re-check: production refuses the local set-up", () => {
     vi.stubEnv("APP_URL", "https://shop.example");
     vi.stubEnv("AUTH_SECRET", "Zq7canary-auth-secret-Kd2Xw9Lm4Rt6Pn3b");
     vi.stubEnv("TRUSTED_PROXY_HOPS", "0");
+    vi.stubEnv("UPLOAD_DIR", UPLOAD_DIR);
     vi.stubEnv("TRUSTED_CLIENT_IP_HEADER", "");
     vi.stubEnv("PAYMENT_TIMEOUT_MINUTES", "");
     vi.stubEnv("LOG_LEVEL", "");
@@ -218,6 +224,7 @@ describe("SEC-009 re-check: the start-up hook ends the process on a refused envi
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("APP_URL", "https://shop.example");
     vi.stubEnv("TRUSTED_PROXY_HOPS", "0");
+    vi.stubEnv("UPLOAD_DIR", UPLOAD_DIR);
     vi.stubEnv("TRUSTED_CLIENT_IP_HEADER", "");
     vi.stubEnv("PAYMENT_TIMEOUT_MINUTES", "");
     vi.stubEnv("LOG_LEVEL", "");

@@ -6,6 +6,8 @@
  *
  * Pure: no database, no network. The Prisma error classes are constructed, not raised by a query.
  */
+import { resolve } from "node:path";
+
 import { APIError } from "better-auth/api";
 import { BetterAuthError } from "better-auth";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -20,6 +22,8 @@ const CANARY = "Zq7SECRETcanary";
 const APP_URL = "https://shop.example.test";
 const DATABASE_URL = "postgresql://shop:Zq7dbPw@db.example.test:5432/shop?schema=public";
 const GOOD_SECRET = "Kd2Xw9Lm4Rt6Pn3bYc5Hj8Vz7Qs1Gf0U";
+/** Required in production since c817572 (T-041); absolute on every platform. */
+const UPLOAD_DIR = resolve("/srv/shop-uploads");
 
 interface LogLine {
   level: string;
@@ -216,6 +220,7 @@ describe("SEC-048 re-check: a failure to build the auth runtime (getAuthRuntime)
       DATABASE_URL,
       AUTH_SECRET: GOOD_SECRET,
       TRUSTED_PROXY_HOPS: "0",
+      UPLOAD_DIR,
       TRUSTED_CLIENT_IP_HEADER: "",
       PAYMENT_TIMEOUT_MINUTES: "",
       LOG_LEVEL: "",

@@ -26,6 +26,8 @@
  * Part of `pnpm test` (project "security"). Run alone with:
  *   pnpm exec vitest run --project security
  */
+import { resolve } from "node:path";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ENV_RULES, EnvValidationError, parseEnv, readDatabaseUrl } from "../../src/server/env";
@@ -59,6 +61,8 @@ const PLACEHOLDERS: readonly string[] = [DEV_PLACEHOLDER, TEST_PLACEHOLDER];
 /** Stands for a real password. If it shows up in an error or a log line, a value leaked. */
 const REAL = "QZXVrealpassword";
 const HOST = "qzxvdb.internal";
+/** Required in production since c817572 (T-041); absolute on every platform. */
+const UPLOAD_DIR = resolve("/srv/shop-uploads");
 const MARKER = "QZXVMARKER";
 const REQUEST_ID = "req_security_round_7";
 
@@ -142,6 +146,7 @@ function production(candidate: Candidate): Record<string, string> {
     AUTH_SECRET: "Zq7canary-auth-secret-Kd2Xw9Lm4Rt6Pn3b",
     DATABASE_URL: candidate.url,
     TRUSTED_PROXY_HOPS: "0",
+    UPLOAD_DIR,
     ...(candidate.pgPassword === undefined ? {} : { PGPASSWORD: candidate.pgPassword }),
   };
 }
