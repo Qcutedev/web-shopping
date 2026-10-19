@@ -25,6 +25,8 @@
  * (AUTH_LIBRARY_VARIABLES, SEC-045), which are refused when set. An empty string counts as
  * "not set".
  */
+import { isAbsolute } from "node:path";
+
 import { z } from "zod";
 
 import { type ClientAddressConfig, MAX_TRUSTED_PROXY_HOPS } from "./client-address";
@@ -54,6 +56,12 @@ export interface Env {
   paymentTimeoutMinutes: number;
   /** `LOG_LEVEL`. */
   logLevel: LogLevel;
+  /**
+   * `UPLOAD_DIR`: absolute directory of the local disk upload adapter (T-041). Always present when
+   * `nodeEnv` is `production`; may be absent in development and test, where the upload and file
+   * endpoints then answer 500 until it is set.
+   */
+  uploadDir?: string;
 }
 
 /** The longest payment timeout accepted: one day. A bound against a typing error, not a product rule. */
@@ -160,6 +168,8 @@ export const ENV_RULES = {
   trustedClientIpHeaderWithHops: "cannot be set when TRUSTED_PROXY_HOPS is greater than 0",
   paymentTimeoutMinutes: `must be an integer from 1 to ${MAX_PAYMENT_TIMEOUT_MINUTES}`,
   logLevel: "must be debug, info, warn, or error",
+  uploadDir: "must be an absolute directory path",
+  uploadDirRequired: "must be set when NODE_ENV=production",
 } as const;
 
 const KNOWN_RULES: ReadonlySet<string> = new Set(Object.values(ENV_RULES));
@@ -243,6 +253,14 @@ const SCHEMAS = {
   LOG_LEVEL: z
     .enum(["debug", "info", "warn", "error"], { error: ENV_RULES.logLevel })
     .default("info"),
+  // Same test as `readUploadDir` in src/modules/uploads/config.ts (isAbsolute, not blank), so a
+  // value that starts the server is a value the upload module accepts. A NUL byte is never a path.
+  UPLOAD_DIR: z
+    .string()
+    .refine((value) => value.trim() !== "" && !value.includes("\0") && isAbsolute(value), {
+      error: ENV_RULES.uploadDir,
+    })
+    .optional(),
 } as const;
 
 type VariableName = keyof typeof SCHEMAS;
@@ -524,6 +542,7 @@ export function parseEnv(source: EnvSource): Env {
   const trustedClientIpHeader = read(source, "TRUSTED_CLIENT_IP_HEADER", issues);
   const paymentTimeoutMinutes = read(source, "PAYMENT_TIMEOUT_MINUTES", issues);
   const logLevel = read(source, "LOG_LEVEL", issues);
+  const uploadDir = read(source, "UPLOAD_DIR", issues);
   checkAuthLibraryVariables(source, issues);
 
   // SR-01: the two ways of trusting a proxy cannot be combined.
@@ -548,6 +567,11 @@ export function parseEnv(source: EnvSource): Env {
     // SR-01: no silent default in production. `0` is a valid answer, but it must be given.
     if (raw(source, "TRUSTED_PROXY_HOPS") === undefined) {
       issues.push({ variable: "TRUSTED_PROXY_HOPS", rule: ENV_RULES.trustedProxyHopsExplicit });
+    }
+    // T-041: no guessed directory in production; a wrong one may not be persistent. A value that
+    // is set but not absolute has been reported by the schema already.
+    if (raw(source, "UPLOAD_DIR") === undefined) {
+      issues.push({ variable: "UPLOAD_DIR", rule: ENV_RULES.uploadDirRequired });
     }
   }
 
@@ -575,6 +599,7 @@ export function parseEnv(source: EnvSource): Env {
     }),
     paymentTimeoutMinutes,
     logLevel,
+    ...(uploadDir === undefined ? {} : { uploadDir }),
   });
 }
 

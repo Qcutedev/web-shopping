@@ -192,6 +192,7 @@ Built in T-011 and exercised on the developer machine on 2026-10-12. `src/server
 | `TRUSTED_CLIENT_IP_HEADER` | A header name matching `^[A-Za-z0-9-]{1,64}$`: a single-value header that the hosting platform's proxy always overwrites with the client address (SR-01). Not `X-Forwarded-For`, `Forwarded`, `Cookie`, `Authorization`, or `Host`, in any letter case. Refused when `TRUSTED_PROXY_HOPS` is greater than 0 | No header is trusted | no |
 | `PAYMENT_TIMEOUT_MINUTES` | An integer from `1` to `1440`, written in digits only: how long an order may await payment before the sweep fails it (D-028). It is configuration so that tests can shorten it (DATA_MODEL.md section 4.3) | `15` | no |
 | `LOG_LEVEL` | `debug`, `info`, `warn`, or `error`. Lines below the level are not written, except lines written through `security()`, which the level never filters (SR-04). See "What `LOG_LEVEL` reaches" below | `info` | no |
+| `UPLOAD_DIR` | An absolute directory path (T-041): where the local disk upload adapter keeps files. Refused when relative or blank, in every `NODE_ENV`. See "Uploaded files" below | Outside production: no value, and the upload and file endpoints answer `500` until it is set. Production: refused, required | no |
 
 How the rules are applied:
 
@@ -209,6 +210,7 @@ Refusals that apply only when `NODE_ENV=production`:
 | `AUTH_SECRET` | It is not a random-looking value (below): a character outside printable ASCII, fewer than 8 distinct characters, a repeated pattern, a run of 8 characters in steady steps, a pattern at a distance of 1 to 8 characters, or a published value or its prefix | SEC-044, SEC-047, SEC-049 |
 | `DATABASE_URL_TEST` | It is set at all | SEC-009 |
 | `TRUSTED_PROXY_HOPS` | It is not set. `0` is accepted, but it must be written | SR-01: no silent default |
+| `UPLOAD_DIR` | It is not set. No directory is guessed: a default could be one that is not persistent | T-041 |
 
 The weak-secret rule for `AUTH_SECRET` (SEC-044, SEC-047, SEC-049). A value that is at least 32 characters long and does not contain `not_a_secret` is still refused when `NODE_ENV=production` if any of these holds:
 
@@ -278,9 +280,22 @@ Not read by `src/server/env.ts` (`AUTH_SECRET` is, since CR-66: see the table ab
 
 | Variable | Purpose | Secret |
 | --- | --- | --- |
-| `UPLOAD_DIR` | Local storage directory | no |
 | `ADMIN_BOOTSTRAP_EMAIL`, `ADMIN_BOOTSTRAP_PASSWORD` | Read once by the bootstrap script (T-016); do not leave set | yes |
 | `ADMIN_BOOTSTRAP_NAME` | Optional display name of the admin the bootstrap script creates; default `Admin` | no |
+
+### Uploaded files
+
+`UPLOAD_DIR` (T-041, `src/modules/uploads/`; contract in API_CONTRACTS.md section 5.8.1). The validation in `src/server/env.ts` is the same test as the upload module's own reader (`isAbsolute`, not blank), plus a refusal of a NUL byte, so a value that starts the server is a value the module accepts. The module still reads the variable itself through `readUploadDir`; moving it to `getEnv().uploadDir` is a change in `src/modules/uploads/` (backend-api).
+
+- **Layout.** Files live at `<UPLOAD_DIR>/<first two hex digits>/<32 hex digit key>`, written once with an exclusive create. The key is random; no user-supplied name is part of a path.
+- **Permissions.** The user that runs the server needs read, write, and create-directory permission on `UPLOAD_DIR` and nothing else is needed. No other account should be able to write to it, and the web server or proxy must not serve it as static files: files are served only through the file endpoint, which applies the access rules. Create the directory before the first start with the right owner; the adapter creates missing directories recursively (the two-digit subdirectories, and `UPLOAD_DIR` itself if its parent allows), so a missing directory under a root-owned parent fails at the first upload.
+- **Persistence.** On a container or a platform with an ephemeral file system, mount `UPLOAD_DIR` on a persistent volume. A directory inside the container image or its writable layer is lost on redeploy. With more than one server instance, the local adapter is wrong: instances do not share a local disk. Use one instance, a shared volume that supports exclusive create, or a new storage adapter (the module has a `StorageProvider` interface for this); that choice is the owner's and is not made yet.
+- **Backup.** The database holds the metadata of each file and the directory holds the bytes; neither is useful without the other. Back them up together, and take the directory copy at about the same time as the database dump. Restoring only the database leaves rows without bytes; restoring only the directory leaves bytes without rows (harmless but wasted). Backup tooling is **not set up**; this is manual until a hosting provider is chosen.
+- **Rollback.** Deleting the directory loses every uploaded file, and no migration can recreate them. Treat it as data, not as a cache.
+- **Local development.** Set `UPLOAD_DIR` in `.env` to a directory of yours, for example `C:\dev\web shoping\uploads` on this machine; `/uploads/` in the repository root is git-ignored. Without it, `pnpm dev` starts but the upload and file endpoints answer `500`. The integration tests set the variable themselves to a temporary directory.
+- **What the operator sees.** In production, a missing value stops the start with `UPLOAD_DIR must be set when NODE_ENV=production`; a relative value, in any environment, with `UPLOAD_DIR must be an absolute directory path`. The value is never in the message.
+
+Not verified: that the directory is writable by the server user. Validation checks the form of the path, not the file system. Check it on staging by uploading one file and reading it back.
 
 Secrets live in the host's secret manager or environment configuration. They are never committed, never printed, and never prefixed `NEXT_PUBLIC_`.
 

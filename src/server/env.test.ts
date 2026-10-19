@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { assertClientAddressConfig, MAX_TRUSTED_PROXY_HOPS } from "./client-address";
@@ -23,6 +25,9 @@ import { createLogger, DEFAULT_LOG_LEVEL, setLogLevel } from "./logger";
 const DATABASE_URL = "postgresql://shop_app:Zq7canaryPw@db.example.test:5432/shop";
 const APP_URL = "https://shop.example.test";
 const AUTH_SECRET = "Zq7canary-auth-secret-Kd2Xw9Lm4Rt6Pn3b";
+// `resolve` makes the path absolute on the platform the test runs on (a POSIX path is not
+// absolute on Windows).
+const UPLOAD_DIR = resolve("/srv/shop-uploads");
 
 /** A valid development environment; a case overrides or removes what it is about. */
 function source(overrides: Record<string, string | undefined> = {}): EnvSource {
@@ -31,7 +36,12 @@ function source(overrides: Record<string, string | undefined> = {}): EnvSource {
 
 /** A valid production environment. */
 function production(overrides: Record<string, string | undefined> = {}): EnvSource {
-  return source({ NODE_ENV: "production", TRUSTED_PROXY_HOPS: "1", ...overrides });
+  return source({
+    NODE_ENV: "production",
+    TRUSTED_PROXY_HOPS: "1",
+    UPLOAD_DIR,
+    ...overrides,
+  });
 }
 
 function failure(env: EnvSource): EnvValidationError {
@@ -658,6 +668,7 @@ describe("parseEnv: the error", () => {
       { variable: "AUTH_SECRET", rule: ENV_RULES.authSecretPlaceholder },
       { variable: "DATABASE_URL_TEST", rule: ENV_RULES.databaseUrlTestInProduction },
       { variable: "TRUSTED_PROXY_HOPS", rule: ENV_RULES.trustedProxyHopsExplicit },
+      { variable: "UPLOAD_DIR", rule: ENV_RULES.uploadDirRequired },
     ]);
     expect(error.name).toBe("EnvValidationError");
     expect(error.message).toBe(
@@ -671,6 +682,7 @@ describe("parseEnv: the error", () => {
         "- AUTH_SECRET must not be a placeholder from .env.example when NODE_ENV=production",
         "- DATABASE_URL_TEST must not be set when NODE_ENV=production",
         "- TRUSTED_PROXY_HOPS must be set explicitly when NODE_ENV=production",
+        "- UPLOAD_DIR must be set when NODE_ENV=production",
       ].join("\n"),
     );
   });
@@ -697,6 +709,7 @@ describe("parseEnv: the error", () => {
       TRUSTED_CLIENT_IP_HEADER: `${canary} header`,
       PAYMENT_TIMEOUT_MINUTES: `${canary}-timeout`,
       LOG_LEVEL: `${canary}-level`,
+      UPLOAD_DIR: `${canary}/relative/uploads`,
     };
     const sources: EnvSource[] = [
       everyVariableWrong,
@@ -728,7 +741,73 @@ describe("parseEnv: the error", () => {
       "TRUSTED_CLIENT_IP_HEADER",
       "PAYMENT_TIMEOUT_MINUTES",
       "LOG_LEVEL",
+      "UPLOAD_DIR",
     ]);
+  });
+});
+
+describe("parseEnv: UPLOAD_DIR (T-041)", () => {
+  it("is optional outside production and absent from the result", () => {
+    for (const nodeEnv of ["development", "test"]) {
+      const env = parseEnv(source({ NODE_ENV: nodeEnv }));
+      expect(env.uploadDir).toBeUndefined();
+      expect("uploadDir" in env).toBe(false);
+    }
+  });
+
+  it("is returned as written when it is an absolute path", () => {
+    for (const nodeEnv of ["development", "test", "production"]) {
+      const env = parseEnv(production({ NODE_ENV: nodeEnv, UPLOAD_DIR }));
+      expect(env.uploadDir).toBe(UPLOAD_DIR);
+    }
+  });
+
+  it("is required in production; empty counts as not set", () => {
+    for (const value of [undefined, ""]) {
+      expect(issuesOf(production({ UPLOAD_DIR: value }))).toEqual([
+        { variable: "UPLOAD_DIR", rule: ENV_RULES.uploadDirRequired },
+      ]);
+    }
+  });
+
+  it.each(["relative/uploads", "./uploads", "uploads", "   ", "\t", `${UPLOAD_DIR}\0x`])(
+    "refuses %j in every NODE_ENV",
+    (value) => {
+      for (const nodeEnv of ["development", "test", "production"]) {
+        expect(issuesOf(production({ NODE_ENV: nodeEnv, UPLOAD_DIR: value }))).toEqual([
+          { variable: "UPLOAD_DIR", rule: ENV_RULES.uploadDir },
+        ]);
+      }
+    },
+  );
+
+  it("reports a relative path once in production, not also as missing", () => {
+    expect(issuesOf(production({ UPLOAD_DIR: "uploads" }))).toHaveLength(1);
+  });
+
+  it("agrees with the upload module's own reader", async () => {
+    const { readUploadDir } = await import("../modules/uploads/config");
+    for (const value of [UPLOAD_DIR, "uploads", "   ", "./x"]) {
+      let envAccepts = true;
+      try {
+        parseEnv(production({ UPLOAD_DIR: value }));
+      } catch {
+        envAccepts = false;
+      }
+      let moduleAccepts = true;
+      try {
+        readUploadDir({ UPLOAD_DIR: value });
+      } catch {
+        moduleAccepts = false;
+      }
+      expect(envAccepts, value).toBe(moduleAccepts);
+    }
+  });
+
+  it("never puts the value into the error", () => {
+    const error = failure(production({ UPLOAD_DIR: "Zq7canary/relative" }));
+    const everything = JSON.stringify([error.message, error.issues, error.stack]);
+    expect(everything).not.toContain("Zq7canary");
   });
 });
 
@@ -1179,6 +1258,7 @@ describe("loadEnvAtStartup", () => {
       APP_URL,
       DATABASE_URL,
       AUTH_SECRET,
+      UPLOAD_DIR,
       DATABASE_URL_TEST: undefined,
       TRUSTED_PROXY_HOPS: undefined,
       TRUSTED_CLIENT_IP_HEADER: undefined,
