@@ -14,7 +14,8 @@
  */
 import { randomUUID } from "node:crypto";
 
-import { db, type DbTransaction } from "@/server/db";
+import { PUBLIC_STORE_WHERE, VISIBLE_PRODUCT_SQL } from "@/modules/catalog/visibility";
+import { db, type DbTransaction, Prisma } from "@/server/db";
 
 import type { UploadContentType } from "./schema";
 
@@ -84,6 +85,10 @@ export async function countUnreferencedUploads(
 }
 
 export interface RegisteredFile {
+  /** The upload's id. Internal: never leaves the server. */
+  id: string;
+  /** The owning store, compared with the session's store for a file that is not public. */
+  storeId: string;
   contentType: string;
   sizeBytes: number;
   /**
@@ -91,27 +96,70 @@ export interface RegisteredFile {
    * database clock: an orphan, never served again (section 5.8 "Lifetime").
    */
   expiredOrphan: boolean;
+  /**
+   * True when the upload is served to anyone (SEC-068): an order item's picture, or a picture of a
+   * product that is visible now (BR-05, `VISIBLE_PRODUCT_SQL`).
+   */
+  publicPicture: boolean;
+  /** True when some store has the upload as its logo, public or not. */
+  isLogo: boolean;
 }
 
 /**
- * The recorded type and size of the upload with this key, and whether it is an expired orphan,
- * or null. One statement. The age is checked first, so an upload inside the grace period costs no
- * reference lookup; a referenced one stops at the first reference found.
+ * The one statement `findUploadByKey` runs, exported so that a test can `EXPLAIN` exactly it
+ * instead of a copy. One row or none. The age is checked first in `expiredOrphan`, so an upload
+ * inside the grace period costs no reference lookup there; each `EXISTS` stops at the first row
+ * found. Every lookup filters on a column with an index of its own: `ProductImage.uploadId`
+ * (unique), `Store.logoUploadId` (unique), `OrderItem.productImageUploadId` (SEC-067). Inside the
+ * visibility subquery the aliases are the ones `VISIBLE_PRODUCT_SQL` needs (`p`, `s`, `u`, `c`);
+ * the upload is `f`.
+ */
+export function fileLookupStatement(storageKey: string, graceSeconds: number): Prisma.Sql {
+  return Prisma.sql`
+    SELECT f."id", f."storeId", f."contentType", f."sizeBytes",
+      (f."createdAt" < now() - make_interval(secs => ${graceSeconds}::int)
+        AND NOT EXISTS (SELECT 1 FROM "ProductImage" pim WHERE pim."uploadId" = f."id")
+        AND NOT EXISTS (SELECT 1 FROM "Store" ls WHERE ls."logoUploadId" = f."id")
+        AND NOT EXISTS (SELECT 1 FROM "OrderItem" o WHERE o."productImageUploadId" = f."id")
+      ) AS "expiredOrphan",
+      (EXISTS (SELECT 1 FROM "OrderItem" o WHERE o."productImageUploadId" = f."id")
+        OR EXISTS (
+          SELECT 1
+          FROM "ProductImage" pim
+          JOIN "Product" p ON p."id" = pim."productId"
+          JOIN "Store" s ON s."id" = p."storeId"
+          JOIN "User" u ON u."id" = s."ownerId"
+          JOIN "Category" c ON c."id" = p."categoryId"
+          WHERE pim."uploadId" = f."id" AND ${VISIBLE_PRODUCT_SQL})
+      ) AS "publicPicture",
+      EXISTS (SELECT 1 FROM "Store" ls WHERE ls."logoUploadId" = f."id") AS "isLogo"
+    FROM "Upload" f
+    WHERE f."storageKey" = ${storageKey}`;
+}
+
+/**
+ * What `GET /api/files/{key}` needs to judge the upload with this key, or null when there is no
+ * such upload. One statement (`fileLookupStatement`).
  */
 export async function findUploadByKey(
   storageKey: string,
   graceSeconds: number,
 ): Promise<RegisteredFile | null> {
-  const rows = await db.$queryRaw<RegisteredFile[]>`
-    SELECT u."contentType", u."sizeBytes",
-      (u."createdAt" < now() - make_interval(secs => ${graceSeconds}::int)
-        AND NOT EXISTS (SELECT 1 FROM "ProductImage" p WHERE p."uploadId" = u."id")
-        AND NOT EXISTS (SELECT 1 FROM "Store" s WHERE s."logoUploadId" = u."id")
-        AND NOT EXISTS (SELECT 1 FROM "OrderItem" o WHERE o."productImageUploadId" = u."id")
-      ) AS "expiredOrphan"
-    FROM "Upload" u
-    WHERE u."storageKey" = ${storageKey}`;
+  const rows = await db.$queryRaw<RegisteredFile[]>(fileLookupStatement(storageKey, graceSeconds));
   return rows[0] ?? null;
+}
+
+/**
+ * True when the upload is the logo of a store whose page is public (conditions 3 and 4 of BR-05,
+ * `PUBLIC_STORE_WHERE`; section 3.4). Asked only for a logo that is not public otherwise, so the
+ * definition stays in one place (catalog/visibility.ts) and most requests do not run it.
+ */
+export async function isLogoOfPublicStore(uploadId: string): Promise<boolean> {
+  const row = await db.store.findFirst({
+    where: { AND: [PUBLIC_STORE_WHERE, { logoUploadId: uploadId }] },
+    select: { id: true },
+  });
+  return row !== null;
 }
 
 export const ORPHAN_DELETE_TRANSACTION_OPTIONS = { maxWait: 5_000, timeout: 30_000 } as const;

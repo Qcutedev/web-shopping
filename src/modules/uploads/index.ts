@@ -17,8 +17,11 @@ export { detectImageType } from "./content";
 export { readUploadRequest } from "./reader";
 export * from "./schema";
 export {
+  type ActorResolver,
   assertUploadAllowance,
   createUpload,
+  type FileAccess,
+  mayServe,
   openFile,
   type OpenedFile,
   type UploadDependencies,

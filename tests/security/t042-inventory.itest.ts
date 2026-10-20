@@ -100,10 +100,14 @@ async function storedUpload(storeId: string): Promise<{ id: string; key: string 
   return { id: row.id, key };
 }
 
-function getFile(key: string): Promise<Response> {
-  return getFileRoute(new Request(`${APP_URL}/api/files/${key}`, { method: "GET" }), {
-    params: Promise.resolve({ key }),
-  } as RouteContext<"/api/files/[key]">);
+function getFile(key: string, cookie?: string): Promise<Response> {
+  return getFileRoute(
+    new Request(`${APP_URL}/api/files/${key}`, {
+      method: "GET",
+      ...(cookie === undefined ? {} : { headers: { cookie } }),
+    }),
+    { params: Promise.resolve({ key }) } as RouteContext<"/api/files/[key]">,
+  );
 }
 
 function uploadRequest(cookie: string): Request {
@@ -347,14 +351,19 @@ describe("T-042 review: a slug collision on every attempt", () => {
 // ---------------------------------------------------------------------------------------------
 
 describe("SEC-068: pictures of unapproved products are served to anyone and do not count against the upload cap", () => {
-  it("documented: a DRAFT product's picture (never published, never in the queue) and a TAKEN_DOWN product's picture are served to an anonymous request", async () => {
+  // Changed by backend-api with the SEC-068 fix (2026-10-20), for the security re-check: this case
+  // documented the flaw and asserted status 200 for an anonymous request. The setup is unchanged;
+  // the anonymous status is now the fixed behaviour (404), and the owner's session gets 200, as
+  // SECURITY.md SEC-068 "Remediation" allows for the chosen serving rule.
+  it("documented: a DRAFT product's picture (never published, never in the queue) and a TAKEN_DOWN product's picture are served to the owner's session only", async () => {
     const who = await seller();
     const draftPicture = await storedUpload(who.storeId);
     const draftId = await createVia(who, { imageKeys: [draftPicture.key] });
     const draft = await db.product.findUniqueOrThrow({ where: { id: draftId } });
     expect(draft.status).toBe("DRAFT");
     expect(draft.moderationStatus).toBe("PENDING");
-    expect((await getFile(draftPicture.key)).status).toBe(200);
+    expect((await getFile(draftPicture.key)).status).toBe(404);
+    expect((await getFile(draftPicture.key, who.cookie)).status).toBe(200);
 
     const downPicture = await storedUpload(who.storeId);
     const downId = await createVia(who, { imageKeys: [downPicture.key] });
@@ -362,7 +371,8 @@ describe("SEC-068: pictures of unapproved products are served to anyone and do n
       where: { id: downId },
       data: { status: "PUBLISHED", moderationStatus: "TAKEN_DOWN", moderationNote: "illegal" },
     });
-    expect((await getFile(downPicture.key)).status).toBe(200);
+    expect((await getFile(downPicture.key)).status).toBe(404);
+    expect((await getFile(downPicture.key, who.cookie)).status).toBe(200);
   });
 
   it("documented: a store at the cap of unattached uploads attaches them to throw-away drafts and uploads again, with no limit on drafts", async () => {
@@ -388,29 +398,27 @@ describe("SEC-068: pictures of unapproved products are served to anyone and do n
     );
   });
 
-  it.fails(
-    "secure: a picture whose only reference is a product no admin approved is not served to an anonymous request",
-    async () => {
-      const who = await seller();
-      const picture = await storedUpload(who.storeId);
-      await createVia(who, { imageKeys: [picture.key] });
-      expect((await getFile(picture.key)).status).toBe(404);
-    },
-  );
+  // Flipped from it.fails by backend-api with the SEC-068 fix (2026-10-20), for the security
+  // re-check. Assertions unchanged; the owner's 200 is added as SEC-068 "Remediation" allows.
+  it("secure: a picture whose only reference is a product no admin approved is not served to an anonymous request", async () => {
+    const who = await seller();
+    const picture = await storedUpload(who.storeId);
+    await createVia(who, { imageKeys: [picture.key] });
+    expect((await getFile(picture.key)).status).toBe(404);
+    expect((await getFile(picture.key, who.cookie)).status).toBe(200);
+  });
 
-  it.fails(
-    "secure: a picture of a TAKEN_DOWN product is not served to an anonymous request",
-    async () => {
-      const who = await seller();
-      const picture = await storedUpload(who.storeId);
-      const productId = await createVia(who, { imageKeys: [picture.key] });
-      await db.product.update({
-        where: { id: productId },
-        data: { status: "PUBLISHED", moderationStatus: "TAKEN_DOWN" },
-      });
-      expect((await getFile(picture.key)).status).toBe(404);
-    },
-  );
+  it("secure: a picture of a TAKEN_DOWN product is not served to an anonymous request", async () => {
+    const who = await seller();
+    const picture = await storedUpload(who.storeId);
+    const productId = await createVia(who, { imageKeys: [picture.key] });
+    await db.product.update({
+      where: { id: productId },
+      data: { status: "PUBLISHED", moderationStatus: "TAKEN_DOWN" },
+    });
+    expect((await getFile(picture.key)).status).toBe(404);
+    expect((await getFile(picture.key, who.cookie)).status).toBe(200);
+  });
 });
 
 // ---------------------------------------------------------------------------------------------

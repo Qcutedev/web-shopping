@@ -39,8 +39,17 @@ const insertMock = vi.fn(async () => {
   calls.push("insert");
   return true;
 });
-type FoundRow = { contentType: string; sizeBytes: number; expiredOrphan: boolean } | null;
+type FoundRow = {
+  id?: string;
+  storeId?: string;
+  contentType: string;
+  sizeBytes: number;
+  expiredOrphan: boolean;
+  publicPicture?: boolean;
+  isLogo?: boolean;
+} | null;
 const findMock = vi.fn<(...args: unknown[]) => Promise<FoundRow>>(async () => null);
+const publicLogoMock = vi.fn<(...args: unknown[]) => Promise<boolean>>(async () => false);
 const quotaLockMock = vi.fn<(...args: unknown[]) => Promise<void>>(async () => {
   calls.push("quota-lock");
 });
@@ -51,11 +60,12 @@ const countMock = vi.fn<(...args: unknown[]) => Promise<number>>(async () => {
 vi.mock("./repository", () => ({
   insertUploadIfStoreApproved: (...args: unknown[]) => insertMock(...(args as [])),
   findUploadByKey: (...args: unknown[]) => findMock(...args),
+  isLogoOfPublicStore: (...args: unknown[]) => publicLogoMock(...args),
   lockStoreUploads: (...args: unknown[]) => quotaLockMock(...args),
   countUnreferencedUploads: (...args: unknown[]) => countMock(...args),
 }));
 
-const { assertUploadAllowance, createUpload, openFile } = await import("./service");
+const { assertUploadAllowance, createUpload, mayServe, openFile } = await import("./service");
 const { MAX_UNATTACHED_UPLOADS_PER_STORE, ORPHAN_GRACE_PERIOD_SECONDS } = await import("./schema");
 const { jpegBytes } = await import("./test-fixtures");
 
@@ -94,9 +104,18 @@ beforeEach(() => {
   countMock.mockClear();
   findMock.mockReset();
   findMock.mockResolvedValue(null);
+  publicLogoMock.mockReset();
+  publicLogoMock.mockResolvedValue(false);
 });
 
-const servable = { expiredOrphan: false };
+/** A registered upload of store-1 that anyone may read (a picture of a visible product). */
+const servable = {
+  id: "upload-1",
+  storeId: "store-1",
+  expiredOrphan: false,
+  publicPicture: true,
+  isLogo: false,
+};
 
 const IMAGE = { contentType: "image/jpeg" as const, bytes: jpegBytes(100) };
 
@@ -343,5 +362,115 @@ describe("openFile", () => {
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
     expect(warn).toHaveBeenCalledTimes(3);
     for (const call of warn.mock.calls) expect(call[1]).toEqual({ storageKey: KEY });
+  });
+});
+
+describe("SEC-068: who may read a file (mayServe)", () => {
+  const owner = seller();
+  const suspendedOwner = seller("SUSPENDED");
+  const otherSeller: Actor = { ...seller(), userId: "user-2", storeId: "store-2" };
+  const customer: Actor = { userId: "user-3", role: "CUSTOMER", storeId: null, storeStatus: null };
+  const admin: Actor = { userId: "user-4", role: "ADMIN", storeId: null, storeStatus: null };
+  // Against the data model, but the role is what is judged: a non-seller with the store id.
+  const customerWithStore: Actor = { ...customer, storeId: "store-1" };
+
+  it("a public file is served to everyone, anonymous included", () => {
+    const file = { storeId: "store-1", isPublic: true };
+    for (const who of [null, owner, otherSeller, customer, admin]) {
+      expect(mayServe(file, who)).toBe(true);
+    }
+  });
+
+  it("a file that is not public is served only to a SELLER of the owning store, suspended or not", () => {
+    const file = { storeId: "store-1", isPublic: false };
+    expect(mayServe(file, owner)).toBe(true);
+    expect(mayServe(file, suspendedOwner)).toBe(true);
+    for (const who of [null, otherSeller, customer, admin, customerWithStore]) {
+      expect(mayServe(file, who)).toBe(false);
+    }
+  });
+});
+
+describe("SEC-068: openFile serves a file that is not public only to its owner", () => {
+  const notPublic = { ...servable, publicPicture: false };
+  const resolver = (who: Actor | null) => vi.fn(async () => who);
+
+  it("a public picture is served without asking for the session", async () => {
+    findMock.mockResolvedValueOnce({ contentType: "image/jpeg", sizeBytes: 64, ...servable });
+    const resolve = resolver(null);
+    await openFile(KEY, { storage: fakeStorage(jpegBytes(64)) }, resolve);
+    expect(resolve).not.toHaveBeenCalled();
+    expect(publicLogoMock).not.toHaveBeenCalled();
+  });
+
+  it("not public: anonymous (the default too), another seller, a customer, an admin are 404 without reading storage or logging", async () => {
+    const warn = vi.fn();
+    const others: (Actor | null)[] = [
+      null,
+      { ...seller(), userId: "user-2", storeId: "store-2" },
+      { userId: "user-3", role: "CUSTOMER", storeId: null, storeStatus: null },
+      { userId: "user-4", role: "ADMIN", storeId: null, storeStatus: null },
+    ];
+    for (const who of others) {
+      const storage = fakeStorage(jpegBytes(64));
+      findMock.mockResolvedValueOnce({ contentType: "image/jpeg", sizeBytes: 64, ...notPublic });
+      await expect(openFile(KEY, { storage, log: { warn } }, resolver(who))).rejects.toMatchObject({
+        code: "NOT_FOUND",
+        status: 404,
+        details: {},
+      });
+      expect(storage.get).not.toHaveBeenCalled();
+    }
+    const storage = fakeStorage(jpegBytes(64));
+    findMock.mockResolvedValueOnce({ contentType: "image/jpeg", sizeBytes: 64, ...notPublic });
+    await expect(openFile(KEY, { storage })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(storage.get).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("not public: the owning seller's session is served", async () => {
+    findMock.mockResolvedValueOnce({ contentType: "image/jpeg", sizeBytes: 64, ...notPublic });
+    const resolve = resolver(seller("SUSPENDED"));
+    const file = await openFile(KEY, { storage: fakeStorage(jpegBytes(64)) }, resolve);
+    expect(file.sizeBytes).toBe(64);
+    expect(resolve).toHaveBeenCalledTimes(1);
+  });
+
+  it("a logo is public only when its store is public; asked for that upload id only", async () => {
+    const logo = { ...notPublic, isLogo: true };
+    publicLogoMock.mockResolvedValueOnce(true);
+    findMock.mockResolvedValueOnce({ contentType: "image/jpeg", sizeBytes: 64, ...logo });
+    const resolve = resolver(null);
+    await openFile(KEY, { storage: fakeStorage(jpegBytes(64)) }, resolve);
+    expect(publicLogoMock).toHaveBeenCalledWith("upload-1");
+    expect(resolve).not.toHaveBeenCalled();
+
+    publicLogoMock.mockResolvedValueOnce(false);
+    findMock.mockResolvedValueOnce({ contentType: "image/jpeg", sizeBytes: 64, ...logo });
+    await expect(
+      openFile(KEY, { storage: fakeStorage(jpegBytes(64)) }, resolver(null)),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("an expired orphan is 404 even for its owner, and the session is not asked", async () => {
+    findMock.mockResolvedValueOnce({
+      contentType: "image/jpeg",
+      sizeBytes: 64,
+      ...notPublic,
+      expiredOrphan: true,
+    });
+    const resolve = resolver(seller());
+    await expect(
+      openFile(KEY, { storage: fakeStorage(jpegBytes(64)) }, resolve),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it("an invalid key never asks for the session", async () => {
+    const resolve = resolver(seller());
+    await expect(
+      openFile("../x", { storage: fakeStorage(jpegBytes(64)) }, resolve),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(resolve).not.toHaveBeenCalled();
   });
 });
