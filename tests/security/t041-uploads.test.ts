@@ -161,13 +161,28 @@ describe("T-041 review: route files", () => {
     expect(source).not.toMatch(/export (async )?function (GET|PUT|PATCH|DELETE)\b/);
   });
 
-  it("the file route is GET only, inside the frame, sets the four protective headers, and reads no session", () => {
+  // Changed by security with the SEC-068 item 1 re-check (2026-10-20): this case asserted that the
+  // route reads no session, which encoded the old rule "every registered upload is public". Under
+  // the new rule a file that is not public is served only to the owning seller, so the route now
+  // hands the session guard `getActor` to `openFile` as a resolver, and only that. Still refused:
+  // `requireActor` (a request without a session must never be 401), a session read of its own
+  // (`cookies()`, `headers()`), a role or store check in the route (the decision is the service's
+  // `mayServe`), and any store id from the request.
+  it("the file route is GET only, inside the frame, sets the four protective headers, and reads the session only through the guard passed to openFile", () => {
     const source = readFileSync(join(ROOT, FILE_ROUTE), "utf8");
     expect(source).toMatch(/export async function GET\(/);
     expect(source).not.toMatch(/export (async )?function (POST|PUT|PATCH|DELETE)\b/);
     expect(source).toMatch(/return handleRequest\(request, async/);
     expect(source).not.toMatch(/@\/server\/db|@prisma|prisma\/generated/);
-    expect(source).not.toMatch(/requireActor|getActor|cookies\(|headers\(\)/);
+    expect(source).not.toMatch(
+      /requireActor|requireRole|requireApprovedSeller|cookies\(|headers\(\)/,
+    );
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    expect(code).toContain('import { getActor } from "@/server/auth/session";');
+    // In the code, getActor appears twice: its import and the one resolver handed to openFile.
+    expect(code.match(/getActor/g)).toHaveLength(2);
+    expect(code).toMatch(/openFile\(key, \{[^}]*\}, \(\) => getActor\(request\)\)/);
+    expect(code).not.toMatch(/await getActor|\.role\b|storeId|searchParams|actor/);
     expect(source).toContain('"X-Content-Type-Options": "nosniff"');
     expect(source).toContain(`"Content-Security-Policy": "default-src 'none'; sandbox"`);
     expect(source).toContain('"Content-Type": file.contentType');

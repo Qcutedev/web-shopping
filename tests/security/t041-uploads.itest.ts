@@ -82,12 +82,25 @@ async function uploadedKey(cookie: string, body: Uint8Array<ArrayBuffer>): Promi
   return (await json<{ data: { key: string } }>(response)).data.key;
 }
 
-function getFile(key: string): Promise<Response> {
-  return getFileRoute(new Request(`${APP_URL}/api/files/${key}`, { method: "GET" }), {
-    params: Promise.resolve({ key }),
-  } as RouteContext<"/api/files/[key]">);
+/**
+ * GET /api/files/{key}, with the caller's session cookie when one is given. Since SEC-068 item 1
+ * (2026-10-20) an upload that is not public (every unattached upload in this file) is served only
+ * to the owning seller's session, so the cases that read bytes pass the owner's cookie.
+ */
+function getFile(key: string, cookie?: string): Promise<Response> {
+  return getFileRoute(
+    new Request(`${APP_URL}/api/files/${key}`, {
+      method: "GET",
+      ...(cookie === undefined ? {} : { headers: { cookie } }),
+    }),
+    { params: Promise.resolve({ key }) } as RouteContext<"/api/files/[key]">,
+  );
 }
 
+// Changed by security with the SEC-068 item 1 re-check (2026-10-20): the GETs of unattached
+// uploads in this file were anonymous and expected 200, which was the old rule. They now carry the
+// owner's cookie (the only caller the new rule serves such a file to), and each describe keeps or
+// adds an anonymous request that must be 404. Header and byte assertions are unchanged.
 describe("T-041 review: a polyglot is served only as the image it claims to be", () => {
   it("JPEG and PNG leading bytes followed by HTML and script: recorded image type, nosniff, sandbox CSP, no-store, inline, bytes unchanged", async () => {
     const seller = await signedIn("SELLER");
@@ -97,7 +110,8 @@ describe("T-041 review: a polyglot is served only as the image it claims to be",
       [concat(pngBytes(16), html), "a.png", "image/png"],
     ] as const) {
       const key = await uploadedKey(seller.cookie, fileBody(bytes, filename, type));
-      const response = await getFile(key);
+      expect((await getFile(key)).status).toBe(404);
+      const response = await getFile(key, seller.cookie);
       expect(response.status).toBe(200);
       expect(response.headers.get("content-type")).toBe(type);
       expect(response.headers.get("x-content-type-options")).toBe("nosniff");
@@ -116,20 +130,27 @@ describe("T-041 review: a polyglot is served only as the image it claims to be",
     const response = await getFileRoute(
       new Request(`${APP_URL}/api/files/${key}?type=text/html`, {
         method: "GET",
-        headers: { accept: "text/html", "content-type": "text/html" },
+        headers: { accept: "text/html", "content-type": "text/html", cookie: seller.cookie },
       }),
       { params: Promise.resolve({ key }) } as RouteContext<"/api/files/[key]">,
     );
+    expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("image/jpeg");
   });
 });
 
-describe("T-041 review: what a suspension does to uploads that exist (by design, D-010 and section 5.8)", () => {
-  it("a suspended store's existing pictures stay public; the store can upload nothing new", async () => {
+// Changed by security with the SEC-068 item 1 re-check (2026-10-20). The case read "a suspended
+// store's existing pictures stay public", the old rule. Under SEC-068 a suspended store's files
+// are public only if they are an order item's picture (a suspended store's products and logo are
+// not visible); an unattached upload is served to the owner's session only, and BR-14 keeps that
+// read for a suspended seller.
+describe("T-041 review: what a suspension does to uploads that exist (D-010, section 5.8, SEC-068)", () => {
+  it("a suspended store's unattached upload is served to its owner only, never anonymously; the store can upload nothing new", async () => {
     const seller = await signedIn("SELLER");
     const key = await uploadedKey(seller.cookie, fileBody(jpegBytes(64)));
     await db.store.update({ where: { id: seller.storeId ?? "" }, data: { status: "SUSPENDED" } });
-    expect((await getFile(key)).status).toBe(200);
+    expect((await getFile(key)).status).toBe(404);
+    expect((await getFile(key, seller.cookie)).status).toBe(200);
     expect((await upload(seller.cookie, fileBody(jpegBytes(64)))).status).toBe(403);
   });
 });
@@ -155,17 +176,25 @@ describe("SEC-064 uploaded images keep their metadata (Exif GPS) and any trailin
     const seller = await signedIn("SELLER");
     const bytes = jpegWithExifGps();
     const key = await uploadedKey(seller.cookie, fileBody(bytes));
-    const served = new TextDecoder("latin1").decode(await (await getFile(key)).arrayBuffer());
+    const response = await getFile(key, seller.cookie);
+    expect(response.status).toBe(200);
+    const served = new TextDecoder("latin1").decode(await response.arrayBuffer());
     expect(served).toContain("Zq7gpsCanary");
     expect(served).toContain("GPSLatitude");
   });
 
+  // Changed by security with the SEC-068 item 1 re-check (2026-10-20): the anonymous GET became
+  // 404, so the 404 envelope held no GPS block and this expected failure passed for the wrong
+  // reason. It now reads with the owner's cookie and asserts the 200 first, so it can pass only
+  // when the bytes served lack the metadata (SEC-064 still OPEN).
   it.fails(
     "an uploaded picture is served without the location its camera wrote into it",
     async () => {
       const seller = await signedIn("SELLER");
       const key = await uploadedKey(seller.cookie, fileBody(jpegWithExifGps()));
-      const served = new TextDecoder("latin1").decode(await (await getFile(key)).arrayBuffer());
+      const response = await getFile(key, seller.cookie);
+      expect(response.status).toBe(200);
+      const served = new TextDecoder("latin1").decode(await response.arrayBuffer());
       expect(served).not.toContain("GPSLatitude");
       expect(served).not.toContain("Zq7gpsCanary");
     },
@@ -177,7 +206,10 @@ describe("SEC-064 uploaded images keep their metadata (Exif GPS) and any trailin
 // ---------------------------------------------------------------------------------------------
 
 describe("SEC-065 an upload that nothing references stays on disk and public for ever", () => {
-  async function orphanOlderThanGrace(): Promise<string> {
+  // Changed by security with the SEC-068 item 1 re-check (2026-10-20): an anonymous 404 no longer
+  // proves the expiry (any unattached upload is now 404 to an anonymous request), so the GETs below
+  // also carry the owner's cookie, the one caller to whom only the expiry can answer 404.
+  async function orphanOlderThanGrace(): Promise<{ key: string; cookie: string }> {
     const seller = await signedIn("SELLER");
     const key = await uploadedKey(seller.cookie, fileBody(jpegBytes(64)));
     // 25 hours: past the 24-hour grace period of API_CONTRACTS.md section 5.8 "Lifetime".
@@ -185,14 +217,14 @@ describe("SEC-065 an upload that nothing references stays on disk and public for
       where: { storageKey: key },
       data: { createdAt: new Date(Date.now() - 25 * 3_600_000) },
     });
-    return key;
+    return { key, cookie: seller.cookie };
   }
 
   // Changed by backend-api with the SEC-065 fix (2026-10-19), for the security re-check: this case
   // documented the flaw and asserted status 200. The row assertions are unchanged; the status is
   // now the fixed behaviour (404), because the row stays until the cleanup job runs.
   it("(documented) an unattached upload 25 hours old keeps its row until the cleanup runs, and is not served", async () => {
-    const key = await orphanOlderThanGrace();
+    const { key, cookie } = await orphanOlderThanGrace();
     const row = await db.upload.findUniqueOrThrow({
       where: { storageKey: key },
       include: { productImage: true, logoOfStore: true, orderItems: true },
@@ -201,10 +233,12 @@ describe("SEC-065 an upload that nothing references stays on disk and public for
     expect(row.logoOfStore).toBeNull();
     expect(row.orderItems).toEqual([]);
     expect((await getFile(key)).status).toBe(404);
+    expect((await getFile(key, cookie)).status).toBe(404);
   });
 
-  it("an unattached upload past the grace period is no longer served", async () => {
-    const key = await orphanOlderThanGrace();
+  it("an unattached upload past the grace period is no longer served, not even to its owner", async () => {
+    const { key, cookie } = await orphanOlderThanGrace();
     expect((await getFile(key)).status).toBe(404);
+    expect((await getFile(key, cookie)).status).toBe(404);
   });
 });
