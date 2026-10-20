@@ -18,7 +18,9 @@
  * (section 3.1), so no other transaction can make it false in between.
  *
  * Reads take no lock and write nothing. The list reads its count and its page in one read-only
- * `REPEATABLE READ` snapshot, so `total` always agrees with `items`; so does the summary.
+ * `REPEATABLE READ` snapshot, so `total` always agrees with `items`; so does the summary, and so
+ * does the detail (`readOwnPaidSellerOrder`), so that its status, shipment, and items always come
+ * from one moment (CR-T043-02): never `PROCESSING` with a shipment a concurrent move just wrote.
  *
  * Raw statements are tagged templates with bound parameters only (`$queryRaw`, `$executeRaw`); no
  * SQL text is built from a value. Nothing here logs: the rows hold names, phones, and addresses
@@ -125,26 +127,44 @@ export interface SellerOrderViewRow extends Omit<SellerOrderListRow, "order"> {
 
 type ReadClient = Pick<DbTransaction, "order" | "shipment" | "orderItem" | "upload">;
 
+/** The `Order` columns of a list entry. */
+const ORDER_LIST_SELECT = {
+  id: true,
+  orderNumber: true,
+  createdAt: true,
+  paymentStatus: true,
+} as const satisfies Prisma.OrderSelect;
+
+/** The `Order` columns of the detail: the list's plus the paid time and the address (Q42). */
+const ORDER_VIEW_SELECT = {
+  ...ORDER_LIST_SELECT,
+  paidAt: true,
+  shipRecipientName: true,
+  shipPhone: true,
+  shipLine1: true,
+  shipSubdistrict: true,
+  shipDistrict: true,
+  shipProvince: true,
+  shipPostalCode: true,
+} as const satisfies Prisma.OrderSelect;
+
+/** The order rows read by the caller, keyed by order id, without the id itself. */
+function byOrderId<T extends { id: string }>(orders: readonly T[]): Map<string, Omit<T, "id">> {
+  return new Map(orders.map(({ id, ...fields }) => [id, fields]));
+}
+
 /**
- * Adds the order's number, creation time, and payment status, the shipment, and the items to
- * scalar seller order rows, by plain statements awaited one after the other (safe inside a
- * transaction, DATA_MODEL.md 7.8). The paid time and the address are not read here.
+ * Adds the order columns the caller already read (`orderById`, one statement on `Order` whatever
+ * the shape, CR-T043-03), the shipment, and the items to scalar seller order rows, by plain
+ * statements awaited one after the other (safe inside a transaction, DATA_MODEL.md 7.8).
  */
-async function hydrate(
+async function hydrate<O extends SellerOrderListRow["order"]>(
   client: ReadClient,
   rows: SellerOrderScalarRow[],
-): Promise<SellerOrderListRow[]> {
+  orderById: ReadonlyMap<string, O>,
+): Promise<(Omit<SellerOrderListRow, "order"> & { order: O })[]> {
   if (rows.length === 0) return [];
   const sellerOrderIds = rows.map((row) => row.id);
-  const orders = await client.order.findMany({
-    where: { id: { in: [...new Set(rows.map((row) => row.orderId))] } },
-    select: {
-      id: true,
-      orderNumber: true,
-      createdAt: true,
-      paymentStatus: true,
-    },
-  });
   const shipments = await client.shipment.findMany({
     where: { sellerOrderId: { in: sellerOrderIds } },
     select: {
@@ -187,7 +207,6 @@ async function hydrate(
           select: { id: true, storageKey: true },
         });
 
-  const orderById = new Map(orders.map((order) => [order.id, order]));
   const shipmentBySellerOrder = new Map(
     shipments.map((shipment) => [shipment.sellerOrderId, shipment]),
   );
@@ -206,11 +225,7 @@ async function hydrate(
       shippingFeeSatang: row.shippingFeeSatang,
       shippingFeeIsSimulated: row.shippingFeeIsSimulated,
       commissionRateBps: row.commissionRateBps,
-      order: {
-        orderNumber: order.orderNumber,
-        createdAt: order.createdAt,
-        paymentStatus: order.paymentStatus,
-      },
+      order,
       shipment:
         shipment === undefined
           ? null
@@ -240,7 +255,12 @@ async function hydrate(
   });
 }
 
-/** The seller order `sellerOrderId` when it is the session's store's and paid, else null. */
+/**
+ * The seller order `sellerOrderId` when it is the session's store's and paid, else null, read
+ * with the client the caller gives: the status change's transaction, or the read-only snapshot of
+ * `readOwnPaidSellerOrder`. Never call it on the pooled `db`: each statement would see its own
+ * moment (CR-T043-02). The `Order` row is read once, with the detail's columns (CR-T043-03).
+ */
 export async function findOwnPaidSellerOrder(
   client: Pick<DbTransaction, "sellerOrder"> & ReadClient,
   scope: SellerScope,
@@ -251,25 +271,29 @@ export async function findOwnPaidSellerOrder(
     select: SELLER_ORDER_SCALAR_SELECT,
   });
   if (row === null) return null;
-  const [hydrated] = await hydrate(client, [row]);
-  if (hydrated === undefined) return null;
   // The detail alone reads the paid time and the buyer's address (owner ruling on Q42).
-  const detail = await client.order.findUnique({
+  const order = await client.order.findUnique({
     where: { id: row.orderId },
-    select: {
-      paidAt: true,
-      shipRecipientName: true,
-      shipPhone: true,
-      shipLine1: true,
-      shipSubdistrict: true,
-      shipDistrict: true,
-      shipProvince: true,
-      shipPostalCode: true,
-    },
+    select: ORDER_VIEW_SELECT,
   });
-  // The foreign key is Restrict and hydrate just read this order; a miss is a database fault.
-  if (detail === null) throw new Error("orders: a seller order's order row is missing.");
-  return { ...hydrated, order: { ...hydrated.order, ...detail } };
+  // The foreign key is Restrict; a missing order is a database fault, never a 404.
+  if (order === null) throw new Error("orders: a seller order's order row is missing.");
+  const [hydrated] = await hydrate(client, [row], byOrderId([order]));
+  return hydrated ?? null;
+}
+
+/**
+ * GET /seller/orders/{id}: `findOwnPaidSellerOrder` in one read-only `REPEATABLE READ` snapshot,
+ * as the list, so that the status, the shipment, and the items agree (CR-T043-02).
+ */
+export async function readOwnPaidSellerOrder(
+  scope: SellerScope,
+  sellerOrderId: string,
+): Promise<SellerOrderViewRow | null> {
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SET TRANSACTION READ ONLY`;
+    return findOwnPaidSellerOrder(tx, scope, sellerOrderId);
+  }, READ_TRANSACTION_OPTIONS);
 }
 
 /**
@@ -298,7 +322,12 @@ export async function listOwnPaidSellerOrders(
       skip,
       take: page.pageSize,
     });
-    return { rows: await hydrate(tx, rows), total };
+    if (rows.length === 0) return { rows: [], total };
+    const orders = await tx.order.findMany({
+      where: { id: { in: [...new Set(rows.map((row) => row.orderId))] } },
+      select: ORDER_LIST_SELECT,
+    });
+    return { rows: await hydrate(tx, rows, byOrderId(orders)), total };
   }, READ_TRANSACTION_OPTIONS);
 }
 

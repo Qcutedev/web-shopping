@@ -78,6 +78,10 @@ const repo = {
     calls.push("read");
     return ROW;
   }),
+  readOwnPaidSellerOrder: vi.fn(async (): Promise<SellerOrderViewRow | null> => {
+    calls.push("snapshot read");
+    return ROW;
+  }),
   listOwnPaidSellerOrders: vi.fn(async () => ({ rows: [ROW], total: 1 })),
   readSellerSummaryRows: vi.fn(async () => ({
     productsByStatus: [],
@@ -98,6 +102,7 @@ vi.mock("./seller-repository", () => ({
       markShipmentDelivered: 0,
       claimAndRestoreStock: 0,
       findOwnPaidSellerOrder: 0,
+      readOwnPaidSellerOrder: 0,
       listOwnPaidSellerOrders: 0,
       readSellerSummaryRows: 0,
     }).map((name) => [
@@ -174,6 +179,7 @@ describe("permission checks", () => {
       const scoped = [
         repo.listOwnPaidSellerOrders,
         repo.findOwnPaidSellerOrder,
+        repo.readOwnPaidSellerOrder,
         repo.lockOwnPaidSellerOrder,
         repo.readSellerSummaryRows,
       ].filter((fn) => fn.mock.calls.length > 0);
@@ -186,16 +192,33 @@ describe("permission checks", () => {
     },
   );
 
-  it("a SELLER without a store is a fault, not a 404", async () => {
-    await expect(service.getOwnSellerOrder(actor("SELLER"), "so1")).rejects.not.toBeInstanceOf(
-      AppError,
-    );
-  });
+  it.each(ALL)(
+    "%s: a SELLER without a store is a fault before any query, not a 404",
+    async (_n, run) => {
+      const failure = await run(actor("SELLER")).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure).not.toBeInstanceOf(AppError);
+      expect((failure as Error).message).toBe("orders: a SELLER without a store.");
+      expect(calls).toEqual([]);
+      for (const fn of Object.values(repo)) expect(fn).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("reads", () => {
+  it("getOwnSellerOrder reads through the one read-only snapshot, not the pooled client (CR-T043-02)", async () => {
+    await service.getOwnSellerOrder(SELLER, "so1");
+    expect(repo.readOwnPaidSellerOrder).toHaveBeenCalledTimes(1);
+    expect(repo.readOwnPaidSellerOrder).toHaveBeenCalledWith(SCOPE, "so1");
+    expect(repo.findOwnPaidSellerOrder).not.toHaveBeenCalled();
+    expect(calls).toEqual(["snapshot read"]);
+  });
+
   it("getOwnSellerOrder: not found is 404 NOT_FOUND with empty details", async () => {
-    repo.findOwnPaidSellerOrder.mockResolvedValueOnce(null);
+    repo.readOwnPaidSellerOrder.mockResolvedValueOnce(null);
     await expect(service.getOwnSellerOrder(SELLER, "other")).rejects.toMatchObject({
       code: "NOT_FOUND",
       details: {},

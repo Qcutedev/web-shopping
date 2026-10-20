@@ -13,11 +13,10 @@
  *     ORPHAN_CLEANUP_INTERVAL_MS, one schedule per process (a `Symbol.for` key on `globalThis`,
  *     as the payment timeout sweep), never overlapping, the timer unref'd.
  *
- * **Not wired.** Nothing calls `startUploadCleanupSchedule` yet: the start-up hook
- * (src/instrumentation.ts) belongs to devops, who adds it beside the payment timeout sweep, outside
- * NODE_ENV=test (SEC-065 remediation item 1). Until then orphans past the grace period are no
- * longer served but their rows and bytes stay, and they keep counting against the store's cap
- * (MAX_UNATTACHED_UPLOADS_PER_STORE), which bounds the disk one store can fill.
+ * **Wired.** The start-up hook (src/instrumentation.ts, owner devops) calls
+ * `startUploadCleanupSchedule` beside the payment timeout sweep, through the module's index and
+ * outside NODE_ENV=test (SEC-065 remediation item 1). In a test process nothing schedules it; tests
+ * call `cleanUpExpiredOrphans` directly.
  *
  * Several processes may run it at once: `FOR UPDATE ... SKIP LOCKED` gives each row to one of
  * them. Log lines hold counts and storage keys only (a key is a public identifier), never a store,

@@ -47,6 +47,7 @@ import {
   lockOwnPaidSellerOrder,
   markShipmentDelivered,
   moveSellerOrderStatus,
+  readOwnPaidSellerOrder,
   readSellerSummaryRows,
   SELLER_ORDER_TRANSACTION_OPTIONS,
   type SellerScope,
@@ -92,13 +93,16 @@ export async function listOwnSellerOrders(
   };
 }
 
-/** GET /seller/orders/{id}: else 404, the same for unknown, foreign, and unpaid. */
+/**
+ * GET /seller/orders/{id}: else 404, the same for unknown, foreign, and unpaid. Read in one
+ * read-only snapshot (CR-T043-02).
+ */
 export async function getOwnSellerOrder(
   actor: Actor,
   sellerOrderId: string,
 ): Promise<SellerOrderViewDto> {
   const scope = sellerScope(actor);
-  const row = await findOwnPaidSellerOrder(db, scope, sellerOrderId);
+  const row = await readOwnPaidSellerOrder(scope, sellerOrderId);
   if (row === null) throw sellerOrderNotFound();
   return toSellerOrderViewDto(row);
 }
