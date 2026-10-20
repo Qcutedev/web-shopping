@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, type MockInstance, vi } from "vitest";
 
 import { register } from "./instrumentation";
 import { ENV_RULES } from "./server/env";
+import type { Logger } from "./server/logger";
 
 // The hook is run against the real configuration module, not a mock of it: what is asserted is
 // what the server does at start. Nothing here may end the test process, so `process.exit` is
@@ -32,6 +33,17 @@ function stubEnvironment(overrides: Record<string, string | undefined> = {}): vo
   };
   for (const [name, value] of Object.entries(values)) vi.stubEnv(name, value);
 }
+
+/** A logger that writes nothing. `child` returns itself. */
+const silentLogger: Logger = {
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+  child() {
+    return silentLogger;
+  },
+};
 
 type WriteCallback = (error?: Error | null) => void;
 
@@ -180,24 +192,11 @@ describe("register: scheduled work", () => {
     expect(cleanup).not.toHaveBeenCalled();
   });
 
-  it("starts no upload cleanup when NODE_ENV is test, in the build phase, or outside Node.js", async () => {
-    const { cleanup } = mockSchedules();
-    record("at once");
-    stubEnvironment({ NODE_ENV: "test" });
-    expect(await run()).toBeUndefined();
-    stubEnvironment({ NODE_ENV: "development", NEXT_PHASE: "phase-production-build" });
-    expect(await run()).toBeUndefined();
-    stubEnvironment({ NODE_ENV: "development", NEXT_RUNTIME: "edge" });
-    expect(await run()).toBeUndefined();
-    expect(cleanup).not.toHaveBeenCalled();
-  });
-
   it("leaves a single, unref'd timer when the hook runs twice with the real module", async () => {
     vi.doMock("./server/auth/session-purge", () => ({ startSessionPurgeSchedule: vi.fn() }));
     vi.doMock("./modules/orders", () => ({ startPaymentTimeoutSweepSchedule: vi.fn() }));
-    // The real schedule module, with only the cleanup run replaced by the options default path:
-    // spy on setInterval to see the timers it creates. The run itself is stubbed at the module's
-    // collaborators so that no database or disk is reached.
+    // The real startUploadCleanupSchedule runs, with only its `run` and `logger` options injected
+    // so that no database or disk is reached. The spy on setInterval shows the timers it creates.
     vi.doMock("./modules/uploads/cleanup", async (importOriginal) => {
       const original = await importOriginal<typeof import("./modules/uploads/cleanup")>();
       return {
@@ -206,7 +205,7 @@ describe("register: scheduled work", () => {
           original.startUploadCleanupSchedule({
             ...options,
             run: () => Promise.resolve({ rowsDeleted: 0, filesDeleted: 0, filesFailed: 0 }),
-            logger: { info() {}, warn() {}, error() {}, debug() {} } as never,
+            logger: silentLogger,
           }),
       };
     });
@@ -250,14 +249,15 @@ describe("register: scheduled work", () => {
   it("starts no schedule when NODE_ENV is test", async () => {
     stubEnvironment({ NODE_ENV: "test" });
     record("at once");
-    const { purge, sweep } = mockSchedules();
+    const { purge, sweep, cleanup } = mockSchedules();
     expect(await run()).toBeUndefined();
     expect(purge).not.toHaveBeenCalled();
     expect(sweep).not.toHaveBeenCalled();
+    expect(cleanup).not.toHaveBeenCalled();
   });
 
   it("starts no schedule in the build phase, outside Node.js, or with an invalid environment", async () => {
-    const { purge, sweep } = mockSchedules();
+    const { purge, sweep, cleanup } = mockSchedules();
     record("at once");
     stubEnvironment({ NODE_ENV: "development", NEXT_PHASE: "phase-production-build" });
     expect(await run()).toBeUndefined();
@@ -267,6 +267,7 @@ describe("register: scheduled work", () => {
     expect(await run()).toBeInstanceOf(Error);
     expect(purge).not.toHaveBeenCalled();
     expect(sweep).not.toHaveBeenCalled();
+    expect(cleanup).not.toHaveBeenCalled();
   });
 });
 
