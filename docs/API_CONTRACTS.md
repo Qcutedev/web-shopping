@@ -1079,6 +1079,77 @@ Product as its seller sees it:
 - **Switched-off category** (D-026, OQ-39). Creating a product with a `categoryId` whose category is inactive, or changing a product's `categoryId` to one, is refused with `409 CONFLICT`, reason `CATEGORY_INACTIVE`, and changes nothing. A product that is already in a category that was switched off later can still be edited as long as its `categoryId` is not changed to another inactive one. An unknown `categoryId` is `404 NOT_FOUND` with `details.resource` `"category"`.
 - **Suspended store: view only, apart from orders** (REQ-S-09; BR-14; D-028). A seller whose store is `SUSPENDED` may use exactly these endpoints: `GET /seller/store`, `GET /seller/summary`, `GET /seller/products`, `GET /seller/products/{id}`, the three order endpoints of [section 5.7.3](#573-seller-orders) (`GET /seller/orders`, `GET /seller/orders/{id}`, `POST /seller/orders/{id}/status`), and `GET /seller/application`. Every other seller endpoint is refused with `403 SELLER_NOT_APPROVED` until the store is reinstated: creating, editing, publishing, unpublishing, archiving, and deleting a product, adjusting stock, editing the store (`PATCH /seller/store`), and uploading (`POST /seller/uploads`). Deleting a product, editing the store, and uploading are not named one by one in D-028; they are refused because they are not views.
 
+##### 5.7.2.1 As built (T-042, 2026-10-20)
+
+Implemented: the nine endpoints of the table above, in `src/modules/inventory` (schema, state table, errors, repository, service; public surface `@/modules/inventory`) and the handlers under `src/app/api/v1/seller/products/` (`route.ts`, `[id]/route.ts`, `[id]/stock/route.ts`, `[id]/publish/route.ts`, `[id]/unpublish/route.ts`, `[id]/archive/route.ts`). The schemas, constants, and types in `src/modules/inventory/schema.ts` are authoritative: `createProductBodySchema`, `updateProductBodySchema`, `stockBodySchema`, `listSellerProductsQuerySchema`, `productIdParamsSchema`, the response types `SellerProductDto` and `DeleteProductDto`, and the constants `MIN_PRICE_SATANG`, `MAX_PRICE_SATANG`, `MAX_SELLER_STOCK`, `LOW_STOCK_THRESHOLD`, `PRODUCT_TITLE_MAX`, `PRODUCT_DESCRIPTION_MAX`, `PRODUCT_SKU_MAX`. The state table is `PRODUCT_TRANSITIONS` and the moderation effect of a save is `classifySave`, both in `src/modules/inventory/state.ts`. Unit tests next to the module and the routes; `tests/integration/inventory/endpoints.test.ts` against PostgreSQL. **Not security-reviewed and not code-reviewed.** The six route files are not yet on the route list guard of `tests/security/t020-t018-catalog-shell.test.ts` (security adds them), so `pnpm test` fails on that one case until then. No endpoint here is rate-limited (section 6 lists none).
+
+**Order of checks** ([section 1.8](#18-access-levels-and-404-against-403)); every response is `Cache-Control: no-store`.
+
+| Endpoint | Access | Steps |
+| --- | --- | --- |
+| `GET /seller/products` | seller (any store status) | 3 session (401), 4 role `SELLER` (403 `FORBIDDEN`), 7 query (400), then the service |
+| `GET /seller/products/{id}` | seller (any store status) | 3, 4 as above, 7 path parameter (400), then the service (404) |
+| `POST /seller/products` | seller | 1 `Origin` (403), 2 `Content-Type` (415), 3 session (401), 4 role `SELLER` then store `APPROVED` (403 `FORBIDDEN`, or 403 `SELLER_NOT_APPROVED` before the body is read), 6 body (413), 7 schema (400), then the service |
+| `PATCH /seller/products/{id}`, `PATCH /seller/products/{id}/stock` | seller | 1, 2, 3, 4 as above, 6 body, 7 path parameter and body, then the service |
+| `DELETE /seller/products/{id}`, `POST .../publish`, `.../unpublish`, `.../archive` | seller, no body ([section 1.2](#12-mutations-without-a-body)) | 1, 2, 3, 4 as above, 7 path parameter, then the service. The body is never read |
+
+**Inside the service** (one transaction per write). The first statement is `requireApprovedStoreForWrite` ([section 5.7.1.1](#5711-as-built-t-040-2026-10-14), "For later tasks"; share lock on the store row while it is the caller's and `APPROVED`), so a suspended store is `403 SELLER_NOT_APPROVED` before any product, category, or upload is looked up (step 8; "store state before ownership", section 1.8). The `Store` row is never updated or deleted after it (CR-T040-04). Then, in this order, the first failing check answers:
+
+1. The product (not on create): locked `FOR UPDATE` by its id **and** the session's store and owner in one statement. An unknown id and another store's id are the same `404 NOT_FOUND`, `details` `{}`, and nothing changes.
+2. A new `categoryId` (on create, or a change on edit): share-locked; none is `404 NOT_FOUND`, `details.resource` `"category"`.
+3. `imageKeys`: each key resolved as an upload of the session's store only and key-share-locked (so the orphan cleanup of section 5.8.1 cannot delete it before the link is written); any unknown or foreign key is `404 NOT_FOUND`, `details.resource` `"upload"`, identical for both.
+4. `409 INVALID_STATE_TRANSITION`: an edit or stock change of an `ARCHIVED` product, and a status move the table does not allow.
+5. `409 CONFLICT`, in this order: `CATEGORY_INACTIVE`, `UPLOAD_IN_USE` (the upload is a picture of another product), `DUPLICATE_SKU`, `NEGATIVE_STOCK`, `STOCK_LIMIT`.
+6. The guarded write itself carries the store condition (DATA_MODEL.md section 7.7); zero rows because a suspension committed in between is `403 SELLER_NOT_APPROVED` and the transaction is rolled back. The unique indexes `Product_storeId_sku_live_key` and `ProductImage_uploadId_key` are the backstop for races and give the same `DUPLICATE_SKU` and `UPLOAD_IN_USE` (two creates with one SKU at the same time: one `201`, one `409`).
+
+**Responses.**
+
+| Endpoint | Success |
+| --- | --- |
+| `GET /seller/products` | `200`, list envelope of `SellerProductDto`, newest first (`createdAt` then `id`, both descending) |
+| `GET /seller/products/{id}` | `200`, `SellerProductDto` |
+| `POST /seller/products` | `201`, `SellerProductDto`: `status` `DRAFT`, `moderationStatus` `PENDING`, `contentRevision` 1, `isSample` false |
+| `PATCH /seller/products/{id}`, `.../stock`, `.../publish`, `.../unpublish`, `.../archive` | `200`, `SellerProductDto` after the change |
+| `DELETE /seller/products/{id}` | `200`, `{ "outcome": "DELETED" }` or `{ "outcome": "ARCHIVED" }` |
+
+`SellerProductDto` has exactly the keys of the example above: `id`, `slug`, `title`, `description`, `sku`, `category` (`{ id, name, isActive }`), `priceSatang`, `stock`, `lowStock`, `soldOut`, `status`, `moderationStatus`, `moderationNote`, `images` (`[{ key, url }]` in display order, `url` is `/api/files/` and the key), `isSample`, `createdAt`, `updatedAt`. No store id, owner id, upload id, `contentRevision`, or `moderationRequestedAt`.
+
+**Fields** (item 8.2-7 settled for these endpoints, provisionally; see below).
+
+| Field | Rule |
+| --- | --- |
+| `title` | One line, trimmed, 1 to 200 characters, `NAME_ALLOWED_TEXT` ([section 5.3.1](#531-as-built-t-030-backend-2026-10-13)) |
+| `description` | Multi-line, 1 to 5000 characters after the normalisation of the store description ([section 5.7.1.1](#5711-as-built-t-040-2026-10-14), "Fields"); every non-empty line under `NAME_ALLOWED_TEXT` |
+| `sku` | One line, trimmed, 1 to 64 characters, `NAME_ALLOWED_TEXT`. Compared exactly for uniqueness: `ABC` and `abc` are two SKUs |
+| `categoryId` | An opaque id, 1 to 200 characters, no U+0000, no lone surrogate (section 1.4) |
+| `priceSatang` | Integer, 100 to 100,000,000 (BR-02) |
+| `stock` (create) | Integer, 0 to 1,000,000 (BR-34) |
+| `imageKeys` | Array of at most 8 opaque keys of 1 to 200 characters; **a key twice is `400`**. An empty array removes every picture |
+| `set` / `adjust` | As in the bullet "Stock" above. Both, neither, `adjust: 0`, and a fraction are `400` (path `""`, code `custom`, for both and neither) |
+| Query | `page`, `pageSize` (section 1.7); `status` one of `DRAFT`, `PUBLISHED`, `ARCHIVED`; `moderationStatus` one of the four values; `lowStock` and `soldOut` accept only `true` (any other value, `false` included, is `400`). Filters combine with AND. Every other parameter, `storeId` included, is ignored |
+
+The edit body takes at least one field (an empty object is `400`, path `""`, code `custom`). On every body, `stock` (edit only), `status`, `moderationStatus`, `moderationNote`, `contentRevision`, `slug`, `storeId`, and `isSample` are `400 unrecognized_keys`.
+
+**Behaviour worth knowing.**
+
+- **Slug.** Generated from the title by `generateSlug` (DATA_MODEL.md section 9) with a random suffix, never taken from the request, and not changed by an edit of the title.
+- **Edit.** Moderation follows `classifySave` and [section 3.3](#33-product-status-and-moderation) exactly. A save in which nothing differs from the stored values writes nothing (not even `updatedAt`). A pure reorder of `imageKeys` rewrites the picture order and `updatedAt` only. Removing a picture removes the link, never the upload or its file.
+- **Publish.** Never sets `moderationStatus`. Publishing a product whose `moderationStatus` is `PENDING` sets its place in the approval queue to the time of the publish (BR-36, D-028).
+- **Delete** (BR-12). A product no order item references is deleted with its picture links and cart lines (cascade); its uploads stay. A product an order item references is archived through the archive row of the state table. The product row lock keeps a checkout from adding an order item in between; the `Restrict` key on `OrderItem.productId` is the backstop.
+- **Stock.** The guarded statements repeat the bounds in their `WHERE` (DATA_MODEL.md section 7.6). Two decrements that together exceed the stock: one succeeds and the other is `409 NEGATIVE_STOCK` (the product row lock orders them). A decrease is accepted when a restore left the stock above 1,000,000.
+- **Pictures and logos.** One upload is a picture of at most one product. Nothing stops the upload used as the store logo from also being a product picture; neither link deletes the file.
+
+**Choices made in T-042 and not yet ruled** (each one constant or one line; a client may rely on the status and the code, not on these values):
+
+- The text limits above: `title` 200, `description` 5000, `sku` 64 and case-sensitive (item 8.2-7).
+- A duplicate key in `imageKeys` is `400` rather than collapsed.
+- `409 CONFLICT` with the new reason `SLUG_TAKEN` (`SLUG_TAKEN` in `src/modules/inventory/errors.ts`; not yet in the reason table of [section 2.3](#23-error-codes)) when the generated slug collides on `Product_slug_key` on each of 3 attempts (`PRODUCT_SLUG_ATTEMPTS`); with 40 random bits per suffix it is not expected to happen.
+- `DELETE` of an `ARCHIVED` product that an order references is `409 INVALID_STATE_TRANSITION` and changes nothing; `DELETE` of an `ARCHIVED` product that no order references deletes it.
+- A stock change of an `ARCHIVED` product is `409 INVALID_STATE_TRANSITION` (the contract says only that `PATCH` of an archived product is refused).
+- `lowStock` and `soldOut` accept only the value `true`.
+- Product ids written by this module are random UUIDs, not cuids (as for uploads, section 5.8.1).
+- No `AuditLog` row for seller product writes (REQ-A-10 asks for one on admin mutations only).
+
 #### 5.7.3 Seller orders
 
 A suspended store still reads and fulfils its existing orders (BR-14; finding B4), so these three endpoints do **not** require an approved store.
