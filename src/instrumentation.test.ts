@@ -153,12 +153,81 @@ describe("register: scheduled work", () => {
     const purge = vi.fn();
     const sweep = vi.fn();
     vi.doMock("./server/auth/session-purge", () => ({ startSessionPurgeSchedule: purge }));
+    const cleanup = vi.fn();
     vi.doMock("./modules/orders", () => ({ startPaymentTimeoutSweepSchedule: sweep }));
-    return { purge, sweep };
+    vi.doMock("./modules/uploads", () => ({ startUploadCleanupSchedule: cleanup }));
+    return { purge, sweep, cleanup };
   }
   afterEach(() => {
     vi.doUnmock("./server/auth/session-purge");
     vi.doUnmock("./modules/orders");
+    vi.doUnmock("./modules/uploads");
+  });
+
+  it("starts the upload cleanup once, with default options, when NODE_ENV is not test", async () => {
+    stubEnvironment({ NODE_ENV: "development" });
+    record("at once");
+    const { cleanup } = mockSchedules();
+    expect(await run()).toBeUndefined();
+    expect(cleanup.mock.calls).toEqual([[]]);
+  });
+
+  it("starts the upload cleanup after the environment validated, and not when it did not", async () => {
+    const { cleanup } = mockSchedules();
+    record("at once");
+    stubEnvironment({ NODE_ENV: "development", APP_URL: undefined });
+    expect(await run()).toBeInstanceOf(Error);
+    expect(cleanup).not.toHaveBeenCalled();
+  });
+
+  it("starts no upload cleanup when NODE_ENV is test, in the build phase, or outside Node.js", async () => {
+    const { cleanup } = mockSchedules();
+    record("at once");
+    stubEnvironment({ NODE_ENV: "test" });
+    expect(await run()).toBeUndefined();
+    stubEnvironment({ NODE_ENV: "development", NEXT_PHASE: "phase-production-build" });
+    expect(await run()).toBeUndefined();
+    stubEnvironment({ NODE_ENV: "development", NEXT_RUNTIME: "edge" });
+    expect(await run()).toBeUndefined();
+    expect(cleanup).not.toHaveBeenCalled();
+  });
+
+  it("leaves a single, unref'd timer when the hook runs twice with the real module", async () => {
+    vi.doMock("./server/auth/session-purge", () => ({ startSessionPurgeSchedule: vi.fn() }));
+    vi.doMock("./modules/orders", () => ({ startPaymentTimeoutSweepSchedule: vi.fn() }));
+    // The real schedule module, with only the cleanup run replaced by the options default path:
+    // spy on setInterval to see the timers it creates. The run itself is stubbed at the module's
+    // collaborators so that no database or disk is reached.
+    vi.doMock("./modules/uploads/cleanup", async (importOriginal) => {
+      const original = await importOriginal<typeof import("./modules/uploads/cleanup")>();
+      return {
+        ...original,
+        startUploadCleanupSchedule: (options?: object) =>
+          original.startUploadCleanupSchedule({
+            ...options,
+            run: () => Promise.resolve({ rowsDeleted: 0, filesDeleted: 0, filesFailed: 0 }),
+            logger: { info() {}, warn() {}, error() {}, debug() {} } as never,
+          }),
+      };
+    });
+    stubEnvironment({ NODE_ENV: "development" });
+    record("at once");
+    const intervals = vi.spyOn(globalThis, "setInterval");
+    try {
+      expect(await run()).toBeUndefined();
+      vi.resetModules(); // a second module copy, as another bundle would have
+      expect(await run()).toBeUndefined();
+      const own = intervals.mock.calls.filter(([, ms]) => ms === 60 * 60 * 1_000);
+      expect(own).toHaveLength(1);
+      const timer = intervals.mock.results[
+        intervals.mock.calls.findIndex(([, ms]) => ms === 3_600_000)
+      ]?.value as NodeJS.Timeout;
+      expect(timer.hasRef()).toBe(false);
+    } finally {
+      const { stopUploadCleanupSchedule } = await import("./modules/uploads/cleanup");
+      stopUploadCleanupSchedule();
+      vi.doUnmock("./modules/uploads/cleanup");
+    }
   });
 
   it("starts the payment timeout sweep with the validated timeout when NODE_ENV is not test", async () => {

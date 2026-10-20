@@ -7,7 +7,8 @@
  * is reported at start, by name and rule and never by value, instead of at some later request.
  * Then, and only with a valid environment, it starts the scheduled removal of expired sessions
  * (T-015, src/server/auth/session-purge.ts) and the payment timeout sweep (T-032,
- * src/modules/orders/timeout-sweep.ts); neither starts in a process with NODE_ENV=test.
+ * src/modules/orders/timeout-sweep.ts) and the upload orphan cleanup (SEC-065,
+ * src/modules/uploads/cleanup.ts); none starts in a process with NODE_ENV=test.
  *
  * Where it does not run:
  *
@@ -59,6 +60,12 @@ export async function register(): Promise<void> {
         // goes through the orders module: only modules reach the database client (rule 7).
         const { startPaymentTimeoutSweepSchedule } = await import("./modules/orders");
         startPaymentTimeoutSweepSchedule({ timeoutMinutes: env.paymentTimeoutMinutes });
+        // SEC-065: deletes orphan uploads past the grace period, once now and every hour. The
+        // module keeps one schedule per process in a `Symbol.for` slot on `globalThis`, which the
+        // hook's own module copy shares with any other copy, so the hook adds no guard of its own.
+        // The timer is unref'd inside the module. Import through the module's index (rule 7).
+        const { startUploadCleanupSchedule } = await import("./modules/uploads");
+        startUploadCleanupSchedule();
       }
     } catch (error) {
       process.exitCode = 1;
