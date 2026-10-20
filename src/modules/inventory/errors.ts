@@ -30,6 +30,11 @@ export const CATEGORY_INACTIVE = "CATEGORY_INACTIVE";
  * raw database error.
  */
 export const SLUG_TAKEN = "SLUG_TAKEN";
+/**
+ * D-043 item 1: the store already holds MAX_LIVE_PRODUCTS_PER_STORE products that are not
+ * `ARCHIVED`. Says nothing of the count. Not yet in the reason table of section 2.3.
+ */
+export const PRODUCT_LIMIT = "PRODUCT_LIMIT";
 
 export function productNotFound(): AppError {
   return notFound();
@@ -70,4 +75,8 @@ export function categoryInactive(): AppError {
 
 export function slugTaken(): AppError {
   return conflict(SLUG_TAKEN);
+}
+
+export function productLimitReached(): AppError {
+  return conflict(PRODUCT_LIMIT);
 }

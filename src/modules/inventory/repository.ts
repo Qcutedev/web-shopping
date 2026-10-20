@@ -16,7 +16,8 @@
  * sellers helper), the category row (`FOR SHARE`, so an admin cannot switch it off between the
  * check and the write), the `Product` row (`FOR UPDATE`), the `Upload` rows (`FOR KEY SHARE`, so
  * the orphan cleanup cannot delete one between the lookup and the link), then the `ProductImage`
- * rows. `createProduct` and `updateProduct` both follow it (CR-T042-01: the update locks the
+ * rows. `createProduct` takes the store's create lock (an advisory lock, no row; D-043) right
+ * after the store row. `createProduct` and `updateProduct` both follow it (CR-T042-01: the update locks the
  * requested category before the product row). DATA_MODEL.md 7.5 places `Product` before
  * `ProductImage` but does not name Store, Category, or Upload; their positions here are this
  * module's own until the database owner adds them there.
@@ -245,6 +246,26 @@ export async function lockOwnProduct(
     WHERE p."id" = ${productId} AND p."storeId" = ${storeId} AND s."ownerId" = ${userId}
     FOR UPDATE OF p`;
   return rows[0] ?? null;
+}
+
+/**
+ * Serialises the creates of one store until the transaction ends (D-043 item 1): a
+ * transaction-level advisory lock on a key derived from the store id, taken right after the store
+ * row's share lock and before any row lock. Two creates of one store therefore count and insert one
+ * after the other, so the per-store product limit cannot be passed in parallel. Other stores are
+ * not held up (a hash collision only makes two stores wait for each other). No row lock, so it
+ * conflicts with neither the store's `FOR SHARE` lock nor a suspension waiting for it.
+ */
+export async function lockStoreProductCreates(tx: DbTransaction, storeId: string): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`products:${storeId}`}, 0))`;
+}
+
+/**
+ * How many products of the store are not `ARCHIVED`. Its condition is that of the partial index
+ * PRODUCT_SKU_LIVE_INDEX, which leads with `storeId`, so the index can serve it.
+ */
+export async function countLiveProducts(tx: DbTransaction, storeId: string): Promise<number> {
+  return tx.product.count({ where: { storeId, status: { not: "ARCHIVED" } } });
 }
 
 /**

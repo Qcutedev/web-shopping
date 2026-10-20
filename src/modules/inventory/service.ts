@@ -26,7 +26,8 @@
  *
  * Order of refusals inside a write: 403 (store), 404 product, 404 `category`, 404 `upload`, then
  * the 409s: `INVALID_STATE_TRANSITION` (the product is archived, or the status move is not in the
- * table), `CATEGORY_INACTIVE`, `UPLOAD_IN_USE`, `DUPLICATE_SKU`, `NEGATIVE_STOCK`, `STOCK_LIMIT`.
+ * table), `PRODUCT_LIMIT` (create only, D-043), `CATEGORY_INACTIVE`, `UPLOAD_IN_USE`,
+ * `DUPLICATE_SKU`, `NEGATIVE_STOCK`, `STOCK_LIMIT`.
  *
  * Money is integer satang, taken from the validated body and stored as given; nothing is
  * computed from a client amount. Stock moves only through a guarded statement (repository).
@@ -47,6 +48,7 @@ import {
   categoryNotFound,
   duplicateSku,
   negativeStock,
+  productLimitReached,
   productNotFound,
   slugTaken,
   stockLimit,
@@ -56,6 +58,7 @@ import {
 } from "./errors";
 import {
   adjustStockIfAllowed,
+  countLiveProducts,
   currentImageUploadIds,
   deleteProductIfStoreApproved,
   findOwnProduct,
@@ -66,6 +69,7 @@ import {
   type LockedProduct,
   lockCategory,
   lockOwnProduct,
+  lockStoreProductCreates,
   liveSkuTaken,
   moveProductStatusIfStoreApproved,
   PRODUCT_IMAGE_UPLOAD_INDEX,
@@ -85,6 +89,7 @@ import {
   type DeleteProductDto,
   type ListSellerProductsQuery,
   LOW_STOCK_THRESHOLD,
+  MAX_LIVE_PRODUCTS_PER_STORE,
   MAX_SELLER_STOCK,
   type SellerProductDto,
   type StockBody,
@@ -255,9 +260,11 @@ function mapWriteError(error: unknown): never {
 }
 
 /**
- * POST /seller/products (REQ-S-04). In one transaction: the store (403), the category (404
- * `category`; inactive is 409 CATEGORY_INACTIVE, BR-23), the pictures (404 `upload`; one attached
- * to another product is 409 UPLOAD_IN_USE), the SKU (409 DUPLICATE_SKU), then the guarded insert
+ * POST /seller/products (REQ-S-04). In one transaction: the store (403), the store's create lock
+ * (D-043), the category (404 `category`; inactive is 409 CATEGORY_INACTIVE, BR-23), the pictures
+ * (404 `upload`; one attached to another product is 409 UPLOAD_IN_USE), the store's products that
+ * are not `ARCHIVED` (MAX_LIVE_PRODUCTS_PER_STORE or more is 409 PRODUCT_LIMIT, counted under the
+ * create lock so parallel creates cannot pass it), the SKU (409 DUPLICATE_SKU), then the guarded insert
  * with status `DRAFT` and moderation `PENDING` (BR-17) and the picture links in the given order.
  * The slug is generated (never taken from the request); a collision on `Product_slug_key` retries
  * the whole transaction with a new suffix, at most PRODUCT_SLUG_ATTEMPTS times, and is then
@@ -272,10 +279,14 @@ export async function createProduct(
     try {
       return await db.$transaction(async (tx) => {
         const { storeId } = await requireApprovedStoreForWrite(tx, actor);
+        await lockStoreProductCreates(tx, storeId);
         const category = await lockCategory(tx, input.categoryId);
         if (category === null) throw categoryNotFound();
         const uploadIds = await resolveOwnUploads(tx, storeId, keys);
         if (uploadIds === null) throw uploadNotFound();
+        if ((await countLiveProducts(tx, storeId)) >= MAX_LIVE_PRODUCTS_PER_STORE) {
+          throw productLimitReached();
+        }
         if (!category.isActive) throw categoryInactive();
         if (await uploadsAttachedElsewhere(tx, uploadIds, null)) throw uploadInUse();
         if (await liveSkuTaken(tx, storeId, input.sku, null)) throw duplicateSku();

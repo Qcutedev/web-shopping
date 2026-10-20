@@ -807,3 +807,131 @@ describe("PATCH /api/v1/seller/products/{id}/stock", () => {
     expect((await db.product.findUniqueOrThrow({ where: { id: product.id } })).stock).toBe(2);
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// D-043 item 1: at most 1,000 products that are not ARCHIVED per store
+// ---------------------------------------------------------------------------------------------
+
+describe("D-043: the per-store product limit on POST /api/v1/seller/products", () => {
+  /** `count` products of the store with the given status, in one statement. */
+  async function fill(
+    storeId: string,
+    count: number,
+    status: "DRAFT" | "PUBLISHED" | "ARCHIVED" = "DRAFT",
+  ): Promise<void> {
+    const category = await createCategory();
+    const tag = `${status.toLowerCase()}-${Math.random().toString(36).slice(2, 10)}`;
+    await db.product.createMany({
+      data: Array.from({ length: count }, (_, i) => ({
+        storeId,
+        categoryId: category.id,
+        title: `Filler ${String(i)}`,
+        slug: `filler-${tag}-${String(i)}`,
+        description: "x",
+        sku: `FILL-${tag}-${String(i)}`,
+        priceSatang: 100,
+        stock: 0,
+        status,
+      })),
+    });
+  }
+
+  it("the 1,000th live product is created; the 1,001st is 409 PRODUCT_LIMIT and writes nothing; ARCHIVED ones do not count", async () => {
+    const me = await seller();
+    await fill(me.storeId, 999);
+    await fill(me.storeId, 5, "ARCHIVED");
+    const accepted = await call.create({ cookie: me.cookie, body: await createBody({ sku: "A" }) });
+    expect(accepted.status).toBe(201);
+
+    const picture = await createUpload({ storeId: me.storeId });
+    const body = await createBody({ sku: "B", imageKeys: [picture.storageKey] });
+    const before = await snapshot();
+    const refused = await call.create({ cookie: me.cookie, body });
+    expect(refused.status).toBe(409);
+    expect(await errorOf(refused)).toEqual({
+      code: "CONFLICT",
+      message: expect.any(String) as string,
+      details: { reason: "PRODUCT_LIMIT" },
+    });
+    await expectUnchanged(before);
+    expect(
+      await db.product.count({ where: { storeId: me.storeId, status: { not: "ARCHIVED" } } }),
+    ).toBe(1_000);
+  });
+
+  it("archiving or deleting a product frees a place; edits and publishes of a full store go through", async () => {
+    const me = await seller();
+    await fill(me.storeId, 998);
+    const ids: string[] = [];
+    for (const sku of ["X1", "X2"]) {
+      const created = await call.create({ cookie: me.cookie, body: await createBody({ sku }) });
+      expect(created.status).toBe(201);
+      ids.push((await dataOf(created)).id);
+    }
+    const [first = "", second = ""] = ids;
+    const full = await call.create({ cookie: me.cookie, body: await createBody({ sku: "X3" }) });
+    expect(await errorCode(full)).toBe("CONFLICT");
+
+    expect((await call.patch(first, { cookie: me.cookie, body: { title: "Edited" } })).status).toBe(
+      200,
+    );
+    expect((await call.publish(first, { cookie: me.cookie })).status).toBe(200);
+
+    expect((await call.archive(first, { cookie: me.cookie })).status).toBe(200);
+    expect(
+      (await call.create({ cookie: me.cookie, body: await createBody({ sku: "X4" }) })).status,
+    ).toBe(201);
+    expect(
+      (await call.create({ cookie: me.cookie, body: await createBody({ sku: "X5" }) })).status,
+    ).toBe(409);
+    expect((await call.remove(second, { cookie: me.cookie })).status).toBe(200);
+    expect(
+      (await call.create({ cookie: me.cookie, body: await createBody({ sku: "X6" }) })).status,
+    ).toBe(201);
+  });
+
+  it("eight parallel creates with two places left: exactly two succeed, six are PRODUCT_LIMIT", async () => {
+    const me = await seller();
+    await fill(me.storeId, 998);
+    const actor = actorOf(me, "APPROVED");
+    const category = await createCategory();
+    const results = await Promise.allSettled(
+      Array.from({ length: 8 }, (_, i) =>
+        createProductService(actor, {
+          title: `Race ${String(i)}`,
+          description: "x",
+          sku: `RACE-${String(i)}`,
+          categoryId: category.id,
+          priceSatang: 100,
+          stock: 0,
+        }),
+      ),
+    );
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(2);
+    for (const result of results.filter((r) => r.status === "rejected")) {
+      expect(result.reason).toMatchObject({ details: { reason: "PRODUCT_LIMIT" } });
+    }
+    expect(
+      await db.product.count({ where: { storeId: me.storeId, status: { not: "ARCHIVED" } } }),
+    ).toBe(1_000);
+  });
+
+  it("one store at the limit does not refuse another store's create", async () => {
+    const full = await seller();
+    const other = await seller();
+    await fill(full.storeId, 1_000, "PUBLISHED");
+    const [refused, accepted] = await Promise.all([
+      call.create({ cookie: full.cookie, body: await createBody({ sku: "F" }) }),
+      call.create({ cookie: other.cookie, body: await createBody({ sku: "O" }) }),
+    ]);
+    expect(refused.status).toBe(409);
+    expect(accepted.status).toBe(201);
+  });
+
+  it("a suspended store at the limit is 403 SELLER_NOT_APPROVED, not 409", async () => {
+    const me = await seller("SUSPENDED");
+    await fill(me.storeId, 1_000);
+    const response = await call.create({ cookie: me.cookie, body: await createBody() });
+    expect(await errorCode(response)).toBe("SELLER_NOT_APPROVED");
+  });
+});

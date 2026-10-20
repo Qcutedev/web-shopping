@@ -89,6 +89,13 @@ const repo = {
   isReferencedByOrders: stub(false),
   deleteProductIfStoreApproved: stub(true),
   listOwnProducts: stub({ rows: [ROW], total: 1 }),
+  lockStoreProductCreates: vi.fn<(...args: unknown[]) => Promise<void>>(async () => {
+    calls.push("create-lock");
+  }),
+  countLiveProducts: vi.fn<(...args: unknown[]) => Promise<number>>(async () => {
+    calls.push("count");
+    return 0;
+  }),
 };
 vi.mock("./repository", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./repository")>();
@@ -141,6 +148,11 @@ beforeEach(() => {
   repo.currentImageUploadIds.mockResolvedValue([]);
   repo.uploadsAttachedElsewhere.mockResolvedValue(false);
   repo.touchProductIfStoreApproved.mockResolvedValue(true);
+  repo.liveSkuTaken.mockResolvedValue(false);
+  repo.countLiveProducts.mockImplementation(async () => {
+    calls.push("count");
+    return 0;
+  });
   repo.insertProductIfStoreApproved.mockResolvedValue("p1");
   repo.setStockIfAllowed.mockResolvedValue(1);
   repo.adjustStockIfAllowed.mockResolvedValue(1);
@@ -380,6 +392,74 @@ describe("order of refusals and conflicts", () => {
     expect(repo.updateProductIfStoreApproved).not.toHaveBeenCalled();
     expect(repo.touchProductIfStoreApproved).not.toHaveBeenCalled();
     expect(repo.replaceImages).not.toHaveBeenCalled();
+  });
+});
+
+describe("D-043: at most MAX_LIVE_PRODUCTS_PER_STORE products not ARCHIVED per store", () => {
+  it("the limit is 1,000", async () => {
+    const { MAX_LIVE_PRODUCTS_PER_STORE } = await import("./schema");
+    expect(MAX_LIVE_PRODUCTS_PER_STORE).toBe(1_000);
+  });
+
+  it("999 live products: the create goes through, counted under the create lock", async () => {
+    repo.countLiveProducts.mockImplementation(async () => {
+      calls.push("count");
+      return 999;
+    });
+    await expect(service.createProduct(SELLER, CREATE)).resolves.toMatchObject({ id: "p1" });
+    expect(calls.slice(0, 2)).toEqual(["store-lock", "create-lock"]);
+    expect(calls.indexOf("create-lock")).toBeLessThan(calls.indexOf("count"));
+    expect(repo.countLiveProducts).toHaveBeenCalledWith(expect.anything(), "s1");
+    expect(repo.lockStoreProductCreates).toHaveBeenCalledWith(expect.anything(), "s1");
+  });
+
+  it("1,000 live products: 409 PRODUCT_LIMIT and nothing is written", async () => {
+    for (const count of [1_000, 1_001]) {
+      repo.countLiveProducts.mockResolvedValue(count);
+      await expect(service.createProduct(SELLER, CREATE)).rejects.toMatchObject({
+        status: 409,
+        code: "CONFLICT",
+        details: { reason: "PRODUCT_LIMIT" },
+      });
+    }
+    expect(repo.insertProductIfStoreApproved).not.toHaveBeenCalled();
+    expect(repo.replaceImages).not.toHaveBeenCalled();
+  });
+
+  it("404 category and 404 upload come before PRODUCT_LIMIT; PRODUCT_LIMIT before the other 409s", async () => {
+    repo.countLiveProducts.mockResolvedValue(1_000);
+    repo.lockCategory.mockResolvedValue(null);
+    await expect(service.createProduct(SELLER, CREATE)).rejects.toMatchObject({
+      details: { resource: "category" },
+    });
+    repo.lockCategory.mockResolvedValue({ isActive: false });
+    repo.resolveOwnUploads.mockResolvedValue(null);
+    await expect(service.createProduct(SELLER, CREATE)).rejects.toMatchObject({
+      details: { resource: "upload" },
+    });
+    repo.resolveOwnUploads.mockResolvedValue([]);
+    repo.liveSkuTaken.mockResolvedValue(true);
+    await expect(service.createProduct(SELLER, CREATE)).rejects.toMatchObject({
+      details: { reason: "PRODUCT_LIMIT" },
+    });
+    repo.liveSkuTaken.mockResolvedValue(false);
+  });
+
+  it("a suspended store is 403 before the create lock or the count", async () => {
+    await expect(service.createProduct(SUSPENDED, CREATE)).rejects.toMatchObject({
+      code: "SELLER_NOT_APPROVED",
+    });
+    expect(repo.lockStoreProductCreates).not.toHaveBeenCalled();
+    expect(repo.countLiveProducts).not.toHaveBeenCalled();
+  });
+
+  it("only create counts: edits, publishes, and stock changes of a store at the limit go through", async () => {
+    repo.countLiveProducts.mockResolvedValue(1_000);
+    await expect(service.updateProduct(SELLER, "p1", { title: "x" })).resolves.toBeDefined();
+    repo.lockOwnProduct.mockResolvedValue({ ...LOCKED, status: "DRAFT" as never });
+    await expect(service.publishProduct(SELLER, "p1")).resolves.toBeDefined();
+    await expect(service.changeStock(SELLER, "p1", { set: 2 })).resolves.toBeDefined();
+    expect(repo.countLiveProducts).not.toHaveBeenCalled();
   });
 });
 

@@ -57,6 +57,13 @@ export const MAX_PRICE_SATANG = 100_000_000;
 export const MAX_SELLER_STOCK = 1_000_000;
 
 /**
+ * D-043 item 1 (SEC-068 item 2, SEC-069): a store may hold at most this many products whose status
+ * is not `ARCHIVED`. One more `POST /seller/products` is `409 CONFLICT` `PRODUCT_LIMIT` before
+ * anything is written. Archiving or deleting a product frees a place; `ARCHIVED` is final.
+ */
+export const MAX_LIVE_PRODUCTS_PER_STORE = 1_000;
+
+/**
  * BR-25: "low stock" is 1 to `LOW_STOCK_THRESHOLD` inclusive, on a product that is on sale. The
  * one constant DATA_MODEL.md section 5.1 asks for; nothing else repeats the number.
  */
