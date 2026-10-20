@@ -1,6 +1,6 @@
 # API Contracts
 
-Owner: backend-api agent. This is the **planned** contract, corrected on 2026-10-11 after the T-004 planning review ([reviews/T-004-findings.md](reviews/T-004-findings.md)) the owner answers in [DECISIONS.md](DECISIONS.md) D-025, D-026, and D-028, and the technical rulings in D-029, and corrected again the same day after the cross-document check, for the technical rulings in D-031, and on 2026-10-12 for D-032 (the store status is judged before the body is read; SECURITY.md SR-05 item 5). **Implemented so far: the six catalog endpoints of [section 5.2](#52-catalog) (T-020, 2026-10-13), the six profile and address endpoints of [section 5.3](#53-account) (T-030 backend, 2026-10-13; integration tests not yet run, [section 5.3.1](#531-as-built-t-030-backend-2026-10-13)), the four cart endpoints of [section 5.4](#54-cart) (T-031), `POST /checkout`, `GET /orders`, and `GET /orders/{id}` of [section 5.5](#55-checkout-and-orders) (T-032, 2026-10-14; unit tests only, [section 5.5.5](#555-as-built-t-032-2026-10-14)), the four application and store endpoints of [section 5.7.1](#571-application-and-store) (T-040, 2026-10-14, [section 5.7.1.1](#5711-as-built-t-040-2026-10-14)), `POST /seller/uploads` and `GET /api/files/{key}` of [section 5.8](#58-uploads-and-files) (T-041, 2026-10-19, [section 5.8.1](#581-as-built-t-041-2026-10-19); not security-reviewed), and `GET /api/health` ([section 5.10](#510-platform)); every other endpoint is planned.** Once an endpoint is built, the Zod schemas in `src/modules/<domain>/schema.ts` are authoritative for it and this document must match them.
+Owner: backend-api agent. This is the **planned** contract, corrected on 2026-10-11 after the T-004 planning review ([reviews/T-004-findings.md](reviews/T-004-findings.md)) the owner answers in [DECISIONS.md](DECISIONS.md) D-025, D-026, and D-028, and the technical rulings in D-029, and corrected again the same day after the cross-document check, for the technical rulings in D-031, and on 2026-10-12 for D-032 (the store status is judged before the body is read; SECURITY.md SR-05 item 5). **Implemented so far: the six catalog endpoints of [section 5.2](#52-catalog) (T-020, 2026-10-13), the six profile and address endpoints of [section 5.3](#53-account) (T-030 backend, 2026-10-13; integration tests not yet run, [section 5.3.1](#531-as-built-t-030-backend-2026-10-13)), the four cart endpoints of [section 5.4](#54-cart) (T-031), `POST /checkout`, `GET /orders`, and `GET /orders/{id}` of [section 5.5](#55-checkout-and-orders) (T-032, 2026-10-14; unit tests only, [section 5.5.5](#555-as-built-t-032-2026-10-14)), the four application and store endpoints of [section 5.7.1](#571-application-and-store) (T-040, 2026-10-14, [section 5.7.1.1](#5711-as-built-t-040-2026-10-14)), `POST /seller/uploads` and `GET /api/files/{key}` of [section 5.8](#58-uploads-and-files) (T-041, 2026-10-19, [section 5.8.1](#581-as-built-t-041-2026-10-19); not security-reviewed), the nine seller product endpoints of [section 5.7.2](#572-products) (T-042, 2026-10-20, [section 5.7.2.1](#5721-as-built-t-042-2026-10-20)), the three seller order endpoints of [section 5.7.3](#573-seller-orders) and `GET /seller/summary` of [section 5.7.4](#574-dashboard-summary) (T-043, 2026-10-20, [section 5.7.3.1](#5731-as-built-t-043-2026-10-20); not security-reviewed and not code-reviewed), and `GET /api/health` ([section 5.10](#510-platform)); every other endpoint is planned.** Once an endpoint is built, the Zod schemas in `src/modules/<domain>/schema.ts` are authoritative for it and this document must match them.
 
 What this document must agree with, and which one wins when a name or value is in question:
 
@@ -983,7 +983,7 @@ The product and the reviewer are taken from the order item and the session, neve
 
 ##### 5.7.1.1 As built (T-040, 2026-10-14)
 
-Implemented: `POST` and `GET /seller/application`, `GET` and `PATCH /seller/store`, in `src/modules/sellers` (schema, state tables, slug generator, repository, service) and the handlers `src/app/api/v1/seller/application/route.ts` and `src/app/api/v1/seller/store/route.ts`. The schemas and types in `src/modules/sellers/schema.ts` are authoritative. `GET /seller/summary` is not built (T-043). Unit tests, route tests, and `tests/integration/sellers/` (against PostgreSQL) cover these endpoints. Security-reviewed: [reviews/T-040-security.md](reviews/T-040-security.md) (2026-10-15; no Critical, High, or Medium finding; SEC-058 raised), SEC-058 re-checked after [D-041](DECISIONS.md) in [reviews/SEC-058-recheck.md](reviews/SEC-058-recheck.md), SEC-059 and SEC-060 re-checked after [D-042](DECISIONS.md) in [reviews/SEC-059-060-recheck.md](reviews/SEC-059-060-recheck.md). Open findings on store names are in [SECURITY.md](SECURITY.md). Both routes are on the route list guard in `tests/security/t020-t018-catalog-shell.test.ts`.
+Implemented: `POST` and `GET /seller/application`, `GET` and `PATCH /seller/store`, in `src/modules/sellers` (schema, state tables, slug generator, repository, service) and the handlers `src/app/api/v1/seller/application/route.ts` and `src/app/api/v1/seller/store/route.ts`. The schemas and types in `src/modules/sellers/schema.ts` are authoritative. `GET /seller/summary` is built by T-043 in the orders module ([section 5.7.3.1](#5731-as-built-t-043-2026-10-20)). Unit tests, route tests, and `tests/integration/sellers/` (against PostgreSQL) cover these endpoints. Security-reviewed: [reviews/T-040-security.md](reviews/T-040-security.md) (2026-10-15; no Critical, High, or Medium finding; SEC-058 raised), SEC-058 re-checked after [D-041](DECISIONS.md) in [reviews/SEC-058-recheck.md](reviews/SEC-058-recheck.md), SEC-059 and SEC-060 re-checked after [D-042](DECISIONS.md) in [reviews/SEC-059-060-recheck.md](reviews/SEC-059-060-recheck.md). Open findings on store names are in [SECURITY.md](SECURITY.md). Both routes are on the route list guard in `tests/security/t020-t018-catalog-shell.test.ts`.
 
 **Order of checks** ([section 1.8](#18-access-levels-and-404-against-403)); every response is `Cache-Control: no-store`; a `userId`, `storeId`, or `id` in the query is ignored.
 
@@ -1175,6 +1175,7 @@ Seller order as its seller sees it:
 {
   "data": {
     "id": "...", "orderNumber": "OD2610110000042", "createdAt": "...",
+    "paidAt": "2026-10-11T18:30:00.000Z",
     "paymentStatus": "PAID",
     "fulfilmentStatus": "PROCESSING", "cancellationKind": null,
     "storeName": "...",
@@ -1190,7 +1191,65 @@ Seller order as its seller sees it:
 }
 ```
 
-`storeName` is the name at purchase, also for the seller (BR-09). `commissionRateBps` is the rate copied at purchase; it is recorded only.
+`storeName` is the name at purchase, also for the seller (BR-09). `commissionRateBps` is the rate copied at purchase; it is recorded only. `paidAt` is the paid time of the whole order (BR-39; D-033 point 4): the same for every store's part of one order, still there after the seller order is cancelled, and never `null` in a seller's response, because a seller sees only paid orders (BR-35).
+
+##### 5.7.3.1 As built (T-043, 2026-10-20)
+
+Implemented: `GET /seller/orders`, `GET /seller/orders/{id}`, `POST /seller/orders/{id}/status`, and `GET /seller/summary` ([section 5.7.4](#574-dashboard-summary)), in the seller side of `src/modules/orders` (`seller-schema.ts`, `seller-repository.ts`, `seller-mapping.ts`, `seller-service.ts`; public surface `@/modules/orders`) and the handlers `src/app/api/v1/seller/orders/route.ts`, `src/app/api/v1/seller/orders/[id]/route.ts`, `src/app/api/v1/seller/orders/[id]/status/route.ts`, and `src/app/api/v1/seller/summary/route.ts`. The schemas, constants, and types in `src/modules/orders/seller-schema.ts` are authoritative: `listSellerOrdersQuerySchema`, `sellerOrderIdParamsSchema`, `sellerOrderStatusBodySchema`, `SELLER_TARGET_STATUSES`, `CARRIER_NAME_MAX`, `TRACKING_NUMBER_MAX`, and the response types `SellerOrderViewDto`, `SellerOrderItemDto`, and `SellerSummaryDto`. The transition table is `FULFILMENT_TRANSITIONS` in `src/modules/orders/state.ts`, the one place it is defined (the payment side uses the same file). Unit tests next to the module and the routes; `tests/integration/seller-orders/endpoints.test.ts` against PostgreSQL. **Not security-reviewed and not code-reviewed.** The four route files are not yet on the route list guard of `tests/security/t020-t018-catalog-shell.test.ts` (security adds them). No endpoint here is rate-limited (section 6 lists none).
+
+**Order of checks** ([section 1.8](#18-access-levels-and-404-against-403)); every response is `Cache-Control: no-store`. All four are `seller (any store status)`: no handler and no service reads the store status, so the seller of a suspended store reads, fulfils, cancels, and reads the summary (BR-14; DATA_MODEL.md section 7.7).
+
+| Endpoint | Steps |
+| --- | --- |
+| `GET /seller/orders` | 3 session (401), 4 role `SELLER` (403 `FORBIDDEN` for a customer and an admin), 7 query (400), then the service |
+| `GET /seller/orders/{id}` | 3, 4 as above, 7 path parameter (400), then the service (404) |
+| `POST /seller/orders/{id}/status` | 1 `Origin` (403), 2 `Content-Type` (415), 3 session (401), 4 role `SELLER` (403 `FORBIDDEN`, before the body is read), 6 body (413), 7 path parameter and body (400), then the service (404, then 409) |
+| `GET /seller/summary` | 3, 4 as above, then the service. The query is not read |
+
+**Scope.** Every read and the status change look a seller order up by its id **and** the session's store **and** its owner **and** an order whose `paymentStatus` is `PAID`, in one statement. An unknown id, another store's seller order, and a seller order of a `PENDING` or `FAILED` order are therefore the same `404 NOT_FOUND` with `details` `{}`, on a read and on a status change, and nothing changes (BR-20, BR-35). A `storeId` in a query is not interpreted; one in the body is `400`.
+
+**Status change** (one transaction, CLAUDE.md rule 5). In this order, the first failing step answers:
+
+1. The seller order row is locked `FOR UPDATE` with the scope above (404).
+2. The move is judged against the table for the actor `SELLER`: `PENDING` to `PROCESSING`; `PROCESSING` to `SHIPPED`; `SHIPPED` to `DELIVERED`; `PENDING` or `PROCESSING` to `CANCELLED`. Anything else is `409 INVALID_STATE_TRANSITION`, `details` `{}`, and nothing changes: in particular `SHIPPED` to `CANCELLED` (BR-29), a move out of `DELIVERED` or `CANCELLED`, and a move to the current status.
+3. The guarded statement takes its source states from the same table and repeats the store and the paid-order condition (DATA_MODEL.md sections 7.4 and 7.6). Zero rows is `409`, never a success.
+4. The effect, in the same transaction: `SHIPPED` inserts the `Shipment` row (`isSimulated` true, `shippedAt` from the database clock, `carrierName` and `trackingNumber` as the seller typed them or `null`); `DELIVERED` sets `Shipment.deliveredAt` from the database clock, never before `shippedAt`; `CANCELLED` claims the seller order's items whose stock was not yet restored and adds exactly those quantities back, in byte order of the product id (DATA_MODEL.md sections 7.3 and 7.5). The restore has no guard and no upper bound (BR-34): an archived product, a hidden one, and one whose stock stands at 1,000,000 all get their stock back. `Order.paymentStatus` and `paidAt` are not touched, and no refund row exists (BR-21).
+5. The seller order is read back in the same transaction and returned, `200`.
+
+Lock order: the `SellerOrder` row, then its `OrderItem` rows (the claim), then the `Product` rows in `COLLATE "C"` order. The `Order` row is not locked: the one condition read from it, `PAID`, is final. Two requests on one seller order queue on the row lock; the second sees the first's result, so two cancels at the same time give one `200` and one `409` and restore the stock once, and a cancel racing a ship ends in exactly one of the two.
+
+**Responses.**
+
+| Endpoint | Success |
+| --- | --- |
+| `GET /seller/orders` | `200`, list envelope of `SellerOrderViewDto`, newest first (`SellerOrder.createdAt` then `id`, both descending). `total` and `items` come from one read-only `REPEATABLE READ` snapshot |
+| `GET /seller/orders/{id}` | `200`, `SellerOrderViewDto` |
+| `POST /seller/orders/{id}/status` | `200`, `SellerOrderViewDto` after the change |
+| `GET /seller/summary` | `200`, `SellerSummaryDto` ([section 5.7.4](#574-dashboard-summary)) |
+
+`SellerOrderViewDto` has exactly the keys of the example above: `id`, `orderNumber`, `createdAt` (the order's), `paidAt`, `paymentStatus` (always `PAID`), `fulfilmentStatus`, `cancellationKind` (`REFUND_OUTSIDE_SYSTEM` when cancelled, else `null`), `storeName`, `itemsSubtotalSatang`, `shippingFeeSatang`, `shippingFeeIsSimulated`, `commissionRateBps`, `shippingAddress`, `shipment`, `items` (each `{ id, productId, productTitle, productSku, image, unitPriceSatang, quantity, lineTotalSatang }`, in the order they were written). No order grand total, shipping total, other store's portion, store id, buyer id, or review. The list items have the same shape as the detail.
+
+**Fields.**
+
+| Field | Rule |
+| --- | --- |
+| `to` | One of `PROCESSING`, `SHIPPED`, `DELIVERED`, `CANCELLED`; anything else, `PENDING` included, is `400` |
+| `carrierName`, `trackingNumber` | Optional; accepted only with `to: "SHIPPED"` (with any other `to`, `400` at the field's own path, code `custom`). One line, trimmed, 1 to 100 characters, `NAME_ALLOWED_TEXT` ([section 5.3.1](#531-as-built-t-030-backend-2026-10-13)). An empty or blank string and `null` are `400`; leave the key out instead |
+| Every other body key | `400 unrecognized_keys`: `storeId`, `fulfilmentStatus`, `from`, `reason`, and any amount included |
+| `{id}` | An opaque id, 1 to 200 characters, no U+0000, no lone surrogate (section 1.4) |
+| Query of the list | `page`, `pageSize` (section 1.7, at most 50); `fulfilmentStatus` one of the five values. Every other parameter, `storeId` and `paymentStatus` included, is ignored |
+
+**Summary** ([section 5.7.4](#574-dashboard-summary)). The four groups are read in one read-only `REPEATABLE READ` snapshot, from rows of the session's store and owner only. `productsByStatus` counts every product of the store by `status` (all three keys are always present). `lowStockCount` and `soldOutCount` count products with `status` `PUBLISHED` and `moderationStatus` `APPROVED`, stock 1 to `LOW_STOCK_THRESHOLD` (5) and stock 0, whatever the store's status and the category's (BR-25; D-028). `ordersByStatus` counts the store's seller orders of `PAID` orders by `fulfilmentStatus` (all five keys present). `paidSalesTotalSatang` is the sum of `SellerOrder.itemsSubtotalSatang` over the store's seller orders of `PAID` orders that are not `CANCELLED`, summed as a 64-bit integer and sent only after it is checked to be a safe integer (a larger sum is `500`, never a rounded figure); the shipping fee is never part of it (BR-33).
+
+**Choices made in T-043 and not yet ruled** (each one constant or one line; a client may rely on the status and the code, not on these values):
+
+- `carrierName` and `trackingNumber`: 100 characters each, the display-name character rule, and a blank value is `400` rather than read as absent (item 8.2-7).
+- The list items carry the whole seller order shape, `paidAt` and the shipping copy included. Whether the seller's list **shows** the paid time is open with the owner (REQUIREMENTS.md Q42); the field is there either way.
+- `createdAt` is the order's creation time (equal to the seller order's, which checkout writes in the same transaction).
+- No `AuditLog` row for a seller's status change or cancel (REQ-A-10 asks for one on admin mutations only), and a seller's cancel takes no reason.
+- `GET /seller/orders` is not filtered by paid date (BR-40 point 6 does not require it).
+- `DATA_MODEL.md` section 7.5 places `Order` before `SellerOrder`; this transaction takes no `Order` lock at all, for the reason above.
+- A `SELLER` session whose user owns no store (not allowed by the data model) is `500 INTERNAL_ERROR`, as in [section 5.7.2.1](#5721-as-built-t-042-2026-10-20).
 
 #### 5.7.4 Dashboard summary
 
@@ -1211,6 +1270,7 @@ Seller order as its seller sees it:
 - `paidSalesTotalSatang` is an **aggregate** ([section 1.5](#15-money)) and can exceed 32 bits. It is the **price of the goods only, without the shipping fee** (D-026, OQ-34): the sum of `itemsSubtotalSatang` over the store's seller orders whose order is `PAID` and whose `fulfilmentStatus` is not `CANCELLED`. Cancelling a paid seller order lowers it (BR-21).
 - `lowStockCount` (stock 1 to 5) and `soldOutCount` (stock 0) are two separate figures and count only products that are on sale, as defined in [section 5.7.2](#572-products) (D-026, OQ-33).
 - `ordersByStatus` counts the store's seller orders whose order is `PAID` (D-026, OQ-41). Seller orders of a `PENDING` or `FAILED` order count in no figure (BR-20).
+- Access `seller (any store status)`: the seller of a suspended store reads it (BR-14). As built by T-043: [section 5.7.3.1](#5731-as-built-t-043-2026-10-20), "Summary". Every key of `productsByStatus` and `ordersByStatus` is always present, with 0 when there is none.
 
 ### 5.8 Uploads and files
 
@@ -1560,7 +1620,7 @@ The owner's answers in D-025, D-026, and D-028 and the rulings in D-029, D-031, 
 
 | Id | Question for the owner | Why it arises | What the contract does meanwhile | Section |
 | --- | --- | --- | --- | --- |
-| 8.1-1 | **Answered by the owner (D-033 point 4, Q40): yes to both.** Kept here until the seller and admin shapes carry it | The time is stored (`Order.paidAt`, DATA_MODEL.md section 6.10) and the report places an order in its range by it | The customer's order shape carries `paidAt` since T-032 ([section 5.5.2](#552-response)). Still to do: `paidAt` in the seller order shapes (T-043) and the admin order shapes with the paid-date filter of BR-40 (T-050) | 5.5.2, 5.7.3, 5.9.5, 5.9.7 |
+| 8.1-1 | **Answered by the owner (D-033 point 4, Q40): yes to both.** Kept here until the seller and admin shapes carry it | The time is stored (`Order.paidAt`, DATA_MODEL.md section 6.10) and the report places an order in its range by it | The customer's order shape carries `paidAt` since T-032 ([section 5.5.2](#552-response)), and the seller order shape since T-043 ([section 5.7.3](#573-seller-orders)). Still to do: the admin order shapes with the paid-date filter of BR-40 (T-050) | 5.5.2, 5.7.3, 5.9.5, 5.9.7 |
 
 Two further questions are parked with the owner in STATUS.md and are **not** open points of this contract, because the contract's behaviour does not wait on them: the Thai text on a hidden cart line (REQUIREMENTS.md Q38; the API carries `unbuyableReason: "NOT_AVAILABLE"`, never the text), and the confirmation that "view only" for a suspended store also refuses editing the store profile, uploading, and deleting a product ([section 5.7.2](#572-products) follows that shared reading; if the owner allows any of the three, its entry changes).
 
