@@ -10,7 +10,7 @@
  * first test of the file, so every assertion names its own keys and stores.
  *
  *   it(...)        behaviour checked on 2026-10-20 that holds. A failure is a regression.
- *   it.fails(...)  an OPEN finding (SEC-066, SEC-067). The body asserts the secure behaviour, so it is
+ *   it.fails(...)  an OPEN finding (SEC-066; SEC-067 was fixed and re-checked). The body asserts the secure behaviour, so it is
  *                  reported as an expected failure while the flaw exists. The owner of the fix
  *                  changes `it.fails` to `it` (and may call the new entry point first), and the
  *                  security agent re-checks the change.
@@ -517,11 +517,25 @@ async function planWithoutSeqScan(
   });
 }
 
-describe("SEC-067 the reference lookup on order items is a full table scan", () => {
-  // The statement of findUploadByKey (src/modules/uploads/repository.ts), run on every
-  // GET /api/files/{key} past the grace period, without a session or a rate limit.
-  const servePlan = (key: string) =>
-    planWithoutSeqScan(
+// Fixed by commit c55c575 (migration 20261020090000_order_item_upload_index), re-checked
+// 2026-10-20. Each statement below is copied from src/modules/uploads/repository.ts; a change
+// there must be copied here.
+describe("SEC-067 the reference lookup on order items uses an index", () => {
+  const INDEX = "OrderItem_productImageUploadId_idx";
+
+  it("the index exists, on OrderItem, leading with productImageUploadId", async () => {
+    const rows = await db.$queryRaw<{ indexdef: string }[]>`
+      SELECT indexdef FROM pg_indexes
+      WHERE schemaname = current_schema() AND tablename = 'OrderItem' AND indexname = ${INDEX}`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.indexdef).toMatch(/ON \S*"OrderItem" USING btree \("productImageUploadId"[,)]/);
+  });
+
+  // findUploadByKey: run on every GET /api/files/{key} past the grace period, without a session
+  // or a rate limit.
+  it("serving a file looks up order item references through the index", async () => {
+    const key = generateStorageKey();
+    const plan = await planWithoutSeqScan(
       (tx) => tx.$queryRaw`
         EXPLAIN SELECT u."contentType", u."sizeBytes",
           (u."createdAt" < now() - make_interval(secs => ${ORPHAN_GRACE_PERIOD_SECONDS}::int)
@@ -532,14 +546,52 @@ describe("SEC-067 the reference lookup on order items is a full table scan", () 
         FROM "Upload" u
         WHERE u."storageKey" = ${key}`,
     );
-
-  it("(documented) serving a file plans a sequential scan of OrderItem even with sequential scans disabled", async () => {
-    const plan = await servePlan(generateStorageKey());
-    expect(plan).toMatch(/Seq Scan on "OrderItem"/);
+    expect(plan).not.toMatch(/Seq Scan on "OrderItem"/);
+    expect(plan).toContain(INDEX);
   });
 
-  it.fails("serving a file looks up order item references through an index", async () => {
-    const plan = await servePlan(generateStorageKey());
+  // countUnreferencedUploads: twice per upload request.
+  it("the per-store cap count looks up order item references through the index", async () => {
+    const plan = await planWithoutSeqScan(
+      (tx) => tx.$queryRaw`
+        EXPLAIN SELECT count(*)::int AS "count"
+        FROM "Upload" u
+        WHERE u."storeId" = ${"store-sec067"}
+          AND NOT EXISTS (SELECT 1 FROM "ProductImage" p WHERE p."uploadId" = u."id")
+          AND NOT EXISTS (SELECT 1 FROM "Store" s WHERE s."logoUploadId" = u."id")
+          AND NOT EXISTS (SELECT 1 FROM "OrderItem" o WHERE o."productImageUploadId" = u."id")`,
+    );
     expect(plan).not.toMatch(/Seq Scan on "OrderItem"/);
+    expect(plan).toContain(INDEX);
+  });
+
+  // deleteExpiredOrphans: both statements. EXPLAIN without ANALYZE executes nothing.
+  it("both orphan cleanup statements look up order item references through the index", async () => {
+    const selectPlan = await planWithoutSeqScan(
+      (tx) => tx.$queryRaw`
+        EXPLAIN SELECT u."id"
+        FROM "Upload" u
+        WHERE u."createdAt" < now() - make_interval(secs => ${ORPHAN_GRACE_PERIOD_SECONDS}::int)
+          AND NOT EXISTS (SELECT 1 FROM "ProductImage" p WHERE p."uploadId" = u."id")
+          AND NOT EXISTS (SELECT 1 FROM "Store" s WHERE s."logoUploadId" = u."id")
+          AND NOT EXISTS (SELECT 1 FROM "OrderItem" o WHERE o."productImageUploadId" = u."id")
+        ORDER BY u."createdAt"
+        LIMIT ${100}::int
+        FOR UPDATE OF u SKIP LOCKED`,
+    );
+    const deletePlan = await planWithoutSeqScan(
+      (tx) => tx.$queryRaw`
+        EXPLAIN DELETE FROM "Upload" u
+        WHERE u."id" = ANY(${["a", "b"]}::text[])
+          AND u."createdAt" < now() - make_interval(secs => ${ORPHAN_GRACE_PERIOD_SECONDS}::int)
+          AND NOT EXISTS (SELECT 1 FROM "ProductImage" p WHERE p."uploadId" = u."id")
+          AND NOT EXISTS (SELECT 1 FROM "Store" s WHERE s."logoUploadId" = u."id")
+          AND NOT EXISTS (SELECT 1 FROM "OrderItem" o WHERE o."productImageUploadId" = u."id")
+        RETURNING u."storageKey"`,
+    );
+    for (const plan of [selectPlan, deletePlan]) {
+      expect(plan).not.toMatch(/Seq Scan on "OrderItem"/);
+      expect(plan).toContain(INDEX);
+    }
   });
 });

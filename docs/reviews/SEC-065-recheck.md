@@ -37,7 +37,7 @@ A clean scanner run shows only that the scanner found nothing, and passing tests
 
 - **SEC-065** PARTIAL (re-checked 2026-10-20). The cap and the 404 are fixed. The cleanup is built but not scheduled. No takedown exists. Full evidence in SECURITY.md.
 - **SEC-066** (Low, OPEN). The cleanup walks rows, never the disk. A file whose delete failed, or whose process died between `storage.put` and the end of the transaction, stays for ever. It is outside the per-store bound.
-- **SEC-067** (Medium, OPEN). The `OrderItem` reference check has no index. Each unauthenticated, unlimited file request for an order-only picture or a not-yet-deleted expired orphan scans every order item. Fix: `@@index([productImageUploadId])` on `OrderItem` (database owner).
+- **SEC-067** (Medium, OPEN). The `OrderItem` reference check has no index. Each unauthenticated, unlimited file request for an order-only picture or a not-yet-deleted expired orphan scans every order item. Fix: `@@index([productImageUploadId])` on `OrderItem` (database owner). Later: FIXED by c55c575, re-checked 2026-10-20 in [SEC-067-recheck.md](SEC-067-recheck.md).
 
 ### Observations (not findings)
 
