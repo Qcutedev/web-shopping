@@ -12,11 +12,14 @@
  * DATA_MODEL.md 7.8). Every product write carries the store condition itself
  * (`storeIsApproved`, DATA_MODEL.md 7.7): zero rows because of it is `403 SELLER_NOT_APPROVED`.
  *
- * Locks, in this order when a transaction takes more than one (DATA_MODEL.md 7.5): the store row
- * (`FOR SHARE`, by the sellers helper), the category row (`FOR SHARE`, so an admin cannot switch it
- * off between the check and the write), the `Product` row (`FOR UPDATE`), the `Upload` rows
- * (`FOR KEY SHARE`, so the orphan cleanup cannot delete one between the lookup and the link),
- * then the `ProductImage` rows.
+ * Locks, in this order when a transaction takes more than one: the store row (`FOR SHARE`, by the
+ * sellers helper), the category row (`FOR SHARE`, so an admin cannot switch it off between the
+ * check and the write), the `Product` row (`FOR UPDATE`), the `Upload` rows (`FOR KEY SHARE`, so
+ * the orphan cleanup cannot delete one between the lookup and the link), then the `ProductImage`
+ * rows. `createProduct` and `updateProduct` both follow it (CR-T042-01: the update locks the
+ * requested category before the product row). DATA_MODEL.md 7.5 places `Product` before
+ * `ProductImage` but does not name Store, Category, or Upload; their positions here are this
+ * module's own until the database owner adds them there.
  *
  * Raw statements are tagged templates with bound parameters only (`$queryRaw`, `$executeRaw`);
  * no SQL text is built from a value. Nothing here logs.
@@ -106,6 +109,12 @@ async function hydrate(client: ReadClient, rows: ProductScalarRow[]): Promise<Pr
       // The foreign key is Restrict; a missing category is a database fault, never a 404.
       throw new Error("inventory: a product's category row is missing.");
     }
+    // CR-T042-07: a link whose upload row is not found is dropped, not a fault like a missing
+    // category. Outside a snapshot (`findOwnProduct` on `db`) the links and the uploads are two
+    // statements: a picture removed from the product in between can leave an orphan the cleanup
+    // deletes before the second read, and the product no longer has that picture. Inside the
+    // list's snapshot (`listOwnProducts`) and a write's transaction (the upload rows are
+    // key-share-locked or linked by a `Restrict` key) the drop cannot happen.
     const imageKeys = links
       .filter((link) => link.productId === row.id)
       .map((link) => keyByUpload.get(link.uploadId))
@@ -170,20 +179,35 @@ export function productListWhere(
   return { AND: and };
 }
 
-/** One page of the seller's products, newest first, then `id` (section 1.7). No transaction. */
+export const LIST_TRANSACTION_OPTIONS = {
+  ...INVENTORY_TRANSACTION_OPTIONS,
+  // The value of Prisma.TransactionIsolationLevel.RepeatableRead, as a literal so that loading
+  // this file reads nothing of the client.
+  isolationLevel: "RepeatableRead",
+} as const satisfies { isolationLevel: Prisma.TransactionIsolationLevel };
+
+/**
+ * One page of the seller's products, newest first, then `id` (section 1.7). The count, the page,
+ * and its categories and pictures are read in one read-only `REPEATABLE READ` transaction, so
+ * every statement sees the same snapshot and `total` always agrees with `items` (CR-T042-05).
+ * It takes no lock and writes nothing.
+ */
 export async function listOwnProducts(
   where: Prisma.ProductWhereInput,
   page: { page: number; pageSize: number },
 ): Promise<{ rows: ProductRow[]; total: number }> {
-  const total = await db.product.count({ where });
-  const rows = await db.product.findMany({
-    where,
-    select: PRODUCT_SCALAR_SELECT,
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    skip: (page.page - 1) * page.pageSize,
-    take: page.pageSize,
-  });
-  return { rows: await hydrate(db, rows), total };
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SET TRANSACTION READ ONLY`;
+    const total = await tx.product.count({ where });
+    const rows = await tx.product.findMany({
+      where,
+      select: PRODUCT_SCALAR_SELECT,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      skip: (page.page - 1) * page.pageSize,
+      take: page.pageSize,
+    });
+    return { rows: await hydrate(tx, rows), total };
+  }, LIST_TRANSACTION_OPTIONS);
 }
 
 // ---------------------------------------------------------------------------------------------

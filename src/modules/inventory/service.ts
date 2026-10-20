@@ -175,8 +175,9 @@ export function toSellerProductDto(row: ProductRow): SellerProductDto {
 
 function readScope(actor: Actor): { storeId: string; userId: string } {
   requireRole(actor, "SELLER");
-  // A seller without a store is not allowed by the data model; nothing of theirs can be found.
-  if (actor.storeId === null) throw productNotFound();
+  // A seller without a store is not allowed by the data model, so this is a fault, answered 500
+  // by the frame, not a 404 the contract does not list (CR-T042-06).
+  if (actor.storeId === null) throw new Error("inventory: a SELLER without a store.");
   return { storeId: actor.storeId, userId: actor.userId };
 }
 
@@ -329,11 +330,14 @@ export async function updateProduct(
     return await db.$transaction(async (tx) => {
       const { storeId } = await requireApprovedStoreForWrite(tx, actor);
       const scope: WriteScope = { storeId, userId: actor.userId, productId };
+      // Lock order of repository.ts: the category before the product row (CR-T042-01). Its 404
+      // is decided only after the product's, so the order of refusals stays 404 product first.
+      const category =
+        input.categoryId === undefined ? null : await lockCategory(tx, input.categoryId);
       const stored = await lockOrNotFound(tx, storeId, actor.userId, productId);
 
       const categoryId = input.categoryId ?? stored.categoryId;
       const categoryChanged = categoryId !== stored.categoryId;
-      const category = categoryChanged ? await lockCategory(tx, categoryId) : null;
       if (categoryChanged && category === null) throw categoryNotFound();
 
       const storedUploadIds = await currentImageUploadIds(tx, productId);
@@ -346,7 +350,13 @@ export async function updateProduct(
 
       if (stored.status === "ARCHIVED") throw invalidStateTransition();
       if (categoryChanged && category !== null && !category.isActive) throw categoryInactive();
-      if (await uploadsAttachedElsewhere(tx, uploadIds, productId)) throw uploadInUse();
+      // Without `imageKeys` the pictures stay the product's own: nothing to look up (CR-T042-04).
+      if (
+        input.imageKeys !== undefined &&
+        (await uploadsAttachedElsewhere(tx, uploadIds, productId))
+      ) {
+        throw uploadInUse();
+      }
       const sku = input.sku ?? stored.sku;
       if (sku !== stored.sku && (await liveSkuTaken(tx, storeId, sku, productId))) {
         throw duplicateSku();
@@ -372,7 +382,14 @@ export async function updateProduct(
         next.priceSatang !== stored.priceSatang ||
         sku !== stored.sku;
 
-      if (fieldsChanged || effect.moderationStatus !== stored.moderationStatus) {
+      // One condition for the full write (CR-T042-03): a field, the moderation status, or the
+      // revision (the picture set changed on a PENDING product) differs. A pure reorder of the
+      // pictures only marks the product updated.
+      if (
+        fieldsChanged ||
+        effect.moderationStatus !== stored.moderationStatus ||
+        effect.bumpRevision
+      ) {
         const written = await updateProductIfStoreApproved(tx, scope, {
           ...next,
           sku,
@@ -381,19 +398,8 @@ export async function updateProduct(
           setRequestedAt: effect.setRequestedAt,
         });
         if (!written) throw storeNotApproved();
-      } else if (picturesChanged || effect.bumpRevision) {
-        // Only the picture order changed (or the set changed on a PENDING product, which raises
-        // the revision): write through the same guarded statement so the revision rule holds.
-        const written = effect.bumpRevision
-          ? await updateProductIfStoreApproved(tx, scope, {
-              ...next,
-              sku,
-              moderationStatus: effect.moderationStatus,
-              bumpRevision: true,
-              setRequestedAt: effect.setRequestedAt,
-            })
-          : await touchProductIfStoreApproved(tx, scope);
-        if (!written) throw storeNotApproved();
+      } else if (picturesChanged) {
+        if (!(await touchProductIfStoreApproved(tx, scope))) throw storeNotApproved();
       }
       if (picturesChanged) await replaceImages(tx, productId, uploadIds);
       return readBack(tx, scope);

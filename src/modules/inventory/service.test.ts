@@ -138,6 +138,9 @@ beforeEach(() => {
   repo.findOwnProduct.mockResolvedValue(ROW);
   repo.lockCategory.mockResolvedValue({ isActive: true });
   repo.resolveOwnUploads.mockResolvedValue([]);
+  repo.currentImageUploadIds.mockResolvedValue([]);
+  repo.uploadsAttachedElsewhere.mockResolvedValue(false);
+  repo.touchProductIfStoreApproved.mockResolvedValue(true);
   repo.insertProductIfStoreApproved.mockResolvedValue("p1");
   repo.setStockIfAllowed.mockResolvedValue(1);
   repo.adjustStockIfAllowed.mockResolvedValue(1);
@@ -377,5 +380,86 @@ describe("order of refusals and conflicts", () => {
     expect(repo.updateProductIfStoreApproved).not.toHaveBeenCalled();
     expect(repo.touchProductIfStoreApproved).not.toHaveBeenCalled();
     expect(repo.replaceImages).not.toHaveBeenCalled();
+  });
+});
+
+describe("T-042 code review follow-ups", () => {
+  it("CR-T042-01: update locks the requested category before the product row", async () => {
+    repo.lockCategory.mockImplementation(async () => {
+      calls.push("category-lock");
+      return { isActive: true };
+    });
+    await service.updateProduct(SELLER, "p1", { categoryId: "c2" });
+    expect(calls).toEqual(["store-lock", "category-lock", "product-lock"]);
+  });
+
+  it("CR-T042-01: update without categoryId locks no category", async () => {
+    await service.updateProduct(SELLER, "p1", { title: "x" });
+    expect(repo.lockCategory).not.toHaveBeenCalled();
+  });
+
+  it("CR-T042-01: a foreign product with an unknown category is still the product's 404", async () => {
+    repo.lockCategory.mockResolvedValue(null);
+    repo.lockOwnProduct.mockResolvedValue(null);
+    await expect(service.updateProduct(SELLER, "p1", { categoryId: "nope" })).rejects.toMatchObject(
+      { status: 404, details: {} },
+    );
+    repo.lockOwnProduct.mockResolvedValue(LOCKED);
+    await expect(service.updateProduct(SELLER, "p1", { categoryId: "nope" })).rejects.toMatchObject(
+      { status: 404, details: { resource: "category" } },
+    );
+  });
+
+  it("CR-T042-01: keeping the current (switched-off) category by naming it is allowed", async () => {
+    repo.lockCategory.mockResolvedValue({ isActive: false });
+    await expect(
+      service.updateProduct(SELLER, "p1", { categoryId: LOCKED.categoryId, title: "x" }),
+    ).resolves.toMatchObject({ id: "p1" });
+  });
+
+  it("CR-T042-03: a picture set change on a PENDING product is one full write with the revision raised", async () => {
+    repo.lockOwnProduct.mockResolvedValue({ ...LOCKED, moderationStatus: "PENDING" as never });
+    repo.currentImageUploadIds.mockResolvedValue(["u1"]);
+    repo.resolveOwnUploads.mockResolvedValue(["u2"]);
+    await service.updateProduct(SELLER, "p1", { imageKeys: ["k2"] });
+    expect(repo.updateProductIfStoreApproved).toHaveBeenCalledTimes(1);
+    expect(repo.updateProductIfStoreApproved).toHaveBeenCalledWith(
+      expect.anything(),
+      { storeId: "s1", userId: "u1", productId: "p1" },
+      expect.objectContaining({ bumpRevision: true, moderationStatus: "PENDING" }),
+    );
+    expect(repo.touchProductIfStoreApproved).not.toHaveBeenCalled();
+    expect(repo.replaceImages).toHaveBeenCalledWith(expect.anything(), "p1", ["u2"]);
+  });
+
+  it("CR-T042-03: a pure reorder only marks the product updated", async () => {
+    repo.currentImageUploadIds.mockResolvedValue(["u1", "u2"]);
+    repo.resolveOwnUploads.mockResolvedValue(["u2", "u1"]);
+    await service.updateProduct(SELLER, "p1", { imageKeys: ["k2", "k1"] });
+    expect(repo.updateProductIfStoreApproved).not.toHaveBeenCalled();
+    expect(repo.touchProductIfStoreApproved).toHaveBeenCalledTimes(1);
+  });
+
+  it("CR-T042-04: without imageKeys no picture conflict is looked up", async () => {
+    repo.currentImageUploadIds.mockResolvedValue(["u1"]);
+    await service.updateProduct(SELLER, "p1", { title: "x" });
+    expect(repo.uploadsAttachedElsewhere).not.toHaveBeenCalled();
+    repo.resolveOwnUploads.mockResolvedValue(["u1"]);
+    await service.updateProduct(SELLER, "p1", { imageKeys: ["k1"] });
+    expect(repo.uploadsAttachedElsewhere).toHaveBeenCalledTimes(1);
+  });
+
+  it("CR-T042-06: a SELLER without a store is a fault (500), not a 404", async () => {
+    const storeless: Actor = { userId: "u1", role: "SELLER", storeId: null, storeStatus: null };
+    for (const run of [
+      () => service.listOwnProducts(storeless, { page: 1, pageSize: 20 }),
+      () => service.getOwnProduct(storeless, "p1"),
+    ]) {
+      const error: unknown = await run().catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toHaveProperty("status");
+    }
+    expect(repo.listOwnProducts).not.toHaveBeenCalled();
+    expect(repo.findOwnProduct).not.toHaveBeenCalled();
   });
 });
