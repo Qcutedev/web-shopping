@@ -348,6 +348,15 @@ The owner accepted the security agent's recommendation on both Low findings rais
 
 Owners: backend-api (`src/modules/auth/schema.ts`, `src/modules/sellers/store-name.ts`, contract), security (flip the SEC-059 and SEC-060 `it.fails` cases and re-check). Frontend needs no new string if the existing reserved and invalid-text messages are reused.
 
+### D-043 Owner ruling on SEC-068 and SEC-069: product limit and rate limit (2026-10-20)
+
+The owner accepted the values proposed in SECURITY.md SEC-068 item 2 and SEC-069 remediation.
+
+1. **Per-store product limit:** 1,000 products that are not `ARCHIVED`. `createProduct` refuses with a 409 before anything is written.
+2. **Rate limit on `POST /seller/products` (create) and on publish:** 60 an hour per seller, with `Retry-After` (API_CONTRACTS section 6).
+
+Owners: backend-api (`src/modules/inventory`, `src/modules/uploads`, `src/server/rate-limit.ts`, contract), security (flip the SEC-068 and SEC-069 `it.fails` cases and re-check).
+
 ## Pending decisions for the user
 
 Undecided, none blocking the MVP: marketplace name and logo, real product photos, hosting provider for staging and production, production object storage, email provider, payment gateway.
