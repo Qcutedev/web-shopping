@@ -436,6 +436,9 @@ model OrderItem {
 
   @@index([sellerOrderId])
   @@index([productId])
+  // SEC-067: the "is this upload referenced by an order" lookup (file serving, upload cap,
+  // orphan cleanup) and the Restrict check of every Upload delete.
+  @@index([productImageUploadId])
 }
 
 model Payment {
