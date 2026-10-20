@@ -716,6 +716,12 @@ describe("T-020 review: the catalog route files are thin", () => {
     "src/app/api/v1/seller/products/[id]/stock/route.ts",
     "src/app/api/v1/seller/products/[id]/unpublish/route.ts",
     "src/app/api/v1/seller/products/route.ts",
+    // T-043 seller order, fulfilment, and dashboard summary routes; reviewed in
+    // tests/security/t043-seller-orders.test.ts (docs/reviews/T-043-security.md).
+    "src/app/api/v1/seller/orders/[id]/route.ts",
+    "src/app/api/v1/seller/orders/[id]/status/route.ts",
+    "src/app/api/v1/seller/orders/route.ts",
+    "src/app/api/v1/seller/summary/route.ts",
   ];
   const nonAuthRoutes = filesUnder(join(ROOT, "src", "app", "api", "v1"), (path) =>
     path.endsWith("route.ts"),
