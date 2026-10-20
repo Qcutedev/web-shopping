@@ -132,9 +132,11 @@ export function startUploadCleanupSchedule(options: CleanupScheduleOptions = {})
     const state = holder[SCHEDULE_KEY];
     if (state === undefined || state.running) return;
     state.running = true;
-    void runUploadCleanup(log, options.run).finally(() => {
-      state.running = false;
-    });
+    void runUploadCleanup(log, options.run)
+      .catch(() => undefined)
+      .finally(() => {
+        state.running = false;
+      });
   };
 
   const timer = setInterval(tick, intervalMs);
