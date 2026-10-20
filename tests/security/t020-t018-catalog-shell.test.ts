@@ -708,6 +708,14 @@ describe("T-020 review: the catalog route files are thin", () => {
     // tests/security/t041-uploads.itest.ts (docs/reviews/T-041-security.md). The file route
     // src/app/api/files/[key]/route.ts is outside src/app/api/v1; t041-uploads.test.ts guards it.
     "src/app/api/v1/seller/uploads/route.ts",
+    // T-042 seller product and inventory routes; reviewed in tests/security/t042-inventory.test.ts
+    // and tests/security/t042-inventory.itest.ts (docs/reviews/T-042-security.md).
+    "src/app/api/v1/seller/products/[id]/archive/route.ts",
+    "src/app/api/v1/seller/products/[id]/publish/route.ts",
+    "src/app/api/v1/seller/products/[id]/route.ts",
+    "src/app/api/v1/seller/products/[id]/stock/route.ts",
+    "src/app/api/v1/seller/products/[id]/unpublish/route.ts",
+    "src/app/api/v1/seller/products/route.ts",
   ];
   const nonAuthRoutes = filesUnder(join(ROOT, "src", "app", "api", "v1"), (path) =>
     path.endsWith("route.ts"),
