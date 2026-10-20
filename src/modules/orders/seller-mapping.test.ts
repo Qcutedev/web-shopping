@@ -6,8 +6,13 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { aggregateSatang, toSellerOrderViewDto, toSellerSummaryDto } from "./seller-mapping";
-import type { SellerOrderViewRow } from "./seller-repository";
+import {
+  aggregateSatang,
+  toSellerOrderListItemDto,
+  toSellerOrderViewDto,
+  toSellerSummaryDto,
+} from "./seller-mapping";
+import type { SellerOrderListRow, SellerOrderViewRow } from "./seller-repository";
 
 const ROW: SellerOrderViewRow = {
   id: "so1",
@@ -166,6 +171,78 @@ describe("toSellerOrderViewDto", () => {
     (status, paidAt) => {
       expect(() =>
         toSellerOrderViewDto({ ...ROW, order: { ...ROW.order, paymentStatus: status, paidAt } }),
+      ).toThrow(Error);
+    },
+  );
+});
+
+const LIST_KEYS = [
+  "cancellationKind",
+  "commissionRateBps",
+  "createdAt",
+  "fulfilmentStatus",
+  "id",
+  "items",
+  "itemsSubtotalSatang",
+  "orderNumber",
+  "paymentStatus",
+  "shipment",
+  "shippingFeeIsSimulated",
+  "shippingFeeSatang",
+  "storeName",
+].sort();
+
+describe("toSellerOrderListItemDto (owner ruling on Q42: no paidAt, no address)", () => {
+  const LIST_ROW: SellerOrderListRow = {
+    ...ROW,
+    order: {
+      orderNumber: ROW.order.orderNumber,
+      createdAt: ROW.order.createdAt,
+      paymentStatus: ROW.order.paymentStatus,
+    },
+  };
+
+  it("has exactly the list keys: neither paidAt nor shippingAddress", () => {
+    const dto = toSellerOrderListItemDto(LIST_ROW);
+    expect(Object.keys(dto).sort()).toEqual(LIST_KEYS);
+    expect(dto).toMatchObject({
+      id: "so1",
+      orderNumber: "OD2610110000042",
+      createdAt: "2026-10-11T18:29:00.000Z",
+      paymentStatus: "PAID",
+      cancellationKind: null,
+    });
+    expect(dto.items).toEqual(toSellerOrderViewDto(ROW).items);
+  });
+
+  it("never copies the paid time or an address field from a wider row", () => {
+    // A detail row passed by mistake still yields only the list keys.
+    const dto = toSellerOrderListItemDto(ROW);
+    expect(Object.keys(dto).sort()).toEqual(LIST_KEYS);
+    const text = JSON.stringify(dto);
+    // The postal code "10110" is not checked by value: it also occurs inside the order number.
+    for (const value of ["2026-10-11T18:30:00.000Z", "สมชาย", "0812345678", "1 ถนน", "แขวง"]) {
+      expect(text).not.toContain(value);
+    }
+    expect(text).not.toMatch(/paidAt|shippingAddress|postalCode|recipientName|phone/);
+  });
+
+  it("the detail is the list entry plus paidAt and shippingAddress", () => {
+    const list = toSellerOrderListItemDto(ROW);
+    const { paidAt, shippingAddress, ...rest } = toSellerOrderViewDto(ROW);
+    expect(rest).toEqual(list);
+    expect(paidAt).toBe("2026-10-11T18:30:00.000Z");
+    expect(shippingAddress.postalCode).toBe("10110");
+  });
+
+  it.each(["PENDING", "FAILED"] as const)(
+    "refuses an order whose payment is %s (a fault, never a shape)",
+    (status) => {
+      expect(() =>
+        toSellerOrderListItemDto({
+          ...LIST_ROW,
+          order: { ...LIST_ROW.order, paymentStatus: status },
+        }),
       ).toThrow(Error);
     },
   );

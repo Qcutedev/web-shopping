@@ -17,10 +17,11 @@
  * check and the write), the `Product` row (`FOR UPDATE`), the `Upload` rows (`FOR KEY SHARE`, so
  * the orphan cleanup cannot delete one between the lookup and the link), then the `ProductImage`
  * rows. `createProduct` takes the store's create lock (an advisory lock, no row; D-043) right
- * after the store row. `createProduct` and `updateProduct` both follow it (CR-T042-01: the update locks the
- * requested category before the product row). DATA_MODEL.md 7.5 places `Product` before
- * `ProductImage` but does not name Store, Category, or Upload; their positions here are this
- * module's own until the database owner adds them there.
+ * after the store row, then the category, and inserts the product without locking a `Product`
+ * row. `updateProduct` takes the requested category (only when the request sends `categoryId`)
+ * before the product row (CR-T042-01). This is the seller-side chain of DATA_MODEL.md 7.5
+ * ("Seller product and upload writes"): `Store`, the store's advisory lock, `Category`,
+ * `Product`, `Upload`, `ProductImage`.
  *
  * Raw statements are tagged templates with bound parameters only (`$queryRaw`, `$executeRaw`);
  * no SQL text is built from a value. Nothing here logs.

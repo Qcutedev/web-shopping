@@ -15,7 +15,11 @@ import { fileURLToPath } from "node:url";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { SellerOrderViewDto, SellerSummaryDto } from "@/modules/orders";
+import type {
+  SellerOrderListItemDto,
+  SellerOrderViewDto,
+  SellerSummaryDto,
+} from "@/modules/orders";
 import * as service from "@/modules/orders/seller-service";
 import type { Actor } from "@/server/auth/actor";
 import { requireActor } from "@/server/auth/session";
@@ -80,6 +84,10 @@ const VIEW: SellerOrderViewDto = {
   shipment: null,
   items: [],
 };
+// An entry of the list: no paidAt and no shippingAddress (owner ruling on Q42).
+const LIST_ITEM = Object.fromEntries(
+  Object.entries(VIEW).filter(([key]) => key !== "paidAt" && key !== "shippingAddress"),
+) as unknown as SellerOrderListItemDto;
 const SUMMARY: SellerSummaryDto = {
   productsByStatus: { DRAFT: 0, PUBLISHED: 0, ARCHIVED: 0 },
   lowStockCount: 0,
@@ -124,7 +132,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   requireActorMock.mockResolvedValue(SELLER);
   vi.mocked(service.listOwnSellerOrders).mockResolvedValue({
-    items: [VIEW],
+    items: [LIST_ITEM],
     page: 1,
     pageSize: 20,
     total: 1,
@@ -198,10 +206,13 @@ describe("GET /seller/orders", () => {
     const response = await listModule.GET(
       new Request(`${APP_ORIGIN}/x?storeId=other&fulfilmentStatus=SHIPPED&page=2`),
     );
-    expect(await response.json()).toEqual({
-      data: [VIEW],
+    const json = (await response.json()) as { data: Record<string, unknown>[] };
+    expect(json).toEqual({
+      data: [LIST_ITEM],
       meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 },
     });
+    expect(json.data[0]).not.toHaveProperty("paidAt");
+    expect(json.data[0]).not.toHaveProperty("shippingAddress");
     expect(service.listOwnSellerOrders).toHaveBeenCalledWith(SUSPENDED, {
       page: 2,
       pageSize: 20,

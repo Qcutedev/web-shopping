@@ -61,6 +61,25 @@ interface SellerOrderData {
   }[];
 }
 
+/** An entry of the list: no `paidAt` and no shipping address (owner ruling on Q42). */
+type SellerOrderListData = Omit<SellerOrderData, "paidAt" | "shippingAddress">;
+
+const LIST_KEYS = [
+  "cancellationKind",
+  "commissionRateBps",
+  "createdAt",
+  "fulfilmentStatus",
+  "id",
+  "items",
+  "itemsSubtotalSatang",
+  "orderNumber",
+  "paymentStatus",
+  "shipment",
+  "shippingFeeIsSimulated",
+  "shippingFeeSatang",
+  "storeName",
+].sort();
+
 interface SummaryData {
   productsByStatus: Record<string, number>;
   lowStockCount: number;
@@ -162,7 +181,9 @@ describe("GET /api/v1/seller/orders", () => {
     const response = await call.list(me.cookie, `?storeId=${other.storeId}`);
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    const body = await json<{ data: SellerOrderData[]; meta: Record<string, number> }>(response);
+    const body = await json<{ data: SellerOrderListData[]; meta: Record<string, number> }>(
+      response,
+    );
     expect(body.meta).toEqual({ page: 1, pageSize: 20, total: 2, totalPages: 1 });
     expect(body.data.map((row) => row.id)).toEqual([
       both.sellerOrderOf(me.storeId).id,
@@ -176,6 +197,41 @@ describe("GET /api/v1/seller/orders", () => {
     expect(JSON.stringify(body)).not.toContain(both.products[1]!.id);
   });
 
+  it("an entry carries neither paidAt nor the shipping address; the detail keeps both (Q42)", async () => {
+    const me = await seller();
+    const placed = await paidOrder([me.storeId]);
+    const id = placed.sellerOrderOf(me.storeId).id;
+
+    const body = await json<{ data: Record<string, unknown>[] }>(await call.list(me.cookie));
+    expect(body.data).toHaveLength(1);
+    const entry = body.data[0]!;
+    expect(Object.keys(entry).sort()).toEqual(LIST_KEYS);
+    expect(entry).not.toHaveProperty("paidAt");
+    expect(entry).not.toHaveProperty("shippingAddress");
+    const text = JSON.stringify(body);
+    for (const value of [
+      placed.order.paidAt!.toISOString(),
+      placed.order.shipRecipientName,
+      placed.order.shipPhone,
+      placed.order.shipLine1,
+    ]) {
+      expect(text).not.toContain(value);
+    }
+
+    const detail = await dataOf(await call.get(id, me.cookie));
+    expect(detail.paidAt).toBe(placed.order.paidAt!.toISOString());
+    expect(detail.shippingAddress).toMatchObject({
+      recipientName: placed.order.shipRecipientName,
+      phone: placed.order.shipPhone,
+    });
+    // Everything else of the entry equals the detail.
+    expect(entry).toEqual(
+      Object.fromEntries(
+        Object.entries(detail).filter(([key]) => key !== "paidAt" && key !== "shippingAddress"),
+      ),
+    );
+  });
+
   it("paginates with a capped page size and filters by fulfilment status", async () => {
     const me = await seller();
     const first = await paidOrder([me.storeId]);
@@ -183,13 +239,13 @@ describe("GET /api/v1/seller/orders", () => {
     await paidOrder([me.storeId]);
     await move(first.sellerOrderOf(me.storeId).id, me.cookie, "PROCESSING");
 
-    const page2 = await json<{ data: SellerOrderData[]; meta: Record<string, number> }>(
+    const page2 = await json<{ data: SellerOrderListData[]; meta: Record<string, number> }>(
       await call.list(me.cookie, "?page=2&pageSize=2"),
     );
     expect(page2.meta).toEqual({ page: 2, pageSize: 2, total: 3, totalPages: 2 });
     expect(page2.data.map((row) => row.id)).toEqual([first.sellerOrderOf(me.storeId).id]);
 
-    const processing = await json<{ data: SellerOrderData[]; meta: Record<string, number> }>(
+    const processing = await json<{ data: SellerOrderListData[]; meta: Record<string, number> }>(
       await call.list(me.cookie, "?fulfilmentStatus=PROCESSING"),
     );
     expect(processing.meta.total).toBe(1);
@@ -204,7 +260,7 @@ describe("GET /api/v1/seller/orders", () => {
   it("a suspended store still lists its seller orders (BR-14)", async () => {
     const me = await seller("SUSPENDED");
     const placed = await paidOrder([me.storeId]);
-    const body = await json<{ data: SellerOrderData[] }>(await call.list(me.cookie));
+    const body = await json<{ data: SellerOrderListData[] }>(await call.list(me.cookie));
     expect(body.data.map((row) => row.id)).toEqual([placed.sellerOrderOf(me.storeId).id]);
   });
 

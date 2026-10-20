@@ -4,7 +4,8 @@
  * session's store's seller orders of paid orders; a `storeId` in the query is not interpreted.
  *
  * Order of checks (section 1.8): 3 the session (401), 4 the role `SELLER` (403 FORBIDDEN), 7 the
- * query (400), then the service. Paginated, newest first.
+ * query (400), then the service. Paginated, newest first. An entry carries neither `paidAt` nor
+ * the buyer's shipping address (owner ruling on Q42); `GET /seller/orders/{id}` does.
  */
 import { listOwnSellerOrders, listSellerOrdersQuerySchema, queryRecord } from "@/modules/orders";
 import { requireRole } from "@/server/auth/actor";

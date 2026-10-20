@@ -8,21 +8,29 @@
  */
 import { imageRef } from "@/modules/catalog/image";
 
-import type { SellerOrderViewDto, SellerSummaryDto } from "./seller-schema";
-import type { SellerOrderViewRow, SellerSummaryRows } from "./seller-repository";
+import type { SellerOrderListItemDto, SellerOrderViewDto, SellerSummaryDto } from "./seller-schema";
+import type {
+  SellerOrderListRow,
+  SellerOrderViewRow,
+  SellerSummaryRows,
+} from "./seller-repository";
 import { cancellationKind, FULFILMENT_STATUSES, type FulfilmentStatusValue } from "./state";
 
-export function toSellerOrderViewDto(row: SellerOrderViewRow): SellerOrderViewDto {
-  if (row.order.paymentStatus !== "PAID" || row.order.paidAt === null) {
-    // Every seller read is filtered on a paid order (BR-35), and the database ties `paidAt` to
-    // `PAID` (`Order_paidAt_check`). Anything else is a fault, never a shape with a null time.
-    throw new Error("orders: a seller order of an order that is not paid reached the mapping.");
+const NOT_PAID_FAULT = "orders: a seller order of an order that is not paid reached the mapping.";
+
+/**
+ * An entry of the list: no `paidAt` and no shipping address (owner ruling on Q42). Built
+ * key by key, so a wider row never leaks a field into the answer.
+ */
+export function toSellerOrderListItemDto(row: SellerOrderListRow): SellerOrderListItemDto {
+  if (row.order.paymentStatus !== "PAID") {
+    // Every seller read is filtered on a paid order (BR-35). Anything else is a fault.
+    throw new Error(NOT_PAID_FAULT);
   }
   return {
     id: row.id,
     orderNumber: row.order.orderNumber,
     createdAt: row.order.createdAt.toISOString(),
-    paidAt: row.order.paidAt.toISOString(),
     paymentStatus: row.order.paymentStatus,
     fulfilmentStatus: row.fulfilmentStatus,
     cancellationKind: cancellationKind(row.fulfilmentStatus, row.order.paymentStatus),
@@ -31,15 +39,6 @@ export function toSellerOrderViewDto(row: SellerOrderViewRow): SellerOrderViewDt
     shippingFeeSatang: row.shippingFeeSatang,
     shippingFeeIsSimulated: row.shippingFeeIsSimulated,
     commissionRateBps: row.commissionRateBps,
-    shippingAddress: {
-      recipientName: row.order.shipRecipientName,
-      phone: row.order.shipPhone,
-      line1: row.order.shipLine1,
-      subdistrict: row.order.shipSubdistrict,
-      district: row.order.shipDistrict,
-      province: row.order.shipProvince,
-      postalCode: row.order.shipPostalCode,
-    },
     shipment:
       row.shipment === null
         ? null
@@ -60,6 +59,28 @@ export function toSellerOrderViewDto(row: SellerOrderViewRow): SellerOrderViewDt
       quantity: item.quantity,
       lineTotalSatang: item.lineTotalSatang,
     })),
+  };
+}
+
+/** The detail (and the status change answer): the list entry plus `paidAt` and the address. */
+export function toSellerOrderViewDto(row: SellerOrderViewRow): SellerOrderViewDto {
+  if (row.order.paymentStatus !== "PAID" || row.order.paidAt === null) {
+    // Every seller read is filtered on a paid order (BR-35), and the database ties `paidAt` to
+    // `PAID` (`Order_paidAt_check`). Anything else is a fault, never a shape with a null time.
+    throw new Error(NOT_PAID_FAULT);
+  }
+  return {
+    ...toSellerOrderListItemDto(row),
+    paidAt: row.order.paidAt.toISOString(),
+    shippingAddress: {
+      recipientName: row.order.shipRecipientName,
+      phone: row.order.shipPhone,
+      line1: row.order.shipLine1,
+      subdistrict: row.order.shipSubdistrict,
+      district: row.order.shipDistrict,
+      province: row.order.shipProvince,
+      postalCode: row.order.shipPostalCode,
+    },
   };
 }
 

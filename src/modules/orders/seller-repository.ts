@@ -73,8 +73,11 @@ type SellerOrderScalarRow = Prisma.SellerOrderGetPayload<{
   select: typeof SELLER_ORDER_SCALAR_SELECT;
 }>;
 
-/** Everything the seller's shape is built from (seller-mapping.ts). */
-export interface SellerOrderViewRow {
+/**
+ * Everything an entry of the list is built from (seller-mapping.ts). It holds neither the paid
+ * time nor the shipping address: the list never reads them (owner ruling on Q42, section 5.7.3).
+ */
+export interface SellerOrderListRow {
   id: string;
   storeName: string;
   fulfilmentStatus: FulfilmentStatusValue;
@@ -85,15 +88,7 @@ export interface SellerOrderViewRow {
   order: {
     orderNumber: string;
     createdAt: Date;
-    paidAt: Date | null;
     paymentStatus: PaymentStatusValue;
-    shipRecipientName: string;
-    shipPhone: string;
-    shipLine1: string;
-    shipSubdistrict: string;
-    shipDistrict: string;
-    shipProvince: string;
-    shipPostalCode: string;
   };
   shipment: {
     carrierName: string | null;
@@ -114,16 +109,31 @@ export interface SellerOrderViewRow {
   }[];
 }
 
+/** Everything the detail shape is built from: the list row plus the paid time and the address. */
+export interface SellerOrderViewRow extends Omit<SellerOrderListRow, "order"> {
+  order: SellerOrderListRow["order"] & {
+    paidAt: Date | null;
+    shipRecipientName: string;
+    shipPhone: string;
+    shipLine1: string;
+    shipSubdistrict: string;
+    shipDistrict: string;
+    shipProvince: string;
+    shipPostalCode: string;
+  };
+}
+
 type ReadClient = Pick<DbTransaction, "order" | "shipment" | "orderItem" | "upload">;
 
 /**
- * Adds the order's copies, the shipment, and the items to scalar seller order rows, by plain
- * statements awaited one after the other (safe inside a transaction, DATA_MODEL.md 7.8).
+ * Adds the order's number, creation time, and payment status, the shipment, and the items to
+ * scalar seller order rows, by plain statements awaited one after the other (safe inside a
+ * transaction, DATA_MODEL.md 7.8). The paid time and the address are not read here.
  */
 async function hydrate(
   client: ReadClient,
   rows: SellerOrderScalarRow[],
-): Promise<SellerOrderViewRow[]> {
+): Promise<SellerOrderListRow[]> {
   if (rows.length === 0) return [];
   const sellerOrderIds = rows.map((row) => row.id);
   const orders = await client.order.findMany({
@@ -132,15 +142,7 @@ async function hydrate(
       id: true,
       orderNumber: true,
       createdAt: true,
-      paidAt: true,
       paymentStatus: true,
-      shipRecipientName: true,
-      shipPhone: true,
-      shipLine1: true,
-      shipSubdistrict: true,
-      shipDistrict: true,
-      shipProvince: true,
-      shipPostalCode: true,
     },
   });
   const shipments = await client.shipment.findMany({
@@ -207,15 +209,7 @@ async function hydrate(
       order: {
         orderNumber: order.orderNumber,
         createdAt: order.createdAt,
-        paidAt: order.paidAt,
         paymentStatus: order.paymentStatus,
-        shipRecipientName: order.shipRecipientName,
-        shipPhone: order.shipPhone,
-        shipLine1: order.shipLine1,
-        shipSubdistrict: order.shipSubdistrict,
-        shipDistrict: order.shipDistrict,
-        shipProvince: order.shipProvince,
-        shipPostalCode: order.shipPostalCode,
       },
       shipment:
         shipment === undefined
@@ -258,19 +252,36 @@ export async function findOwnPaidSellerOrder(
   });
   if (row === null) return null;
   const [hydrated] = await hydrate(client, [row]);
-  return hydrated ?? null;
+  if (hydrated === undefined) return null;
+  // The detail alone reads the paid time and the buyer's address (owner ruling on Q42).
+  const detail = await client.order.findUnique({
+    where: { id: row.orderId },
+    select: {
+      paidAt: true,
+      shipRecipientName: true,
+      shipPhone: true,
+      shipLine1: true,
+      shipSubdistrict: true,
+      shipDistrict: true,
+      shipProvince: true,
+      shipPostalCode: true,
+    },
+  });
+  // The foreign key is Restrict and hydrate just read this order; a miss is a database fault.
+  if (detail === null) throw new Error("orders: a seller order's order row is missing.");
+  return { ...hydrated, order: { ...hydrated.order, ...detail } };
 }
 
 /**
  * One page of the session's store's seller orders of paid orders, newest first, then `id`
  * (section 1.7; index `SellerOrder(storeId, fulfilmentStatus, createdAt)`), and their count, in one
- * read-only `REPEATABLE READ` snapshot.
+ * read-only `REPEATABLE READ` snapshot. Neither the paid time nor the shipping address is read.
  */
 export async function listOwnPaidSellerOrders(
   scope: SellerScope,
   filter: { fulfilmentStatus?: FulfilmentStatusValue },
   page: { page: number; pageSize: number },
-): Promise<{ rows: SellerOrderViewRow[]; total: number }> {
+): Promise<{ rows: SellerOrderListRow[]; total: number }> {
   const where: Prisma.SellerOrderWhereInput = {
     ...ownPaidSellerOrderWhere(scope),
     ...(filter.fulfilmentStatus === undefined ? {} : { fulfilmentStatus: filter.fulfilmentStatus }),

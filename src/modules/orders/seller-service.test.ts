@@ -217,6 +217,21 @@ describe("reads", () => {
     expect(page.items[0]?.id).toBe("so1");
   });
 
+  it("listOwnSellerOrders: an entry carries neither paidAt nor shippingAddress (Q42 ruling)", async () => {
+    const page = await service.listOwnSellerOrders(SELLER, { page: 1, pageSize: 20 });
+    const entry = page.items[0];
+    expect(entry).toBeDefined();
+    expect(entry).not.toHaveProperty("paidAt");
+    expect(entry).not.toHaveProperty("shippingAddress");
+    expect(JSON.stringify(page)).not.toContain("0812345678");
+  });
+
+  it("getOwnSellerOrder: the detail keeps paidAt and shippingAddress", async () => {
+    const dto = await service.getOwnSellerOrder(SELLER, "so1");
+    expect(dto.paidAt).toBe("2026-10-20T00:00:01.000Z");
+    expect(dto.shippingAddress).toMatchObject({ phone: "0812345678", postalCode: "10110" });
+  });
+
   it("getSellerSummary passes the low-stock threshold", async () => {
     await service.getSellerSummary(SUSPENDED);
     expect(repo.readSellerSummaryRows).toHaveBeenCalledWith(SCOPE, 5);

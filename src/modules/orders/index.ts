@@ -19,7 +19,12 @@ export {
   listOwnSellerOrders,
 } from "./seller-service";
 export * from "./seller-schema";
-export { aggregateSatang, toSellerOrderViewDto, toSellerSummaryDto } from "./seller-mapping";
+export {
+  aggregateSatang,
+  toSellerOrderListItemDto,
+  toSellerOrderViewDto,
+  toSellerSummaryDto,
+} from "./seller-mapping";
 export { PAYMENT_TRANSACTION_OPTIONS } from "./repository";
 export {
   runPaymentTimeoutSweep,

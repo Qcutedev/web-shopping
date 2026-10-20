@@ -34,7 +34,11 @@ import { db } from "@/server/db";
 import { invalidStateTransition } from "@/server/errors";
 
 import { sellerOrderNotFound } from "./errors";
-import { toSellerOrderViewDto, toSellerSummaryDto } from "./seller-mapping";
+import {
+  toSellerOrderListItemDto,
+  toSellerOrderViewDto,
+  toSellerSummaryDto,
+} from "./seller-mapping";
 import {
   claimAndRestoreStock,
   findOwnPaidSellerOrder,
@@ -49,6 +53,7 @@ import {
 } from "./seller-repository";
 import type {
   ListSellerOrdersQuery,
+  SellerOrderListItemDto,
   SellerOrderStatusBody,
   SellerOrderViewDto,
   SellerSummaryDto,
@@ -67,17 +72,20 @@ function sellerScope(actor: Actor): SellerScope {
   return { storeId: actor.storeId, userId: actor.userId };
 }
 
-/** GET /seller/orders: the store's seller orders of paid orders, newest first, paginated. */
+/**
+ * GET /seller/orders: the store's seller orders of paid orders, newest first, paginated. An entry
+ * carries neither `paidAt` nor the buyer's address (owner ruling on Q42); the detail does.
+ */
 export async function listOwnSellerOrders(
   actor: Actor,
   query: ListSellerOrdersQuery,
-): Promise<Page<SellerOrderViewDto>> {
+): Promise<Page<SellerOrderListItemDto>> {
   const scope = sellerScope(actor);
   const filter =
     query.fulfilmentStatus === undefined ? {} : { fulfilmentStatus: query.fulfilmentStatus };
   const { rows, total } = await listOwnPaidSellerOrders(scope, filter, query);
   return {
-    items: rows.map(toSellerOrderViewDto),
+    items: rows.map(toSellerOrderListItemDto),
     page: query.page,
     pageSize: query.pageSize,
     total,

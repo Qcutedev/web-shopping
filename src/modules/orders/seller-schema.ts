@@ -9,9 +9,13 @@
  * `400 VALIDATION_ERROR` and nothing changes. A `storeId` in a query is not interpreted: the
  * query schema strips unknown parameters.
  *
- * Text limits (item 8.2-7, set for this endpoint in T-043; **provisional** until the owner or the
- * orchestrator rules, each one constant below): `carrierName` and `trackingNumber` are one line,
- * trimmed, 1 to 100 characters, the display-name rule (`NAME_ALLOWED_TEXT`).
+ * Text limits (item 8.2-7; owner ruling of 2026-10-20, seventy-ninth session): `carrierName` and
+ * `trackingNumber` are one line, trimmed, 1 to 100 characters, the display-name rule
+ * (`NAME_ALLOWED_TEXT`). Blank (empty after trimming) is `400 VALIDATION_ERROR`.
+ *
+ * List and detail differ (owner ruling of 2026-10-20 on Q42): an entry of the list
+ * (`SellerOrderListItemDto`) carries neither `paidAt` nor the buyer's shipping address; only the
+ * detail and the status change answer (`SellerOrderViewDto`) carry them.
  *
  * Money is integer satang (section 1.5). Times are ISO 8601 strings in UTC (section 1.6).
  */
@@ -28,7 +32,7 @@ import {
   type PaymentStatusValue,
 } from "./state";
 
-/** Provisional text limits (file comment). */
+/** Text limits (file comment). */
 export const CARRIER_NAME_MAX = 100;
 export const TRACKING_NUMBER_MAX = 100;
 
@@ -114,20 +118,17 @@ export interface SellerOrderItemDto {
 }
 
 /**
- * A seller order as its seller sees it (section 5.7.3): the store's own portion of an order only,
- * never another store's portion and never the order's grand total.
+ * An entry of `GET /seller/orders` (section 5.7.3): the store's own portion of an order only,
+ * never another store's portion and never the order's grand total. It carries neither `paidAt`
+ * nor the buyer's shipping address (owner ruling on Q42: detail only); `SellerOrderViewDto` adds
+ * both.
  */
-export interface SellerOrderViewDto {
+export interface SellerOrderListItemDto {
   id: string;
   /** The order's number (BR-37); opaque. */
   orderNumber: string;
   /** When the order was created. */
   createdAt: string;
-  /**
-   * When the order's payment became `PAID` (BR-39): the paid time of the whole order, the same
-   * for every store's part. Never null here, because a seller sees only paid orders (BR-35).
-   */
-  paidAt: string;
   /** Always `PAID`: a seller never sees an order that is not paid (BR-35). */
   paymentStatus: PaymentStatusValue;
   fulfilmentStatus: FulfilmentStatusValue;
@@ -141,10 +142,23 @@ export interface SellerOrderViewDto {
   shippingFeeIsSimulated: boolean;
   /** Copied at purchase; recorded only, nothing is deducted (BR-13). */
   commissionRateBps: number;
-  /** The buyer's shipping copy taken at purchase (BR-09). */
-  shippingAddress: ShippingAddressDto;
   shipment: ShipmentDto | null;
   items: SellerOrderItemDto[];
+}
+
+/**
+ * A seller order as its seller sees it on `GET /seller/orders/{id}` and in the answer of
+ * `POST /seller/orders/{id}/status` (section 5.7.3): the list entry plus the paid time and the
+ * buyer's shipping address.
+ */
+export interface SellerOrderViewDto extends SellerOrderListItemDto {
+  /**
+   * When the order's payment became `PAID` (BR-39): the paid time of the whole order, the same
+   * for every store's part. Never null here, because a seller sees only paid orders (BR-35).
+   */
+  paidAt: string;
+  /** The buyer's shipping copy taken at purchase (BR-09). */
+  shippingAddress: ShippingAddressDto;
 }
 
 /** `GET /seller/summary` (section 5.7.4; REQ-S-03). Every figure is computed from rows. */
