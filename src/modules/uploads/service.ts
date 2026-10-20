@@ -7,9 +7,12 @@
  *   createUpload  seller                 SELLER with an APPROVED store, from the session's actor;
  *                                        again under the store row's share lock; and the insert
  *                                        carries the condition itself
- *   openFile      public                 none: pictures are public by design; the key must match
- *                                        the pattern and belong to a registered upload that is
- *                                        not an expired orphan (SEC-065)
+ *   openFile      public, or the owning  the key must match the pattern and belong to a
+ *                 seller                 registered upload that is not an expired orphan
+ *                                        (SEC-065); then `mayServe` (SEC-068): served to anyone
+ *                                        only when public (an order item's picture, a picture of
+ *                                        a visible product, the logo of a public store), else
+ *                                        only to a SELLER session of the owning store
  *
  * The owner of an upload is the caller's store, taken from the session (`actor.storeId` with
  * `actor.userId`), never from the request (CLAUDE.md rule 6). Uploading attaches nothing.
@@ -25,6 +28,7 @@ import {
   countUnreferencedUploads,
   findUploadByKey,
   insertUploadIfStoreApproved,
+  isLogoOfPublicStore,
   lockStoreUploads,
 } from "./repository";
 import {
@@ -144,18 +148,55 @@ export interface OpenedFile {
   sizeBytes: number;
 }
 
+/** What decides who may read a registered upload that is not an expired orphan. */
+export interface FileAccess {
+  /** The owning store. */
+  storeId: string;
+  /** An order item's picture, a picture of a visible product, or the logo of a public store. */
+  isPublic: boolean;
+}
+
+/**
+ * SEC-068 item 1 (section 5.8 "Serving"): a public file is served to anyone, with or without a
+ * session. Any other registered upload (an unattached one inside the grace period, a picture of a
+ * draft, of a product awaiting approval, rejected, or taken down, or hidden by its store, owner,
+ * or category, the logo of a suspended store) is served only to a `SELLER` whose session's store
+ * owns it, whatever that store's status (BR-14: a suspended seller still reads). Everyone else,
+ * an admin included, is answered as for an unknown key.
+ */
+export function mayServe(file: FileAccess, actor: Actor | null): boolean {
+  if (file.isPublic) return true;
+  return actor !== null && actor.role === "SELLER" && actor.storeId === file.storeId;
+}
+
+/** Resolves the caller's actor from the request's session; asked only for a file not public. */
+export type ActorResolver = () => Promise<Actor | null>;
+
+const anonymous: ActorResolver = () => Promise.resolve(null);
+
 /**
  * GET /api/files/{key}: the stored bytes of a registered upload. 404 NOT_FOUND, identical in
  * every case, for a key that does not match the pattern (checked first; nothing is read), a key
  * with no `Upload` row, an expired orphan (nothing references it and it is older than
- * ORPHAN_GRACE_PERIOD_SECONDS; SEC-065, nothing is read and nothing is logged), and a row whose
- * bytes are missing or have another length than recorded. The last two are operator matters and
- * write one warn line with the key.
+ * ORPHAN_GRACE_PERIOD_SECONDS; SEC-065, nothing is read and nothing is logged), a file the caller
+ * may not read (`mayServe`, SEC-068; nothing is read and nothing is logged), and a row whose bytes
+ * are missing or have another length than recorded. The last two are operator matters and write
+ * one warn line with the key.
+ *
+ * `resolveActor` is called only when the file is not public, so a public file costs no session
+ * lookup; the route passes the session guard. Without it the caller is anonymous.
  */
-export async function openFile(key: string, deps: UploadDependencies): Promise<OpenedFile> {
+export async function openFile(
+  key: string,
+  deps: UploadDependencies,
+  resolveActor: ActorResolver = anonymous,
+): Promise<OpenedFile> {
   if (!isStorageKey(key)) throw fileNotFound();
   const row = await findUploadByKey(key, ORPHAN_GRACE_PERIOD_SECONDS);
   if (row === null || row.expiredOrphan) throw fileNotFound();
+  const isPublic = row.publicPicture || (row.isLogo && (await isLogoOfPublicStore(row.id)));
+  const access: FileAccess = { storeId: row.storeId, isPublic };
+  if (!isPublic && !mayServe(access, await resolveActor())) throw fileNotFound();
   if (!isUploadContentType(row.contentType)) {
     deps.log?.warn("A registered upload has a type that is not allowed", { storageKey: key });
     throw fileNotFound();

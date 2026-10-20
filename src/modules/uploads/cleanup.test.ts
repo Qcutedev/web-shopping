@@ -8,6 +8,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Logger } from "@/server/logger";
 
 vi.mock("@/server/db", () => ({ db: {} }));
+// The repository's serving lookup imports the visibility rule, which reads the client's enums.
+vi.mock("@/modules/catalog/visibility", () => ({
+  PUBLIC_STORE_WHERE: {},
+  VISIBLE_PRODUCT_SQL: {},
+}));
 
 const {
   cleanUpExpiredOrphans,

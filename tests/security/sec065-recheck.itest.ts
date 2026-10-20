@@ -207,11 +207,17 @@ describe("SEC-065 re-check: an expired orphan is 404 whoever asks", () => {
     for (const body of bodies) expect(body).toEqual(bodies[0]);
   });
 
-  it("the grace boundary is the database clock: 60 s inside is served, 60 s past is 404", async () => {
+  // Changed by security with the SEC-068 item 1 re-check (2026-10-20): "60 s inside is served"
+  // was an anonymous 200, the old rule. An unattached upload is now served only to the owning
+  // seller, so the boundary is read with the owner's cookie (the only caller for whom the clock
+  // decides), and the anonymous request inside the grace period is now asserted 404.
+  it("the grace boundary is the database clock: 60 s inside is served to the owner, 60 s past is 404 to the owner; anonymous is 404 on both sides", async () => {
     const seller = await signedIn("SELLER");
     const inside = await storedUpload(seller.storeId ?? "", ORPHAN_GRACE_PERIOD_SECONDS - 60);
     const past = await storedUpload(seller.storeId ?? "", ORPHAN_GRACE_PERIOD_SECONDS + 60);
-    expect((await getFile(inside.key)).status).toBe(200);
+    expect((await getFile(inside.key, seller.cookie)).status).toBe(200);
+    expect((await getFile(past.key, seller.cookie)).status).toBe(404);
+    expect((await getFile(inside.key)).status).toBe(404);
     expect((await getFile(past.key)).status).toBe(404);
   });
 });

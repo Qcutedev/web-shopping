@@ -1219,7 +1219,7 @@ Findings S7 and S8; DATA_MODEL.md sections 6.7, 6.8, and 8; SECURITY.md "Upload 
 | Method | Path | Access | Notes |
 | --- | --- | --- | --- |
 | POST | `/seller/uploads` | seller | `multipart/form-data` only, one image per request in the field `file`. Rate-limited. Response `201`. A suspended store is refused before the body is read. |
-| GET | `/api/files/{key}` | public | Serves a stored image. Not an envelope response on success. |
+| GET | `/api/files/{key}` | public, or the owning seller (SEC-068) | Serves a stored image to anyone when it is public, otherwise only to the session of the seller whose store owns it. Not an envelope response on success. |
 
 **Upload.**
 
@@ -1247,7 +1247,9 @@ Findings S7 and S8; DATA_MODEL.md sections 6.7, 6.8, and 8; SECURITY.md "Upload 
 
 - The key must match the strict pattern of generated keys and must belong to a registered upload that is not an orphan (see "Lifetime"); anything else, including any traversal attempt, is `404 NOT_FOUND` and reads nothing. The key pattern itself is `OPEN (technical)` for T-041 (SECURITY.md TM-18).
 - The response has the upload's recorded image content type, never one derived from the request, and `X-Content-Type-Options: nosniff`.
-- Product pictures and logos are public by design: a file is served to anyone who has its key, whether or not the product it belongs to is currently visible.
+- **Who may read** (SEC-068 item 1, 2026-10-20; replaces "product pictures and logos are public by design"). A file is **public**, and served to anyone with or without a session, when it is at least one of: a picture of a product that is **visible now** ([section 3.4](#34-visibility-and-can-be-bought), BR-05), the logo of a store whose page is **public** (section 3.4), or the picture of an **order item**. Every other registered upload that is not an orphan is served **only to a `SELLER` session whose store owns it**, whatever that store's status (BR-14): an upload not attached yet, a picture of a draft, of a product awaiting approval, rejected, taken down, or archived, of a product hidden by its store, its owner, or its category, and the logo of a suspended store. Anyone else, an admin included, gets the same `404 NOT_FOUND` as for an unknown key. A takedown, a suspension, a deactivated owner, or a switched-off category therefore stops the public serving of the pictures at once, and approval or reinstatement brings it back, without any write to an upload.
+- No session is required: a request without one is never `401`. The session is looked up only for a file that is not public. A seller's dashboard shows its own pictures through the same `url`, with its session cookie.
+- The admin moderation screens (T-050) cannot yet show the pictures of a product awaiting approval: an admin session is not the owner. That needs its own rule, decided with T-050.
 - Local adapter only in the MVP (D-010). Caching of file responses is `OPEN (technical)` for T-041; nothing is documented as cacheable yet.
 
 #### 5.8.1 As built (T-041, 2026-10-19)
@@ -1295,9 +1297,10 @@ Implemented: `POST /api/v1/seller/uploads` (`src/app/api/v1/seller/uploads/route
 - `runUploadCleanup()` is one run with one log line (`info` with `rowsDeleted`, `filesDeleted`, `filesFailed`; `error` with the error class and code only). `startUploadCleanupSchedule()` runs it at once and then every `ORPHAN_CLEANUP_INTERVAL_MS` (one hour), one schedule per process.
 - **Not scheduled yet.** Nothing calls `startUploadCleanupSchedule`: the start-up hook `src/instrumentation.ts`, which already starts the session purge and the payment timeout sweep, belongs to devops. Until it is wired, orphans are not served but their rows and bytes stay, and they keep counting against the store's cap, which bounds what one store can keep on disk to 50 files of at most 5 MB.
 
-**`GET /api/files/{key}`** (public, no session, no rate limit). One path segment, decoded by the framework.
+**`GET /api/files/{key}`** (public or the owning seller, SEC-068; no rate limit). One path segment, decoded by the framework.
 
-- `404 NOT_FOUND`, the same envelope in every case: a key that does not match `STORAGE_KEY_PATTERN` (checked first; nothing is looked up or read), a key with no `Upload` row, an orphan (nothing references the upload and it is older than `ORPHAN_GRACE_PERIOD_SECONDS` = 86,400 by the database clock; nothing is read or logged; SEC-065), a row whose bytes are missing or whose stored length differs from `sizeBytes`, or a recorded type outside the three (the last three write a warn line with the key).
+- Order: the key pattern; one statement (`fileLookupStatement` in `src/modules/uploads/repository.ts`) reads the upload's store, type, size, whether it is an orphan, whether it is an order item picture or a picture of a visible product (`VISIBLE_PRODUCT_SQL`), and whether it is any store's logo; for a logo that is not otherwise public, one more query asks whether its store is public (`PUBLIC_STORE_WHERE`); for a file that is still not public, the session is resolved through `getActor` and `mayServe` (`src/modules/uploads/service.ts`) allows only a `SELLER` whose store id is the upload's; then the bytes. Every lookup in the statement uses an index of its own (`ProductImage_uploadId_key`, `Store_logoUploadId_key`, `OrderItem_productImageUploadId_idx`, primary keys).
+- `404 NOT_FOUND`, the same envelope in every case: a key that does not match `STORAGE_KEY_PATTERN` (checked first; nothing is looked up or read), a key with no `Upload` row, an orphan (nothing references the upload and it is older than `ORPHAN_GRACE_PERIOD_SECONDS` = 86,400 by the database clock; nothing is read or logged; SEC-065), a file the caller may not read (SEC-068; nothing is read or logged), a row whose bytes are missing or whose stored length differs from `sizeBytes`, or a recorded type outside the three (the last three write a warn line with the key).
 - `200`: the bytes, with `Content-Type` the recorded type, `Content-Length`, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`, `Content-Disposition: inline`, `X-Request-Id`, and `Cache-Control: no-store` (**provisional**, see below). Not an envelope.
 
 **Choices made in T-041 and not yet ruled** (item 8.2-8, "T-041, with security"; each is one constant, so a ruling is a one-line change). A client may rely on the status and the error code, not on these values:

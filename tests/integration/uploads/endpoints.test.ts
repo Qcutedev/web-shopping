@@ -35,6 +35,7 @@ import {
 import { db } from "@/server/db";
 
 import {
+  createCategory,
   createOrderItemRow,
   createProduct,
   createProductImage,
@@ -120,8 +121,11 @@ function watchedBody(bytes: Uint8Array<ArrayBuffer>): {
   return { stream, pulled: () => pulled };
 }
 
-function fileRequest(key: string): Request {
-  return new Request(`${APP_URL}/api/files/${encodeURIComponent(key)}`, { method: "GET" });
+function fileRequest(key: string, cookie?: string): Request {
+  return new Request(`${APP_URL}/api/files/${encodeURIComponent(key)}`, {
+    method: "GET",
+    ...(cookie === undefined ? {} : { headers: { cookie } }),
+  });
 }
 
 function fileContext(key: string): RouteContext<"/api/files/[key]"> {
@@ -511,14 +515,20 @@ describe("createUpload: the store status is judged again in the transaction", ()
 // ---------------------------------------------------------------------------------------------
 
 describe("GET /api/files/{key}", () => {
-  it("serves the stored bytes to anyone with the recorded type and nosniff", async () => {
+  // Changed with SEC-068 (2026-10-20): an unattached upload is no longer public. The headers and
+  // bytes are checked on the owner's request; the anonymous request is now 404.
+  it("serves an unattached upload to its owner's session with the recorded type and nosniff; anonymous is 404", async () => {
     const seller = await signedIn("SELLER");
     const bytes = webpBytes(321);
     const uploaded = await postUploadRoute(
       uploadRequest(fileBody(bytes, "a.webp", "image/webp"), { cookie: seller.cookie }),
     );
     const { data } = await json<{ data: { key: string } }>(uploaded);
-    const response = await getFileRoute(fileRequest(data.key), fileContext(data.key));
+    expect((await getFileRoute(fileRequest(data.key), fileContext(data.key))).status).toBe(404);
+    const response = await getFileRoute(
+      fileRequest(data.key, seller.cookie),
+      fileContext(data.key),
+    );
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("image/webp");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
@@ -556,8 +566,15 @@ describe("GET /api/files/{key}", () => {
       uploadRequest(fileBody(jpegBytes()), { cookie: seller.cookie }),
     );
     const { data } = await json<{ data: { key: string } }>(uploaded);
+    // Owner's session (SEC-068), so the 404 comes from the missing bytes, not from the access rule.
+    expect(
+      (await getFileRoute(fileRequest(data.key, seller.cookie), fileContext(data.key))).status,
+    ).toBe(200);
     await unlink(join(uploadDir, data.key.slice(0, 2), data.key));
-    const response = await getFileRoute(fileRequest(data.key), fileContext(data.key));
+    const response = await getFileRoute(
+      fileRequest(data.key, seller.cookie),
+      fileContext(data.key),
+    );
     expect(response.status).toBe(404);
   });
 });
@@ -711,16 +728,20 @@ describe("SEC-065: a store's cap on uploads nothing references", () => {
 });
 
 describe("SEC-065: GET /api/files/{key} for uploads nothing references", () => {
-  async function status(key: string): Promise<number> {
-    return (await getFileRoute(fileRequest(key), fileContext(key))).status;
+  async function status(key: string, cookie?: string): Promise<number> {
+    return (await getFileRoute(fileRequest(key, cookie), fileContext(key))).status;
   }
 
-  it("is served inside the grace period, and 404 after it, the same 404 as an unknown key", async () => {
+  // Changed with SEC-068 (2026-10-20): inside the grace period an unattached upload is served to
+  // its owner's session only; past it, to nobody, the owner included.
+  it("is served to its owner inside the grace period, and 404 after it, the same 404 as an unknown key", async () => {
     const seller = await signedIn("SELLER");
     const key = await uploadedKey(seller.cookie);
     await setAge(key, 23);
-    expect(await status(key)).toBe(200);
+    expect(await status(key, seller.cookie)).toBe(200);
+    expect(await status(key)).toBe(404);
     await setAge(key, 25);
+    expect(await status(key, seller.cookie)).toBe(404);
     const response = await getFileRoute(fileRequest(key), fileContext(key));
     expect(response.status).toBe(404);
     const unknown = "f".repeat(32);
@@ -858,5 +879,145 @@ describe("SEC-065: the orphan cleanup", () => {
     expect(await db.upload.findUnique({ where: { storageKey: key } })).toBeNull();
     expect(await filesUnder(uploadDir)).toContain(fileOf(key));
     expect((await getFileRoute(fileRequest(key), fileContext(key))).status).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// SEC-068: who may read a file
+// ---------------------------------------------------------------------------------------------
+
+describe("SEC-068: GET /api/files/{key} serves a file that is not public only to its owner", () => {
+  async function idOf(key: string): Promise<string> {
+    return (await db.upload.findUniqueOrThrow({ where: { storageKey: key } })).id;
+  }
+
+  async function answer(key: string, cookie?: string) {
+    const response = await getFileRoute(fileRequest(key, cookie), fileContext(key));
+    if (response.status !== 200) {
+      const { error } = await json<{ error: { code: string; message: string; details: unknown } }>(
+        response,
+      );
+      return { status: response.status, body: [error.code, error.message, error.details] };
+    }
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await response.arrayBuffer();
+    return { status: 200, body: null };
+  }
+
+  /** A picture of a product of `storeId` with the given product, store, and category state. */
+  async function pictureOf(
+    cookie: string,
+    storeId: string,
+    product: { status?: "DRAFT" | "PUBLISHED" | "ARCHIVED"; moderationStatus?: string } = {},
+    categoryActive = true,
+  ): Promise<string> {
+    const key = await uploadedKey(cookie);
+    const category = await createCategory({ isActive: categoryActive });
+    const row = await createProduct({
+      storeId,
+      categoryId: category.id,
+      ...(product.status === undefined ? {} : { status: product.status }),
+      ...(product.moderationStatus === undefined
+        ? {}
+        : { moderationStatus: product.moderationStatus as never }),
+    });
+    await createProductImage({ productId: row.id, uploadId: await idOf(key) });
+    return key;
+  }
+
+  it("not public (unattached, draft, pending, rejected, taken down, archived, inactive category): only the owner, every other caller the unknown-key 404", async () => {
+    const owner = await signedIn("SELLER");
+    const storeId = owner.storeId ?? "";
+    const other = await signedIn("SELLER");
+    const customer = await signedIn("CUSTOMER");
+    const admin = await signedIn("ADMIN");
+    const keys = [
+      await uploadedKey(owner.cookie),
+      await pictureOf(owner.cookie, storeId, { status: "DRAFT", moderationStatus: "PENDING" }),
+      await pictureOf(owner.cookie, storeId, { moderationStatus: "PENDING" }),
+      await pictureOf(owner.cookie, storeId, { moderationStatus: "REJECTED" }),
+      await pictureOf(owner.cookie, storeId, { moderationStatus: "TAKEN_DOWN" }),
+      await pictureOf(owner.cookie, storeId, { status: "ARCHIVED" }),
+      await pictureOf(owner.cookie, storeId, {}, false),
+    ];
+    const unknown = await answer("e".repeat(32));
+    expect(unknown.status).toBe(404);
+    for (const key of keys) {
+      expect((await answer(key, owner.cookie)).status, key).toBe(200);
+      for (const cookie of [undefined, other.cookie, customer.cookie, admin.cookie]) {
+        expect(await answer(key, cookie), key).toEqual(unknown);
+      }
+    }
+  });
+
+  it("public: a picture of a visible product, the logo of an approved store, and an order item picture are served to anyone", async () => {
+    const owner = await signedIn("SELLER");
+    const storeId = owner.storeId ?? "";
+    const visible = await pictureOf(owner.cookie, storeId);
+    const logo = await uploadedKey(owner.cookie);
+    await db.store.update({ where: { id: storeId }, data: { logoUploadId: await idOf(logo) } });
+    const ordered = await uploadedKey(owner.cookie);
+    // The order item's product is not visible: an order's picture is public on its own.
+    const draft = await createProduct({ storeId, status: "DRAFT", moderationStatus: "PENDING" });
+    await createOrderItemRow({
+      sellerOrderId: (await createSellerOrderRow({ storeId })).id,
+      productId: draft.id,
+      productImageUploadId: await idOf(ordered),
+    });
+    const customer = await signedIn("CUSTOMER");
+    for (const key of [visible, logo, ordered]) {
+      expect((await answer(key)).status, key).toBe(200);
+      expect((await answer(key, customer.cookie)).status, key).toBe(200);
+    }
+  });
+
+  it("a takedown, a suspension, and a deactivated owner hide the pictures at once; the logo of a suspended store too", async () => {
+    const owner = await signedIn("SELLER");
+    const storeId = owner.storeId ?? "";
+    const picture = await pictureOf(owner.cookie, storeId);
+    const logo = await uploadedKey(owner.cookie);
+    await db.store.update({ where: { id: storeId }, data: { logoUploadId: await idOf(logo) } });
+    expect((await answer(picture)).status).toBe(200);
+    expect((await answer(logo)).status).toBe(200);
+
+    await db.store.update({ where: { id: storeId }, data: { status: "SUSPENDED" } });
+    expect((await answer(picture)).status).toBe(404);
+    expect((await answer(logo)).status).toBe(404);
+    // The suspended seller still reads its own files (BR-14).
+    expect((await answer(picture, owner.cookie)).status).toBe(200);
+    expect((await answer(logo, owner.cookie)).status).toBe(200);
+
+    await db.store.update({ where: { id: storeId }, data: { status: "APPROVED" } });
+    expect((await answer(picture)).status).toBe(200);
+    await db.user.update({ where: { id: owner.userId }, data: { isActive: false } });
+    expect((await answer(picture)).status).toBe(404);
+    expect((await answer(logo)).status).toBe(404);
+    await db.user.update({ where: { id: owner.userId }, data: { isActive: true } });
+
+    const product = await db.productImage.findFirstOrThrow({
+      where: { uploadId: await idOf(picture) },
+    });
+    await db.product.update({
+      where: { id: product.productId },
+      data: { moderationStatus: "TAKEN_DOWN", moderationNote: "x" },
+    });
+    expect((await answer(picture)).status).toBe(404);
+    expect((await answer(picture, owner.cookie)).status).toBe(200);
+  });
+
+  it("the lookup statement uses an index for every reference (EXPLAIN of the statement itself)", async () => {
+    const { fileLookupStatement } = await import("@/modules/uploads/repository");
+    const { Prisma } = await import("@/server/db");
+    const plan = await db.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL enable_seqscan = off`;
+      const rows = await tx.$queryRaw<{ "QUERY PLAN": string }[]>(
+        Prisma.sql`EXPLAIN ${fileLookupStatement("0".repeat(32), 86_400)}`,
+      );
+      return rows.map((row) => row["QUERY PLAN"]).join("\n");
+    });
+    expect(plan).not.toMatch(/Seq Scan/);
+    expect(plan).toContain("OrderItem_productImageUploadId_idx");
+    expect(plan).toContain("ProductImage_uploadId_key");
+    expect(plan).toContain("Store_logoUploadId_key");
   });
 });
