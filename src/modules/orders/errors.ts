@@ -10,3 +10,11 @@ import { type AppError, notFound } from "@/server/errors";
 export function orderNotFound(): AppError {
   return notFound();
 }
+
+/**
+ * A seller order id that is unknown, of another store, or of an order whose payment is not `PAID`
+ * (BR-35): the same `404 NOT_FOUND`, `details` `{}`, for all three (section 1.8, D-015).
+ */
+export function sellerOrderNotFound(): AppError {
+  return notFound();
+}
