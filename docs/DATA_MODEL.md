@@ -693,6 +693,22 @@ One transaction: `UPDATE "SellerOrder" SET "fulfilmentStatus" = 'CANCELLED' WHER
 
 To keep transactions from deadlocking, every transaction takes its locks in this order and skips the ones it does not need: `Cart` row, then `Order`, then `SellerOrder`, then `OrderItem`, then `Product` rows in ascending id, then `ProductImage`, then `CartItem`. A seller's product edit locks its one `Product` row before it reads or replaces the `ProductImage` rows ([section 4.2](#42-product-status-and-moderation-s5-oq-04-oq-05-oq-06-oq-35-oq-36-oq-42)). Any transaction that writes cart lines on the customer's behalf outside a plain add or change (the return of step 5 in 7.2, and the lowering write of the refusal transaction in 7.1) holds the `Cart` row lock first. A read of the cart takes no lock and writes nothing ([section 6.9](#69-cart-and-cartitem)). "Not the last admin" locks the active admin `User` rows it counts (`FOR UPDATE`) before it changes one of them.
 
+**Seller product and upload writes (T-041, T-042; CR-T042-01, D-043).** The transactions of `src/modules/inventory/` and `src/modules/uploads/` take their locks in this order and skip the ones they do not need:
+
+1. `Store` row of the session's store, first statement of the transaction. A write to other tables takes `FOR SHARE` (`requireApprovedStoreForWrite`, `lockStoreIfApproved` in `src/modules/sellers/repository.ts`); a write of the `Store` row itself takes `FOR NO KEY UPDATE`, or `FOR UPDATE` when it changes `name` (CR-T040-06). A transaction that took `FOR SHARE` never updates or deletes that `Store` row afterwards (CR-T040-04): two such transactions would deadlock on the upgrade.
+2. The store's advisory locks: transaction-level, on a key derived from the store id, no row lock. `createProduct` takes `pg_advisory_xact_lock(hashtextextended('products:' || storeId, 0))` (`lockStoreProductCreates`, D-043 item 1) and counts the store's products that are not `ARCHIVED` under it. `createUpload` takes the same function on `'uploads:' || storeId` (`lockStoreUploads`, SEC-065) and counts the store's unreferenced uploads under it. No transaction takes both today. A hash collision only makes two stores wait for each other.
+3. `Category` row, `FOR SHARE` (`lockCategory`), so an admin switch-off waits until the write ends (BR-23). `createProduct` always takes it; `updateProduct` takes it only when the request sends `categoryId`, and before the `Product` row (CR-T042-01). Its 404 is decided after the product's, so the refusal order stays 404 product first.
+4. `Product` row, `FOR UPDATE OF p` (`lockOwnProduct`), with the store id and owner in the `WHERE`. One row per transaction on the seller side; `createProduct` inserts and locks none.
+5. `Upload` rows named by the request, `FOR KEY SHARE`, in `ORDER BY "id" COLLATE "C"` (`resolveOwnUploads`), so the orphan cleanup cannot delete one between the lookup and the link.
+6. `ProductImage` rows (`replaceImages`), as already stated above.
+
+Combined with the order at the top of this section, the seller-side chain is `Store`, the store's advisory lock, `Category`, `Product`, `Upload`, `ProductImage`. The sellers module takes `SellerApplication`, then `User`, then `Store` (`src/modules/sellers/repository.ts`), which agrees with it. Nothing in code yet fixes where `Store` and `Category` stand relative to `Cart`, `Order`, `SellerOrder`, and `OrderItem`: no transaction locks both groups explicitly today (open question, section 19.3).
+
+Not in the list:
+
+- The orphan cleanup (`deleteExpiredOrphans`) locks `Upload` rows `FOR UPDATE ... SKIP LOCKED` in `createdAt` order. It skips a locked row rather than waiting for it, so it holds no position in the order; an attach that starts after it waits for it and then fails its foreign key (section 8).
+- The `FOR KEY SHARE` locks PostgreSQL takes itself for a foreign key check, for example on the `Store` row when checkout inserts a `SellerOrder`, or on the `Upload` row when an `OrderItem` copies a picture. They conflict only with `FOR UPDATE` and with a delete or key change of the referenced row.
+
 **"Ascending id" for `Product` rows means `COLLATE "C"` order (CR-T032-06).** Both sides that take `Product` row locks in a sequence get that sequence from a SQL `ORDER BY` with `COLLATE "C"`, never from the database's default collation and never from a JavaScript sort:
 
 - Checkout (7.1 step 4) runs its stock statements in the order of `SELECT "id", "productId", "quantity" FROM "CartItem" WHERE "cartId" = :cartId ORDER BY "productId" COLLATE "C" ASC` (`findCartLinesForCheckout` in `src/modules/checkout/repository.ts`).
@@ -1098,6 +1114,7 @@ What remains is technical and belongs to a later task:
 | What triggers the two things that must run with no visitor: the session purge (hourly) and the failing of orders still `PENDING` after 15 minutes. Nothing runs on a schedule yet. D-029 places the choice of the scheduler for the **session purge** in T-015 with devops and names nothing else; the plan in DEPLOYMENT.md ("Scheduled work") is that the overdue-order sweep is added in T-032 on the scheduler T-015 chooses | auth with devops (T-015) for the scheduler and the purge; backend-api (T-032) for the sweep | 6.1, 4.3 |
 | The checkout shape: T-013 validated the statements and all three candidates with one request at a time (section 21.6). Choosing one, and testing it under concurrency, is T-032 (D-031 point 5) | T-032 | 7.1, 21.6 |
 | Whether a suspended seller may still edit the store profile and register uploads. This document reads "view only" as refusing both; D-028 does not name them | orchestrator, backend-api | 7.7 |
+| Where `Store` and `Category` stand relative to `Cart`, `Order`, `SellerOrder`, and `OrderItem` in the lock order. No transaction locks both groups explicitly today; the first admin path that does (store suspension or category switch-off that then touches products or orders, T-050, T-051) must fix it here before it is written | database with backend-api (T-050, T-051) | 7.5 |
 
 ### 19.4 To validate against installed versions
 
