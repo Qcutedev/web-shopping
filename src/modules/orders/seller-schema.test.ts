@@ -75,7 +75,7 @@ describe("sellerOrderStatusBodySchema", () => {
       "a".repeat(CARRIER_NAME_MAX + 1),
       "line\nbreak",
       "tab\there",
-      "‮bidi",
+      `${String.fromCodePoint(0x202e)}bidi`,
     ]) {
       expect(
         sellerOrderStatusBodySchema.safeParse({ to: "SHIPPED", carrierName: value }).success,
