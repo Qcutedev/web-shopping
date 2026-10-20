@@ -1164,12 +1164,13 @@ A suspended store still reads and fulfils its existing orders (BR-14; finding B4
 | POST | `/seller/orders/{id}/status` | seller (any store status) | Body `{ to, carrierName?, trackingNumber? }`. Else 404. |
 
 - A seller sees **only their own store's portion** of an order: their seller order, its items, and the buyer's shipping copy. Never another store's portion, and never the order's grand total.
+- **The list carries neither `paidAt` nor the buyer's shipping copy** (owner ruling 2026-10-20 on REQUIREMENTS.md Q42: the paid time and the address are shown on the detail only). `GET /seller/orders/{id}` and the answer of `POST /seller/orders/{id}/status` carry both.
 - **A seller sees a seller order only once its order is paid** (BR-20; D-026, OQ-41). Every seller read and write is filtered on the order's `paymentStatus` being `PAID`. A seller order whose order is still `PENDING`, or `FAILED`, does not exist for the seller: absent from the list, `404 NOT_FOUND` by id, `404` on a status change, and counted in no figure. `paymentStatus` in a seller's response is therefore always `PAID`.
 - `to` is one of `PROCESSING`, `SHIPPED`, `DELIVERED`, `CANCELLED`; any other value is `400 VALIDATION_ERROR`. The move must be in the table of [section 3.2](#32-fulfilment-status-per-seller-order), otherwise `409 INVALID_STATE_TRANSITION` and nothing changes: in particular `PENDING` to `PROCESSING` while the payment is not `PAID`, and anything from `SHIPPED` other than `DELIVERED`.
 - `carrierName` and `trackingNumber` are accepted only with `to: "SHIPPED"`; with any other `to` they are a `400 VALIDATION_ERROR`. Both are optional. **Shipping is simulated**: no carrier is contacted and no tracking number is generated.
 - Cancelling restores the stock of the seller order's items once and leaves the payment as it is. A cancelled seller order that was paid carries `cancellationKind: "REFUND_OUTSIDE_SYSTEM"`; the system records no refund (BR-21).
 
-Seller order as its seller sees it:
+Seller order as its seller sees it on the detail and after a status change (a list entry is the same without `paidAt` and `shippingAddress`):
 
 ```json
 {
@@ -1195,7 +1196,7 @@ Seller order as its seller sees it:
 
 ##### 5.7.3.1 As built (T-043, 2026-10-20)
 
-Implemented: `GET /seller/orders`, `GET /seller/orders/{id}`, `POST /seller/orders/{id}/status`, and `GET /seller/summary` ([section 5.7.4](#574-dashboard-summary)), in the seller side of `src/modules/orders` (`seller-schema.ts`, `seller-repository.ts`, `seller-mapping.ts`, `seller-service.ts`; public surface `@/modules/orders`) and the handlers `src/app/api/v1/seller/orders/route.ts`, `src/app/api/v1/seller/orders/[id]/route.ts`, `src/app/api/v1/seller/orders/[id]/status/route.ts`, and `src/app/api/v1/seller/summary/route.ts`. The schemas, constants, and types in `src/modules/orders/seller-schema.ts` are authoritative: `listSellerOrdersQuerySchema`, `sellerOrderIdParamsSchema`, `sellerOrderStatusBodySchema`, `SELLER_TARGET_STATUSES`, `CARRIER_NAME_MAX`, `TRACKING_NUMBER_MAX`, and the response types `SellerOrderViewDto`, `SellerOrderItemDto`, and `SellerSummaryDto`. The transition table is `FULFILMENT_TRANSITIONS` in `src/modules/orders/state.ts`, the one place it is defined (the payment side uses the same file). Unit tests next to the module and the routes; `tests/integration/seller-orders/endpoints.test.ts` against PostgreSQL. **Not security-reviewed and not code-reviewed.** The four route files are not yet on the route list guard of `tests/security/t020-t018-catalog-shell.test.ts` (security adds them). No endpoint here is rate-limited (section 6 lists none).
+Implemented: `GET /seller/orders`, `GET /seller/orders/{id}`, `POST /seller/orders/{id}/status`, and `GET /seller/summary` ([section 5.7.4](#574-dashboard-summary)), in the seller side of `src/modules/orders` (`seller-schema.ts`, `seller-repository.ts`, `seller-mapping.ts`, `seller-service.ts`; public surface `@/modules/orders`) and the handlers `src/app/api/v1/seller/orders/route.ts`, `src/app/api/v1/seller/orders/[id]/route.ts`, `src/app/api/v1/seller/orders/[id]/status/route.ts`, and `src/app/api/v1/seller/summary/route.ts`. The schemas, constants, and types in `src/modules/orders/seller-schema.ts` are authoritative: `listSellerOrdersQuerySchema`, `sellerOrderIdParamsSchema`, `sellerOrderStatusBodySchema`, `SELLER_TARGET_STATUSES`, `CARRIER_NAME_MAX`, `TRACKING_NUMBER_MAX`, and the response types `SellerOrderListItemDto`, `SellerOrderViewDto`, `SellerOrderItemDto`, and `SellerSummaryDto`. The transition table is `FULFILMENT_TRANSITIONS` in `src/modules/orders/state.ts`, the one place it is defined (the payment side uses the same file). Unit tests next to the module and the routes; `tests/integration/seller-orders/endpoints.test.ts` against PostgreSQL. **Not security-reviewed and not code-reviewed.** The four route files are not yet on the route list guard of `tests/security/t020-t018-catalog-shell.test.ts` (security adds them). No endpoint here is rate-limited (section 6 lists none).
 
 **Order of checks** ([section 1.8](#18-access-levels-and-404-against-403)); every response is `Cache-Control: no-store`. All four are `seller (any store status)`: no handler and no service reads the store status, so the seller of a suspended store reads, fulfils, cancels, and reads the summary (BR-14; DATA_MODEL.md section 7.7).
 
@@ -1222,14 +1223,16 @@ Lock order: the `SellerOrder` row, then its `OrderItem` rows (the claim), then t
 
 | Endpoint | Success |
 | --- | --- |
-| `GET /seller/orders` | `200`, list envelope of `SellerOrderViewDto`, newest first (`SellerOrder.createdAt` then `id`, both descending). `total` and `items` come from one read-only `REPEATABLE READ` snapshot |
+| `GET /seller/orders` | `200`, list envelope of `SellerOrderListItemDto`, newest first (`SellerOrder.createdAt` then `id`, both descending). `total` and `items` come from one read-only `REPEATABLE READ` snapshot |
 | `GET /seller/orders/{id}` | `200`, `SellerOrderViewDto` |
 | `POST /seller/orders/{id}/status` | `200`, `SellerOrderViewDto` after the change |
 | `GET /seller/summary` | `200`, `SellerSummaryDto` ([section 5.7.4](#574-dashboard-summary)) |
 
-`SellerOrderViewDto` has exactly the keys of the example above: `id`, `orderNumber`, `createdAt` (the order's), `paidAt`, `paymentStatus` (always `PAID`), `fulfilmentStatus`, `cancellationKind` (`REFUND_OUTSIDE_SYSTEM` when cancelled, else `null`), `storeName`, `itemsSubtotalSatang`, `shippingFeeSatang`, `shippingFeeIsSimulated`, `commissionRateBps`, `shippingAddress`, `shipment`, `items` (each `{ id, productId, productTitle, productSku, image, unitPriceSatang, quantity, lineTotalSatang }`, in the order they were written). No order grand total, shipping total, other store's portion, store id, buyer id, or review. The list items have the same shape as the detail.
+`SellerOrderViewDto` has exactly the keys of the example above: `id`, `orderNumber`, `createdAt` (the order's), `paidAt`, `paymentStatus` (always `PAID`), `fulfilmentStatus`, `cancellationKind` (`REFUND_OUTSIDE_SYSTEM` when cancelled, else `null`), `storeName`, `itemsSubtotalSatang`, `shippingFeeSatang`, `shippingFeeIsSimulated`, `commissionRateBps`, `shippingAddress`, `shipment`, `items` (each `{ id, productId, productTitle, productSku, image, unitPriceSatang, quantity, lineTotalSatang }`, in the order they were written). No order grand total, shipping total, other store's portion, store id, buyer id, or review.
 
-**Fields.**
+`SellerOrderListItemDto`, the shape of a list entry, has the same keys **except `paidAt` and `shippingAddress`** (owner ruling on Q42, below). The list query does not read the paid time or the address columns at all; only the detail and the status change read them.
+
+**Fields** (item 8.2-7 settled for `carrierName` and `trackingNumber` by the owner, 2026-10-20).
 
 | Field | Rule |
 | --- | --- |
@@ -1241,12 +1244,15 @@ Lock order: the `SellerOrder` row, then its `OrderItem` rows (the claim), then t
 
 **Summary** ([section 5.7.4](#574-dashboard-summary)). The four groups are read in one read-only `REPEATABLE READ` snapshot, from rows of the session's store and owner only. `productsByStatus` counts every product of the store by `status` (all three keys are always present). `lowStockCount` and `soldOutCount` count products with `status` `PUBLISHED` and `moderationStatus` `APPROVED`, stock 1 to `LOW_STOCK_THRESHOLD` (5) and stock 0, whatever the store's status and the category's (BR-25; D-028). `ordersByStatus` counts the store's seller orders of `PAID` orders by `fulfilmentStatus` (all five keys present). `paidSalesTotalSatang` is the sum of `SellerOrder.itemsSubtotalSatang` over the store's seller orders of `PAID` orders that are not `CANCELLED`, summed as a 64-bit integer and sent only after it is checked to be a safe integer (a larger sum is `500`, never a rounded figure); the shipping fee is never part of it (BR-33).
 
+**Decided by the owner (2026-10-20, seventy-ninth session):**
+
+- `carrierName` and `trackingNumber`: 1 to 100 characters each, the display-name character rule, and a blank value is `400` rather than read as absent (item 8.2-7 for these two fields).
+- REQUIREMENTS.md Q42 for the seller list: **no**. `GET /seller/orders` entries carry neither `paidAt` nor the shipping copy; the paid time and the address are on `GET /seller/orders/{id}` (and the status change answer) only.
+- No `AuditLog` row for a seller's status change or cancel (REQ-A-10 asks for one on admin mutations only), and a seller's cancel takes no reason. Accepted for the MVP.
+
 **Choices made in T-043 and not yet ruled** (each one constant or one line; a client may rely on the status and the code, not on these values):
 
-- `carrierName` and `trackingNumber`: 100 characters each, the display-name character rule, and a blank value is `400` rather than read as absent (item 8.2-7).
-- The list items carry the whole seller order shape, `paidAt` and the shipping copy included. Whether the seller's list **shows** the paid time is open with the owner (REQUIREMENTS.md Q42); the field is there either way.
 - `createdAt` is the order's creation time (equal to the seller order's, which checkout writes in the same transaction).
-- No `AuditLog` row for a seller's status change or cancel (REQ-A-10 asks for one on admin mutations only), and a seller's cancel takes no reason.
 - `GET /seller/orders` is not filtered by paid date (BR-40 point 6 does not require it).
 - `DATA_MODEL.md` section 7.5 places `Order` before `SellerOrder`; this transaction takes no `Order` lock at all, for the reason above.
 - A `SELLER` session whose user owns no store (not allowed by the data model) is `500 INTERNAL_ERROR`, as in [section 5.7.2.1](#5721-as-built-t-042-2026-10-20).
