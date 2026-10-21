@@ -173,6 +173,27 @@ export const th = {
     // {page} is the page number.
     page: "หน้า {page}",
   },
+  // Strings of the Dialog, Table, and FileUpload primitives. Texts proposed in DESIGN_SYSTEM.md
+  // ("Strings the primitives need"); not yet approved by the owner.
+  dialog: {
+    close: "ปิด",
+  },
+  table: {
+    sortAscending: "เรียงจากน้อยไปมาก",
+    sortDescending: "เรียงจากมากไปน้อย",
+  },
+  fileUpload: {
+    drop: "ลากไฟล์มาวางที่นี่ หรือ",
+    choose: "เลือกไฟล์",
+    choosePictures: "เลือกรูปภาพ",
+    // {name} is the file name.
+    remove: "ลบไฟล์ {name}",
+    progress: "ความคืบหน้าการอัปโหลด {name}",
+    // {percent} is a whole number from 0 to 100.
+    uploading: "กำลังอัปโหลด {percent}%",
+    done: "อัปโหลดแล้ว",
+    failed: "อัปโหลดไม่สำเร็จ",
+  },
   account: {
     navLabel: "เมนูบัญชีของฉัน",
     breadcrumbLabel: "เส้นทางนำทาง",

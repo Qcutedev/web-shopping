@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
+import { Dialog } from "@/components/ui/dialog";
 import { th } from "@/i18n/th";
 import { deleteProduct, type ProductAction, runProductAction } from "@/lib/api-client/seller";
 import type { SellerProductDto } from "@/modules/inventory/schema";
@@ -102,77 +103,72 @@ export function ProductActions({
         {notice ? <Alert tone="success">{notice}</Alert> : null}
         {failure ? <SellerRequestError failure={failure} returnTo={returnTo} /> : null}
 
-        {confirming !== null ? (
-          <Alert
-            tone="warning"
-            role="alertdialog"
-            title={confirming === "archive" ? confirm.archiveConfirm : confirm.deleteConfirm}
-            action={
-              <div className="flex flex-wrap gap-3">
-                <Button
-                  variant="danger"
-                  size="sm"
-                  loading={pending === (confirming === "archive" ? "archive" : "delete")}
-                  disabled={busy}
-                  onClick={() => void (confirming === "archive" ? run("archive") : remove())}
-                >
-                  {confirming === "archive"
-                    ? confirm.archiveConfirmAction
-                    : confirm.deleteConfirmAction}
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => setConfirming(null)}
-                >
-                  {th.seller.common.cancel}
-                </Button>
-              </div>
-            }
-          >
-            {confirming === "archive" ? confirm.archiveConfirmNote : confirm.deleteConfirmNote}
-          </Alert>
-        ) : (
-          <div className="flex flex-wrap gap-3">
-            {product.status === "DRAFT" ? (
-              <Button
-                loading={pending === "publish"}
-                disabled={disabled || busy}
-                onClick={() => void run("publish")}
-              >
-                {th.seller.products.actions.publish}
-              </Button>
-            ) : null}
-            {product.status === "PUBLISHED" ? (
-              <Button
-                variant="secondary"
-                loading={pending === "unpublish"}
-                disabled={disabled || busy}
-                onClick={() => void run("unpublish")}
-              >
-                {th.seller.products.actions.unpublish}
-              </Button>
-            ) : null}
-            {!archived ? (
-              <Button
-                variant="secondary"
-                disabled={disabled || busy}
-                onClick={() => setConfirming("archive")}
-              >
-                {th.seller.products.actions.archive}
-              </Button>
-            ) : null}
+        <div className="flex flex-wrap gap-3">
+          {product.status === "DRAFT" ? (
             <Button
-              variant="ghost"
+              loading={pending === "publish"}
               disabled={disabled || busy}
-              onClick={() => setConfirming("delete")}
+              onClick={() => void run("publish")}
             >
-              {th.seller.products.actions.delete}
+              {th.seller.products.actions.publish}
             </Button>
-          </div>
-        )}
+          ) : null}
+          {product.status === "PUBLISHED" ? (
+            <Button
+              variant="secondary"
+              loading={pending === "unpublish"}
+              disabled={disabled || busy}
+              onClick={() => void run("unpublish")}
+            >
+              {th.seller.products.actions.unpublish}
+            </Button>
+          ) : null}
+          {!archived ? (
+            <Button
+              variant="secondary"
+              disabled={disabled || busy}
+              onClick={() => setConfirming("archive")}
+            >
+              {th.seller.products.actions.archive}
+            </Button>
+          ) : null}
+          <Button
+            variant="ghost"
+            disabled={disabled || busy}
+            onClick={() => setConfirming("delete")}
+          >
+            {th.seller.products.actions.delete}
+          </Button>
+        </div>
       </div>
+      {/* Confirmation of a step that cannot be undone. Not dismissible while the request runs. */}
+      <Dialog
+        open={confirming !== null}
+        role="alertdialog"
+        size="sm"
+        dismissible={!busy}
+        closeLabel={th.dialog.close}
+        onClose={() => setConfirming(null)}
+        title={confirming === "delete" ? confirm.deleteConfirm : confirm.archiveConfirm}
+        description={
+          confirming === "delete" ? confirm.deleteConfirmNote : confirm.archiveConfirmNote
+        }
+        footer={
+          <>
+            <Button variant="secondary" disabled={busy} onClick={() => setConfirming(null)}>
+              {th.seller.common.cancel}
+            </Button>
+            <Button
+              variant="danger"
+              loading={pending === (confirming === "delete" ? "delete" : "archive")}
+              disabled={busy}
+              onClick={() => void (confirming === "delete" ? remove() : run("archive"))}
+            >
+              {confirming === "delete" ? confirm.deleteConfirmAction : confirm.archiveConfirmAction}
+            </Button>
+          </>
+        }
+      />
     </Card>
   );
 }

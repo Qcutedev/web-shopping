@@ -308,6 +308,22 @@ describe("OrderStatusPanel", () => {
     expect(screen.getByText(th.seller.orders.actions.noActions)).toBeTruthy();
   });
 
+  it("asks in a modal alert dialog, closes on Escape, and returns focus to the trigger", async () => {
+    const user = userEvent.setup();
+    render(<OrderStatusPanel orderId="so1" status="PENDING" />);
+    const trigger = screen.getByRole("button", { name: th.seller.orders.actions.cancel });
+    await user.click(trigger);
+    const dialog = screen.getByRole("alertdialog", {
+      name: th.seller.orders.actions.cancelConfirm,
+    });
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(within(dialog).getByText(th.seller.orders.actions.cancelConfirmNote)).toBeTruthy();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(changeOrderStatus).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(trigger);
+  });
+
   it("asks before cancelling, names the outside-the-system refund, and cancels on confirm", async () => {
     const user = userEvent.setup();
     changeOrderStatus.mockResolvedValue({

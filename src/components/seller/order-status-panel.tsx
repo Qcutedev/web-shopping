@@ -5,6 +5,7 @@ import { type FormEvent, useState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
+import { Dialog } from "@/components/ui/dialog";
 import { InputField } from "@/components/ui/input";
 import { NoticeLabel } from "@/components/ui/notice-label";
 import { th } from "@/i18n/th";
@@ -182,63 +183,58 @@ export function OrderStatusPanel({
           </form>
         ) : null}
 
-        {confirmingCancel ? (
-          <Alert
-            tone="warning"
-            role="alertdialog"
-            title={th.seller.orders.actions.cancelConfirm}
-            action={
-              <div className="flex flex-wrap gap-3">
-                <Button
-                  variant="danger"
-                  size="sm"
-                  loading={pending === "CANCELLED"}
-                  disabled={busy}
-                  onClick={() => void send({ to: "CANCELLED" })}
-                >
-                  {th.seller.orders.actions.cancelConfirmAction}
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => setConfirmingCancel(false)}
-                >
-                  {th.seller.common.cancel}
-                </Button>
-              </div>
-            }
-          >
-            {th.seller.orders.actions.cancelConfirmNote}
-          </Alert>
-        ) : (
-          <div className="flex flex-wrap gap-3">
-            {moves.includes("PROCESSING") ? (
-              <Button
-                loading={pending === "PROCESSING"}
-                disabled={busy}
-                onClick={() => void send({ to: "PROCESSING" })}
-              >
-                {th.seller.orders.actions.confirm}
-              </Button>
-            ) : null}
-            {moves.includes("DELIVERED") ? (
-              <Button
-                loading={pending === "DELIVERED"}
-                disabled={busy}
-                onClick={() => void send({ to: "DELIVERED" })}
-              >
-                {th.seller.orders.actions.deliver}
-              </Button>
-            ) : null}
-            {moves.includes("CANCELLED") ? (
-              <Button variant="ghost" disabled={busy} onClick={() => setConfirmingCancel(true)}>
-                {th.seller.orders.actions.cancel}
-              </Button>
-            ) : null}
-          </div>
-        )}
+        <div className="flex flex-wrap gap-3">
+          {moves.includes("PROCESSING") ? (
+            <Button
+              loading={pending === "PROCESSING"}
+              disabled={busy}
+              onClick={() => void send({ to: "PROCESSING" })}
+            >
+              {th.seller.orders.actions.confirm}
+            </Button>
+          ) : null}
+          {moves.includes("DELIVERED") ? (
+            <Button
+              loading={pending === "DELIVERED"}
+              disabled={busy}
+              onClick={() => void send({ to: "DELIVERED" })}
+            >
+              {th.seller.orders.actions.deliver}
+            </Button>
+          ) : null}
+          {moves.includes("CANCELLED") ? (
+            <Button variant="ghost" disabled={busy} onClick={() => setConfirmingCancel(true)}>
+              {th.seller.orders.actions.cancel}
+            </Button>
+          ) : null}
+        </div>
       </div>
+      {/* Cancelling cannot be undone and the refund is outside the system: ask first. */}
+      <Dialog
+        open={confirmingCancel}
+        role="alertdialog"
+        size="sm"
+        dismissible={!busy}
+        closeLabel={th.dialog.close}
+        onClose={() => setConfirmingCancel(false)}
+        title={th.seller.orders.actions.cancelConfirm}
+        description={th.seller.orders.actions.cancelConfirmNote}
+        footer={
+          <>
+            <Button variant="secondary" disabled={busy} onClick={() => setConfirmingCancel(false)}>
+              {th.seller.common.cancel}
+            </Button>
+            <Button
+              variant="danger"
+              loading={pending === "CANCELLED"}
+              disabled={busy}
+              onClick={() => void send({ to: "CANCELLED" })}
+            >
+              {th.seller.orders.actions.cancelConfirmAction}
+            </Button>
+          </>
+        }
+      />
     </Card>
   );
 }

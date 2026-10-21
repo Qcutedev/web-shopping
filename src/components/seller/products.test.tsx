@@ -414,6 +414,22 @@ describe("ProductActions", () => {
     expect(await screen.findByText(th.seller.products.actions.archived)).toBeTruthy();
   });
 
+  it("confirms in a modal alert dialog that Escape closes without sending anything", async () => {
+    const user = userEvent.setup();
+    render(<ProductActions product={draft} />);
+    const trigger = screen.getByRole("button", { name: th.seller.products.actions.delete });
+    await user.click(trigger);
+    const dialog = screen.getByRole("alertdialog", {
+      name: th.seller.products.actions.deleteConfirm,
+    });
+    expect(within(dialog).getByText(th.seller.products.actions.deleteConfirmNote)).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: th.dialog.close })).toBeTruthy();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(api.deleteProduct).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(trigger);
+  });
+
   it("goes back to the list after a real delete", async () => {
     const user = userEvent.setup();
     api.deleteProduct.mockResolvedValue({ ok: true, status: 200, data: { outcome: "DELETED" } });
