@@ -28,7 +28,7 @@ import { ModerationBadge, ProductStatusBadge } from "./status-badges";
  */
 export function ProductsTable({ items }: { items: readonly SellerProductDto[] }) {
   return (
-    <Table caption={th.seller.products.listLabel} captionHidden density="dense">
+    <Table caption={th.seller.products.listLabel} captionHidden density="dense" stacked>
       <TableHeader>
         <TableRow interactive={false}>
           <TableHead>{th.seller.products.columns.product}</TableHead>
@@ -61,7 +61,7 @@ export function ProductsTable({ items }: { items: readonly SellerProductDto[] })
                 </div>
               </div>
             </TableCell>
-            <TableCell>
+            <TableCell label={th.seller.products.columns.status}>
               <div className="flex flex-wrap items-center gap-2">
                 <ProductStatusBadge status={product.status} />
                 <ModerationBadge status={product.moderationStatus} />
@@ -74,10 +74,10 @@ export function ProductsTable({ items }: { items: readonly SellerProductDto[] })
                 {product.isSample ? <NoticeLabel>{th.notice.sampleData}</NoticeLabel> : null}
               </div>
             </TableCell>
-            <TableCell align="end">
+            <TableCell align="end" label={th.seller.products.columns.price}>
               <Price satang={product.priceSatang} />
             </TableCell>
-            <TableCell align="end">
+            <TableCell align="end" label={th.seller.products.columns.stock}>
               {fill(th.seller.products.row.stockCount, { count: formatCount(product.stock) })}
             </TableCell>
           </TableRow>

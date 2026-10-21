@@ -27,7 +27,7 @@ import { FulfilmentBadge, PaymentBadge } from "./status-badges";
  */
 export function OrdersTable({ items }: { items: readonly SellerOrderListItemDto[] }) {
   return (
-    <Table caption={th.seller.orders.listLabel} captionHidden density="dense">
+    <Table caption={th.seller.orders.listLabel} captionHidden density="dense" stacked>
       <TableHeader>
         <TableRow interactive={false}>
           <TableHead>{th.seller.orders.columns.order}</TableHead>
@@ -52,8 +52,10 @@ export function OrdersTable({ items }: { items: readonly SellerOrderListItemDto[
                 {order.orderNumber}
               </Link>
             </TableCell>
-            <TableCell>{formatDateTime(order.createdAt)}</TableCell>
-            <TableCell>
+            <TableCell label={th.seller.orders.columns.placedAt}>
+              {formatDateTime(order.createdAt)}
+            </TableCell>
+            <TableCell label={th.seller.orders.columns.status}>
               <div className="flex flex-wrap items-center gap-2">
                 <FulfilmentBadge status={order.fulfilmentStatus} />
                 <PaymentBadge status={order.paymentStatus} />
@@ -62,13 +64,13 @@ export function OrdersTable({ items }: { items: readonly SellerOrderListItemDto[
                 <p className="type-small text-danger mt-1">{th.seller.orders.row.cancelledNote}</p>
               ) : null}
             </TableCell>
-            <TableCell align="end">
+            <TableCell align="end" label={th.seller.orders.columns.items}>
               {fill(th.seller.orders.row.itemCount, { count: formatCount(order.items.length) })}
             </TableCell>
-            <TableCell align="end">
+            <TableCell align="end" label={th.seller.orders.columns.subtotal}>
               <Price satang={order.itemsSubtotalSatang} />
             </TableCell>
-            <TableCell align="end">
+            <TableCell align="end" label={th.seller.orders.columns.shippingFee}>
               <div className="flex flex-col items-end gap-1">
                 <Price satang={order.shippingFeeSatang} />
                 {order.shippingFeeIsSimulated ? (
