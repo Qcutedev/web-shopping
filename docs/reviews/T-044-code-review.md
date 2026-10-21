@@ -45,3 +45,17 @@ Verdict: CHANGES REQUIRED. CR-97 to CR-99 and CR-101 to CR-106 are fixed (each n
 - **CR-111 (Info, qa)** `dashboard-store.test.tsx:333-346` passes against the old `Tile`; assert something only `StatCard` gives or label it a regression guard.
 - **CR-112 (Info, frontend)** `order-detail-view.tsx:80` raw `item.quantity` not through `formatCount`.
 - **CR-113 (Info, frontend)** `image-set-editor.tsx:65-77` a later `wrongType`/`tooBig` message hides the `skipped` message from the same pick.
+
+## Review of ccf1787 (Table stacked) and b8574f0 (CR-109 re-seed) (eighty-eighth session)
+
+Verdict: CHANGES REQUIRED (CR-114 blocking). Checks by reviewer: vitest on table, products, dashboard-store tests 77 passed; eslint, prettier, `pnpm typecheck` exit 0. Not run: browser at 360/768/1280 px, screen readers; "tests fail without the fix" for CR-109 was checked by reasoning, not by reverting.
+
+- **CR-114 (Medium, blocking, ui-ux-design)** `src/components/ui/table.tsx:336`: `TableStateRow` td has `max-md:block` unconditionally. With `stacked` off, below md the cell becomes display:block in a table-row and `colSpan` no longer spans. Contradicts "off by default, unchanged". Fix: `cn("p-0", stacked && "max-md:block")`; render a `TableStateRow` in the stacked-off test and assert no `max-md:` class.
+- **CR-115 (Low, ui-ux-design)** `table.test.tsx:178-184`: the explicit-roles test passes on native elements without `role`. Assert the attributes directly.
+- **CR-116 (Low, ui-ux-design)** `table.tsx:79-88`: stacked region below md keeps `tabIndex=0` and focus ring but cannot scroll. Drop the stop when `stacked` or record "accepted" in DESIGN_SYSTEM.md.
+- **CR-117 (Low, ui-ux-design)** `table.tsx:157`, `:177-178`: stacked `TableFooter` draws a border inside a border. Drop card styling on footer rows or document unsupported.
+- **CR-118 (Low, ui-ux-design, qa)** `table.test.tsx:186-191`: header-hidden test only checks the substring `sr-only`. Assert the exact token `max-md:[&:not(:focus-within)]:sr-only`; qa adds a Playwright check at 360 px (tab to sort button, header visible).
+- **CR-119 (Low, frontend)** `product-form.tsx:151-156`, `store-form.tsx:130-137`: after save, `seenEditableKey` keeps the pre-save key, so the following `router.refresh()` re-seeds and wipes text typed in between. Fix: on success set the key from `response.data` via one shared helper; add a test.
+- **CR-120 (Low, product decision)** `store-form.tsx:86-92`, `dashboard-store.test.tsx:313-323`: a form locked by a refresh (SUSPENDED, archived) keeps unsaved typed values in disabled fields. Decide: re-seed to stored values on lock, or keep and record why. Owner question if unsure.
+
+Checked and correct: re-seed logic follows the editable fields only; excluded fields are right; image keys are stable; default Table path unchanged apart from CR-114; per-cell label is aria-hidden so no double announcement; tailwind-merge resolves fine.
