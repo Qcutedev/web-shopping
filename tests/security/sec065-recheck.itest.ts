@@ -466,7 +466,7 @@ describe("SEC-065 re-check: the cleanup and paths outside the storage root", () 
     expect(await readFile(join(directory, "inner"), "utf8")).toBe("keep");
   });
 
-  it("a row whose bytes are already gone is deleted without error and counted as a deleted file", async () => {
+  it("a row whose bytes are already gone is deleted without error and counted as a missing file (SEC-073)", async () => {
     const seller = await signedIn("SELLER");
     const key = generateStorageKey();
     const row = await createUploadRow({ storeId: seller.storeId ?? "", storageKey: key });
@@ -482,7 +482,7 @@ describe("SEC-065 re-check: the cleanup and paths outside the storage root", () 
       },
     });
     expect(seen).toContain(key);
-    expect(result.filesDeleted).toBeGreaterThanOrEqual(1);
+    expect(result.filesMissing).toBeGreaterThanOrEqual(1);
     expect(await db.upload.findUnique({ where: { id: row.id } })).toBeNull();
   });
 

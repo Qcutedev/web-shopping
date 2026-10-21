@@ -864,6 +864,7 @@ describe("SEC-065: the orphan cleanup", () => {
     const failing = {
       put: storage.put.bind(storage),
       get: storage.get.bind(storage),
+      assertReady: storage.assertReady.bind(storage),
       delete: async (k: string) => {
         if (k === key) throw Object.assign(new Error("EPERM"), { code: "EPERM" });
         await storage.delete(k);
