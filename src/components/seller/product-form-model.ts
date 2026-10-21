@@ -51,15 +51,15 @@ export const EMPTY_PRODUCT_VALUES: ProductFormValues = {
   images: [],
 };
 
-export function valuesOfProduct(product: SellerProductDto): ProductFormValues {
+export function valuesOfProduct(stored: SellerProductDto): ProductFormValues {
   return {
-    title: product.title,
-    description: product.description,
-    sku: product.sku,
-    categoryId: product.category.id,
-    price: satangToBaht(product.priceSatang),
-    stock: String(product.stock),
-    images: product.images.map((image) => ({ ...image })),
+    title: stored.title,
+    description: stored.description,
+    sku: stored.sku,
+    categoryId: stored.category.id,
+    price: satangToBaht(stored.priceSatang),
+    stock: String(stored.stock),
+    images: stored.images.map((image) => ({ ...image })),
   };
 }
 
