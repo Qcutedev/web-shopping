@@ -26,4 +26,10 @@ export {
   type OpenedFile,
   type UploadDependencies,
 } from "./service";
-export { generateStorageKey, LocalDiskStorage, type StorageProvider } from "./storage";
+export {
+  generateStorageKey,
+  LocalDiskStorage,
+  type StorageProvider,
+  UPLOAD_ROOT_MARKER,
+  UploadStorageNotReadyError,
+} from "./storage";

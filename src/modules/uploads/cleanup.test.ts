@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Logger } from "@/server/logger";
 
+import type { CleanupResult } from "./cleanup";
+
 vi.mock("@/server/db", () => ({ db: {} }));
 // The repository's serving lookup imports the visibility rule, which reads the client's enums.
 vi.mock("@/modules/catalog/visibility", () => ({
@@ -27,11 +29,14 @@ const { ORPHAN_GRACE_PERIOD_SECONDS } = await import("./schema");
 const KEY_A = "a".repeat(32);
 const KEY_B = "b".repeat(32);
 
+const { UploadStorageNotReadyError } = await import("./storage");
+
 function fakeStorage() {
   return {
     put: vi.fn(),
     get: vi.fn(),
-    delete: vi.fn<(key: string) => Promise<void>>(async () => undefined),
+    delete: vi.fn<(key: string) => Promise<boolean>>(async () => true),
+    assertReady: vi.fn<() => Promise<void>>(async () => undefined),
   };
 }
 
@@ -55,8 +60,12 @@ describe("cleanUpExpiredOrphans", () => {
   it("deletes the rows first, then the bytes of exactly the rows deleted", async () => {
     const order: string[] = [];
     const storage = fakeStorage();
+    storage.assertReady.mockImplementation(async () => {
+      order.push("check");
+    });
     storage.delete.mockImplementation(async (key: string) => {
       order.push(`file ${key}`);
+      return true;
     });
     const deleteRows = vi.fn(async () => {
       order.push("rows");
@@ -64,8 +73,57 @@ describe("cleanUpExpiredOrphans", () => {
     });
     const result = await cleanUpExpiredOrphans({ storage, deleteRows });
     expect(deleteRows).toHaveBeenCalledWith(ORPHAN_GRACE_PERIOD_SECONDS, ORPHAN_CLEANUP_BATCH_SIZE);
-    expect(order).toEqual(["rows", `file ${KEY_A}`, `file ${KEY_B}`]);
-    expect(result).toEqual({ rowsDeleted: 2, filesDeleted: 2, filesFailed: 0 });
+    expect(order).toEqual(["check", "rows", `file ${KEY_A}`, `file ${KEY_B}`]);
+    expect(result).toEqual({ rowsDeleted: 2, filesDeleted: 2, filesMissing: 0, filesFailed: 0 });
+  });
+
+  it("SEC-073: a storage check that fails deletes no row and no file, and the run throws", async () => {
+    const storage = fakeStorage();
+    storage.assertReady.mockRejectedValueOnce(new UploadStorageNotReadyError());
+    const deleteRows = vi.fn(async () => [KEY_A]);
+    await expect(cleanUpExpiredOrphans({ storage, deleteRows })).rejects.toBeInstanceOf(
+      UploadStorageNotReadyError,
+    );
+    expect(deleteRows).not.toHaveBeenCalled();
+    expect(storage.delete).not.toHaveBeenCalled();
+  });
+
+  it("SEC-073: a storage without the check is refused before any row is deleted", async () => {
+    const deleteRows = vi.fn(async () => [KEY_A]);
+    const storage = { put: vi.fn(), get: vi.fn(), delete: vi.fn(async () => true) };
+    await expect(cleanUpExpiredOrphans({ storage, deleteRows })).rejects.toBeInstanceOf(
+      UploadStorageNotReadyError,
+    );
+    expect(deleteRows).not.toHaveBeenCalled();
+  });
+
+  it("SEC-073: a file already missing is counted apart, with one warn line per run holding the count", async () => {
+    const storage = fakeStorage();
+    storage.delete
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    const warn = vi.fn();
+    const result = await cleanUpExpiredOrphans({
+      storage,
+      log: { warn },
+      deleteRows: async () => [KEY_A, KEY_B, KEY_A],
+    });
+    expect(result).toEqual({ rowsDeleted: 3, filesDeleted: 1, filesMissing: 2, filesFailed: 0 });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[1]).toEqual({ filesMissing: 2 });
+  });
+
+  it("counts a deletion of an adapter that cannot tell (resolves nothing) as deleted", async () => {
+    const storage = { ...fakeStorage(), delete: vi.fn(async (): Promise<void> => undefined) };
+    const warn = vi.fn();
+    const result = await cleanUpExpiredOrphans({
+      storage,
+      log: { warn },
+      deleteRows: async () => [KEY_A],
+    });
+    expect(result).toEqual({ rowsDeleted: 1, filesDeleted: 1, filesMissing: 0, filesFailed: 0 });
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it("goes on while a batch is full, and stops at the batch limit", async () => {
@@ -85,7 +143,7 @@ describe("cleanUpExpiredOrphans", () => {
     const storage = fakeStorage();
     const result = await cleanUpExpiredOrphans({ storage, deleteRows: async () => [] });
     expect(storage.delete).not.toHaveBeenCalled();
-    expect(result).toEqual({ rowsDeleted: 0, filesDeleted: 0, filesFailed: 0 });
+    expect(result).toEqual({ rowsDeleted: 0, filesDeleted: 0, filesMissing: 0, filesFailed: 0 });
   });
 
   it("a failed file deletion is counted, logged with the key only, and does not stop the run", async () => {
@@ -99,7 +157,7 @@ describe("cleanUpExpiredOrphans", () => {
       log: { warn },
       deleteRows: async () => [KEY_A, KEY_B],
     });
-    expect(result).toEqual({ rowsDeleted: 2, filesDeleted: 1, filesFailed: 1 });
+    expect(result).toEqual({ rowsDeleted: 2, filesDeleted: 1, filesMissing: 0, filesFailed: 1 });
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0]?.[1]).toEqual({ storageKey: KEY_A });
     expect(storage.delete).toHaveBeenCalledWith(KEY_B);
@@ -122,7 +180,7 @@ describe("cleanUpExpiredOrphans", () => {
 describe("runUploadCleanup", () => {
   it("writes one info line with the counts", async () => {
     const log = fakeLogger();
-    const result = { rowsDeleted: 3, filesDeleted: 2, filesFailed: 1 };
+    const result = { rowsDeleted: 3, filesDeleted: 1, filesMissing: 1, filesFailed: 1 };
     await expect(runUploadCleanup(log, async () => result)).resolves.toEqual(result);
     expect(log.info).toHaveBeenCalledWith("Upload orphan cleanup ran", {
       component: "upload-cleanup",
@@ -157,11 +215,10 @@ describe("startUploadCleanupSchedule", () => {
     let release: () => void = () => undefined;
     const run = vi.fn(
       () =>
-        new Promise<{ rowsDeleted: number; filesDeleted: number; filesFailed: number }>(
-          (resolve) => {
-            release = () => resolve({ rowsDeleted: 0, filesDeleted: 0, filesFailed: 0 });
-          },
-        ),
+        new Promise<CleanupResult>((resolve) => {
+          release = () =>
+            resolve({ rowsDeleted: 0, filesDeleted: 0, filesMissing: 0, filesFailed: 0 });
+        }),
     );
     const logger = fakeLogger();
     expect(startUploadCleanupSchedule({ run, logger, intervalMs: 1_000 })).toBe(true);

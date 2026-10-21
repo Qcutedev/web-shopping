@@ -32,8 +32,35 @@ export interface StorageProvider {
   put(key: string, bytes: Uint8Array): Promise<void>;
   /** The object under `key`, or null when there is none. */
   get(key: string): Promise<StoredObject | null>;
-  /** Removes the object under `key`; no object is not an error. */
-  delete(key: string): Promise<void>;
+  /**
+   * Removes the object under `key`; no object is not an error. Resolves `false` when there was no
+   * object, `true` (or nothing, for an adapter that cannot tell) when one was removed.
+   */
+  delete(key: string): Promise<boolean | void>;
+  /**
+   * Throws UploadStorageNotReadyError unless the store is the one the uploads were written to
+   * (SEC-073). The orphan cleanup calls it before it deletes any row, and refuses to run on an
+   * adapter that does not have it.
+   */
+  assertReady?(): Promise<void>;
+}
+
+/**
+ * The name of the marker file in the root of the local disk store (SEC-073). `put` writes it once,
+ * so a root that holds it is one that uploads were written to; an empty or unmounted directory, a
+ * typo, or another instance's disk does not hold it.
+ */
+export const UPLOAD_ROOT_MARKER = ".marketplace-uploads";
+
+/**
+ * The upload store is not the one the uploads were written to (missing, not a directory, or
+ * without the marker). The message names no path.
+ */
+export class UploadStorageNotReadyError extends Error {
+  constructor() {
+    super("The upload storage root is missing or does not hold the upload marker.");
+    this.name = "UploadStorageNotReadyError";
+  }
 }
 
 /** A new storage key: 128 random bits as 32 lower-case hexadecimal digits. */
@@ -74,6 +101,10 @@ function isExistingFile(error: unknown): boolean {
  * A file is written with the exclusive flag (`wx`): an existing file is never overwritten. A
  * write that fails half way can leave a partial file; such a file has no `Upload` row and is never
  * served (section 5.8), and the service deletes it.
+ *
+ * The root holds one more file, UPLOAD_ROOT_MARKER, written by the first `put` (SEC-073). The
+ * orphan cleanup deletes no row unless `assertReady` finds it. A root that existed before the
+ * marker did gets it at its next upload; until then the cleanup refuses to run there.
  */
 export class LocalDiskStorage implements StorageProvider {
   readonly root: string;
@@ -95,8 +126,37 @@ export class LocalDiskStorage implements StorageProvider {
     return { directory, file };
   }
 
+  /**
+   * Creates the root and its marker file when they are missing (SEC-073). `put` calls it before
+   * every write, so the marker exists in every root an upload was written to; an existing marker
+   * is kept as it is.
+   */
+  async prepareRoot(): Promise<void> {
+    await mkdir(this.root, { recursive: true });
+    try {
+      await writeFile(join(this.root, UPLOAD_ROOT_MARKER), "", { flag: "wx" });
+    } catch (error) {
+      if (!isExistingFile(error)) throw error;
+    }
+  }
+
+  /** Throws UploadStorageNotReadyError unless the root is a directory that holds the marker. */
+  async assertReady(): Promise<void> {
+    try {
+      const [root, marker] = await Promise.all([
+        stat(this.root),
+        stat(join(this.root, UPLOAD_ROOT_MARKER)),
+      ]);
+      if (root.isDirectory() && marker.isFile()) return;
+    } catch {
+      // Missing, not a directory, or unreadable: the same answer, with no path in it.
+    }
+    throw new UploadStorageNotReadyError();
+  }
+
   async put(key: string, bytes: Uint8Array): Promise<void> {
     const { directory, file } = this.pathOf(key);
+    await this.prepareRoot();
     await mkdir(directory, { recursive: true });
     try {
       await writeFile(file, bytes, { flag: "wx" });
@@ -123,12 +183,14 @@ export class LocalDiskStorage implements StorageProvider {
     return { body, sizeBytes };
   }
 
-  async delete(key: string): Promise<void> {
+  async delete(key: string): Promise<boolean> {
     const { file } = this.pathOf(key);
     try {
       await unlink(file);
+      return true;
     } catch (error) {
       if (!isMissingFile(error)) throw error;
+      return false;
     }
   }
 }

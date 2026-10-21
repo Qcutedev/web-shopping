@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -6,7 +6,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { getUploadStorage, readUploadDir, UploadStorageNotConfiguredError } from "./config";
 import { STORAGE_KEY_PATTERN } from "./schema";
-import { generateStorageKey, LocalDiskStorage } from "./storage";
+import {
+  generateStorageKey,
+  LocalDiskStorage,
+  UPLOAD_ROOT_MARKER,
+  UploadStorageNotReadyError,
+} from "./storage";
 
 let root: string;
 
@@ -39,9 +44,36 @@ describe("LocalDiskStorage", () => {
     const object = await storage.get(key);
     expect(object?.sizeBytes).toBe(3);
     expect(Array.from(await readAll(object!.body))).toEqual([1, 2, 3]);
-    await storage.delete(key);
+    expect(await storage.delete(key)).toBe(true);
     expect(await storage.get(key)).toBeNull();
-    await storage.delete(key); // no object is not an error
+    expect(await storage.delete(key)).toBe(false); // no object is not an error
+  });
+
+  it("SEC-073: the first put writes the root marker; assertReady passes only with it", async () => {
+    const storage = new LocalDiskStorage(join(root, "store"));
+    await expect(storage.assertReady()).rejects.toBeInstanceOf(UploadStorageNotReadyError);
+    await storage.put(generateStorageKey(), Uint8Array.from([1]));
+    expect(await readFile(join(root, "store", UPLOAD_ROOT_MARKER), "utf8")).toBe("");
+    await expect(storage.assertReady()).resolves.toBeUndefined();
+    // A second put keeps the marker as it is.
+    await writeFile(join(root, "store", UPLOAD_ROOT_MARKER), "kept");
+    await storage.put(generateStorageKey(), Uint8Array.from([2]));
+    expect(await readFile(join(root, "store", UPLOAD_ROOT_MARKER), "utf8")).toBe("kept");
+  });
+
+  it("SEC-073: assertReady refuses an existing directory without the marker, a marker that is a directory, and a root that is a file; the error names no path", async () => {
+    const empty = new LocalDiskStorage(root);
+    const error = await empty.assertReady().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(UploadStorageNotReadyError);
+    expect(String((error as Error).message)).not.toContain(root);
+
+    await mkdir(join(root, UPLOAD_ROOT_MARKER));
+    await expect(empty.assertReady()).rejects.toBeInstanceOf(UploadStorageNotReadyError);
+
+    await writeFile(join(root, "file-root"), "");
+    await expect(
+      new LocalDiskStorage(join(root, "file-root")).assertReady(),
+    ).rejects.toBeInstanceOf(UploadStorageNotReadyError);
   });
 
   it("never overwrites an existing object", async () => {

@@ -8,6 +8,11 @@
  *     per run. The rows go first; the bytes of each deleted row are deleted after its batch
  *     committed. A file whose deletion fails stays without a row: it is never served (`openFile`
  *     needs the row) and one warn line names its key, so an operator can remove it.
+ *   - Before the first batch it checks the storage (`storage.assertReady`, SEC-073): a root that
+ *     is missing, not a directory, or without the upload marker deletes no row and the run throws
+ *     UploadStorageNotReadyError (one error line through `runUploadCleanup`). A storage without
+ *     the check is refused the same way. A file already missing is counted apart
+ *     (`filesMissing`) with one warn line per run, so a wrong root that passed the check shows.
  *   - `runUploadCleanup()` is one run with its log line; never throws.
  *   - `startUploadCleanupSchedule()` runs it once at start and then every
  *     ORPHAN_CLEANUP_INTERVAL_MS, one schedule per process (a `Symbol.for` key on `globalThis`,
@@ -28,7 +33,7 @@ import { logger as defaultLogger, type Logger } from "@/server/logger";
 import { getUploadStorage } from "./config";
 import { deleteExpiredOrphans } from "./repository";
 import { ORPHAN_GRACE_PERIOD_SECONDS } from "./schema";
-import type { StorageProvider } from "./storage";
+import { type StorageProvider, UploadStorageNotReadyError } from "./storage";
 
 /** **Provisional (SEC-065).** Rows deleted per transaction. */
 export const ORPHAN_CLEANUP_BATCH_SIZE = 100;
@@ -40,8 +45,10 @@ export const ORPHAN_CLEANUP_INTERVAL_MS = 60 * 60 * 1_000;
 export interface CleanupResult {
   /** `Upload` rows deleted. */
   rowsDeleted: number;
-  /** Their stored files deleted (a file already missing counts as deleted). */
+  /** Their stored files deleted. */
   filesDeleted: number;
+  /** Files already missing (SEC-073); above zero, one warn line per run with the count. */
+  filesMissing: number;
   /** Files whose deletion failed; each has one warn line with its key. */
   filesFailed: number;
 }
@@ -56,20 +63,30 @@ export interface CleanupDependencies {
   deleteRows?: (graceSeconds: number, limit: number) => Promise<string[]>;
 }
 
-/** Deletes expired orphans, rows first, then their bytes. Throws only when a row batch fails. */
+/**
+ * Deletes expired orphans, rows first, then their bytes. Throws when the storage check fails
+ * (UploadStorageNotReadyError, before any row is deleted) or when a row batch fails.
+ */
 export async function cleanUpExpiredOrphans(deps: CleanupDependencies): Promise<CleanupResult> {
   const graceSeconds = deps.graceSeconds ?? ORPHAN_GRACE_PERIOD_SECONDS;
   const batchSize = deps.batchSize ?? ORPHAN_CLEANUP_BATCH_SIZE;
   const maxBatches = deps.maxBatches ?? ORPHAN_CLEANUP_MAX_BATCHES;
   const deleteRows = deps.deleteRows ?? deleteExpiredOrphans;
-  const result: CleanupResult = { rowsDeleted: 0, filesDeleted: 0, filesFailed: 0 };
+  if (deps.storage.assertReady === undefined) throw new UploadStorageNotReadyError();
+  await deps.storage.assertReady();
+  const result: CleanupResult = {
+    rowsDeleted: 0,
+    filesDeleted: 0,
+    filesMissing: 0,
+    filesFailed: 0,
+  };
   for (let batch = 0; batch < maxBatches; batch += 1) {
     const keys = await deleteRows(graceSeconds, batchSize);
     result.rowsDeleted += keys.length;
     for (const key of keys) {
       try {
-        await deps.storage.delete(key);
-        result.filesDeleted += 1;
+        if ((await deps.storage.delete(key)) === false) result.filesMissing += 1;
+        else result.filesDeleted += 1;
       } catch {
         result.filesFailed += 1;
         deps.log?.warn("Stored bytes of a deleted orphan upload could not be deleted", {
@@ -79,15 +96,26 @@ export async function cleanUpExpiredOrphans(deps: CleanupDependencies): Promise<
     }
     if (keys.length < batchSize) break;
   }
+  if (result.filesMissing > 0) {
+    deps.log?.warn("Stored bytes of deleted orphan uploads were already missing", {
+      filesMissing: result.filesMissing,
+    });
+  }
   return result;
 }
+
+/**
+ * What an injected `run` (tests only) resolves to. `filesMissing` is optional here so that a stub
+ * written before SEC-073 still fits; the real run always sets it.
+ */
+export type CleanupRunResult = Omit<CleanupResult, "filesMissing"> & { filesMissing?: number };
 
 /** One run with its log line: `info` with the counts, or `error` with the error's class and code. */
 export async function runUploadCleanup(
   log: Logger = defaultLogger,
-  run: () => Promise<CleanupResult> = () =>
+  run: () => Promise<CleanupRunResult> = () =>
     cleanUpExpiredOrphans({ storage: getUploadStorage(), log }),
-): Promise<CleanupResult | undefined> {
+): Promise<CleanupRunResult | undefined> {
   try {
     const result = await run();
     log.info("Upload orphan cleanup ran", { component: "upload-cleanup", ...result });
@@ -115,7 +143,7 @@ type GlobalWithSchedule = typeof globalThis & { [SCHEDULE_KEY]?: ScheduleState }
 export interface CleanupScheduleOptions {
   intervalMs?: number;
   logger?: Logger;
-  run?: () => Promise<CleanupResult>;
+  run?: () => Promise<CleanupRunResult>;
 }
 
 /**
