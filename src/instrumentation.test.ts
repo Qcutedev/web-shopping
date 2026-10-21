@@ -176,12 +176,15 @@ describe("register: scheduled work", () => {
     vi.doUnmock("./modules/uploads");
   });
 
-  it("starts the upload cleanup once, with default options, when NODE_ENV is not test", async () => {
+  it("starts the upload cleanup once, with the volume-alert logger only, when NODE_ENV is not test", async () => {
     stubEnvironment({ NODE_ENV: "development" });
     record("at once");
     const { cleanup } = mockSchedules();
     expect(await run()).toBeUndefined();
-    expect(cleanup.mock.calls).toEqual([[]]);
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    const options = cleanup.mock.calls[0]?.[0] as { logger?: { info?: unknown } };
+    expect(Object.keys(options)).toEqual(["logger"]);
+    expect(typeof options.logger?.info).toBe("function");
   });
 
   it("starts the upload cleanup after the environment validated, and not when it did not", async () => {

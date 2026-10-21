@@ -65,7 +65,10 @@ export async function register(): Promise<void> {
         // hook's own module copy shares with any other copy, so the hook adds no guard of its own.
         // The timer is unref'd inside the module. Import through the module's index (rule 7).
         const { startUploadCleanupSchedule } = await import("./modules/uploads");
-        startUploadCleanupSchedule();
+        // SEC-073 item 3: the logger adds a rate-limited security alert line when a run counts
+        // `filesMissing > 0` (missing or unmounted upload volume). Nothing else changes.
+        const { withUploadVolumeAlert } = await import("./server/upload-volume-alert");
+        startUploadCleanupSchedule({ logger: withUploadVolumeAlert() });
       }
     } catch (error) {
       process.exitCode = 1;
