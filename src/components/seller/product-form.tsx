@@ -55,12 +55,22 @@ export function ProductForm({
   const [values, setValues] = useState<ProductFormValues>(
     product ? valuesOfProduct(product) : EMPTY_PRODUCT_VALUES,
   );
-  // The product the page passes in wins when it changes (after a refresh).
+  // The product the page passes in wins when it changes (after a refresh). The baseline `saved`
+  // always follows it. The typed values are replaced only when an editable field changed: a stock
+  // change or product action also refreshes the page and must not wipe unsaved edits (CR-109).
+  // Stock is not edited here after create, so it is left out of the key.
   const productKey = JSON.stringify(product ?? null);
+  const editableKey = JSON.stringify(
+    product ? { ...valuesOfProduct(product), stock: "" } : null,
+  );
   const [seenProductKey, setSeenProductKey] = useState(productKey);
+  const [seenEditableKey, setSeenEditableKey] = useState(editableKey);
   if (seenProductKey !== productKey) {
     setSeenProductKey(productKey);
     setSaved(product);
+  }
+  if (seenEditableKey !== editableKey) {
+    setSeenEditableKey(editableKey);
     setValues(product ? valuesOfProduct(product) : EMPTY_PRODUCT_VALUES);
   }
   const [errors, setErrors] = useState<FieldErrors<ProductField>>({});

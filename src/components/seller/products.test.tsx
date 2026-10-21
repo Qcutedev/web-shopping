@@ -542,6 +542,21 @@ describe("ProductForm follows the stored product (CR-99)", () => {
       (screen.getByLabelText(new RegExp(th.seller.products.form.title)) as HTMLInputElement).value,
     ).toBe("stored-title");
   });
+
+  it("keeps a typed title when only the stock changes (CR-109)", () => {
+    const categories = [{ id: "c1", name: "x", isActive: true }];
+    const { rerender } = render(<ProductForm product={product} categories={categories} />);
+    const titleInput = screen.getByLabelText(
+      new RegExp(th.seller.products.form.title),
+    ) as HTMLInputElement;
+    fireEvent.change(titleInput, { target: { value: "typed-title" } });
+    rerender(
+      <ProductForm product={{ ...product, stock: product.stock + 5 }} categories={categories} />,
+    );
+    expect(
+      (screen.getByLabelText(new RegExp(th.seller.products.form.title)) as HTMLInputElement).value,
+    ).toBe("typed-title");
+  });
 });
 
 describe("ProductForm images and copy (CR-101, CR-103)", () => {

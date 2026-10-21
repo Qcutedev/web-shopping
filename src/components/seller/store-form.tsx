@@ -67,12 +67,24 @@ export function StoreForm({ store }: { store: SellerStoreDto }) {
   const [contactPhone, setContactPhone] = useState(store.contactPhone);
   const [logo, setLogo] = useState<ImageRef | null>(store.logo);
   // The store the page passes in wins when it changes (after a refresh), so a status moved by
-  // the server (suspended, or no longer approved) is not hidden behind the copy kept here.
+  // the server (suspended, or no longer approved) is not hidden behind the copy kept here. The
+  // baseline `saved` always follows; the typed values are replaced only when an editable field
+  // changed, so a refresh for another reason keeps unsaved edits (CR-109).
   const storeKey = JSON.stringify(store);
+  const editableKey = JSON.stringify([
+    store.name,
+    store.description,
+    store.contactPhone,
+    store.logo,
+  ]);
   const [seenStoreKey, setSeenStoreKey] = useState(storeKey);
+  const [seenEditableKey, setSeenEditableKey] = useState(editableKey);
   if (seenStoreKey !== storeKey) {
     setSeenStoreKey(storeKey);
     setSaved(store);
+  }
+  if (seenEditableKey !== editableKey) {
+    setSeenEditableKey(editableKey);
     setName(store.name);
     setDescription(store.description ?? "");
     setContactPhone(store.contactPhone);

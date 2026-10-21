@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { th } from "@/i18n/th";
@@ -308,6 +308,18 @@ describe("StoreForm follows the stored store (CR-99)", () => {
     expect(
       (screen.getByRole("button", { name: th.seller.store.save }) as HTMLButtonElement).disabled,
     ).toBe(true);
+  });
+
+  it("keeps a typed name when only the status changes (CR-109)", () => {
+    const { rerender } = render(<StoreForm store={store} />);
+    fireEvent.change(screen.getByLabelText(new RegExp(th.seller.store.fields.name)), {
+      target: { value: "typed-name" },
+    });
+    rerender(<StoreForm store={{ ...store, status: "SUSPENDED" }} />);
+    expect(
+      (screen.getByLabelText(new RegExp(th.seller.store.fields.name)) as HTMLInputElement).value,
+    ).toBe("typed-name");
+    expect(screen.getByText(th.seller.store.suspendedNote)).toBeTruthy();
   });
 });
 
