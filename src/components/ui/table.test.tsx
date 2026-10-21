@@ -6,6 +6,7 @@ import {
   TableBody,
   TableCell,
   TableHead,
+  TableFooter,
   TableHeader,
   TableRow,
   TableSkeletonRows,
@@ -189,6 +190,59 @@ describe("Table", () => {
       expect(screen.getAllByRole("columnheader")).toHaveLength(2);
       expect(screen.getByRole("rowheader", { name: "A-001" })).toBeTruthy();
       expect(screen.getAllByRole("row")).toHaveLength(2);
+      expect(document.querySelector("table")?.getAttribute("role")).toBe("table");
+      expect(document.querySelector("thead")?.getAttribute("role")).toBe("rowgroup");
+      expect(document.querySelector("tbody")?.getAttribute("role")).toBe("rowgroup");
+      expect(document.querySelector("tbody tr")?.getAttribute("role")).toBe("row");
+      expect(document.querySelector("th[scope='col']")?.getAttribute("role")).toBe("columnheader");
+      expect(document.querySelector("th[scope='row']")?.getAttribute("role")).toBe("rowheader");
+      expect(document.querySelector("tbody td")?.getAttribute("role")).toBe("cell");
+    });
+
+    it("drops the scroll-region keyboard stop below md and keeps it from md", () => {
+      const original = window.matchMedia;
+      const stub = (matches: boolean) =>
+        vi.fn().mockReturnValue({
+          matches,
+          addEventListener: () => {},
+          removeEventListener: () => {},
+        });
+      try {
+        window.matchMedia = stub(true) as unknown as typeof window.matchMedia;
+        const below = render(<Stacked />);
+        expect(below.container.querySelector("[role='region']")?.hasAttribute("tabindex")).toBe(
+          false,
+        );
+        below.unmount();
+        window.matchMedia = stub(false) as unknown as typeof window.matchMedia;
+        const wide = render(<Stacked />);
+        expect(wide.container.querySelector("[role='region']")?.getAttribute("tabindex")).toBe("0");
+        wide.unmount();
+        window.matchMedia = stub(true) as unknown as typeof window.matchMedia;
+        render(<Stacked stacked={false} />);
+        expect(screen.getByRole("region").getAttribute("tabindex")).toBe("0");
+      } finally {
+        window.matchMedia = original;
+      }
+    });
+
+    it("draws no card inside the footer card", () => {
+      render(
+        <Table caption="x" stacked>
+          <TableFooter>
+            <TableRow>
+              <TableCell label="รวม">1</TableCell>
+            </TableRow>
+          </TableFooter>
+        </Table>,
+      );
+      const footer = document.querySelector("tfoot") as HTMLElement;
+      expect(footer.className).toContain("max-md:border");
+      const tokens = (footer.querySelector("tr") as HTMLElement).className.split(/\s+/);
+      expect(footer.className).toContain("max-md:[&_tr]:border-0");
+      expect(footer.className).toContain("max-md:[&_tr]:bg-transparent");
+      expect(footer.className).toContain("max-md:[&_tr]:rounded-none");
+      expect(tokens).toContain("max-md:block");
     });
 
     it("turns rows into cards below md and hides the header unless focused", () => {
@@ -196,7 +250,9 @@ describe("Table", () => {
       const body = document.querySelector("tbody") as HTMLElement;
       expect(body.className).toContain("max-md:flex");
       expect(body.querySelector("tr")?.className).toContain("max-md:block");
-      expect(document.querySelector("thead")?.className).toContain("sr-only");
+      expect(document.querySelector("thead")?.className.split(/\s+/)).toContain(
+        "max-md:[&:not(:focus-within)]:sr-only",
+      );
     });
 
     it("leaves the table unchanged when stacked is off", () => {
@@ -206,6 +262,30 @@ describe("Table", () => {
       expect(cell.className).not.toContain("max-md:");
       expect(document.querySelector("table")?.getAttribute("role")).toBeNull();
       expect(document.querySelector("thead")?.className).not.toContain("max-md:");
+    });
+
+    it("keeps the state row cell a plain spanning cell when stacked is off", () => {
+      render(
+        <Table caption="x">
+          <TableBody>
+            <TableStateRow columns={3}>ไม่มีรายการ</TableStateRow>
+          </TableBody>
+        </Table>,
+      );
+      const cell = screen.getByRole("cell", { name: "ไม่มีรายการ" });
+      expect(cell.className).not.toContain("max-md:");
+      expect(cell.closest("tr")?.className).not.toContain("max-md:");
+    });
+
+    it("makes the state row cell a block below md when stacked", () => {
+      render(
+        <Table caption="x" stacked>
+          <TableBody>
+            <TableStateRow columns={3}>ไม่มีรายการ</TableStateRow>
+          </TableBody>
+        </Table>,
+      );
+      expect(screen.getByRole("cell", { name: "ไม่มีรายการ" }).className).toContain("max-md:block");
     });
   });
 

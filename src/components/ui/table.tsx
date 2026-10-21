@@ -2,6 +2,7 @@ import {
   createContext,
   useContext,
   useId,
+  useSyncExternalStore,
   type HTMLAttributes,
   type ReactNode,
   type TdHTMLAttributes,
@@ -29,6 +30,27 @@ const CELL_PADDING: Record<TableDensity, string> = {
   comfortable: "px-4 py-3",
   dense: "px-3 py-2",
 };
+
+const BELOW_MD_QUERY = "(max-width: 767.98px)";
+
+function subscribeBelowMd(onChange: () => void) {
+  if (typeof window.matchMedia !== "function") return () => {};
+  const query = window.matchMedia(BELOW_MD_QUERY);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
+function getBelowMd() {
+  return typeof window.matchMedia === "function" && window.matchMedia(BELOW_MD_QUERY).matches;
+}
+
+/**
+ * True below `md`. A stacked table cannot scroll there, so its wrapper drops the keyboard stop
+ * (an attribute cannot be responsive in CSS). The server renders the focusable form.
+ */
+function useBelowMd() {
+  return useSyncExternalStore(subscribeBelowMd, getBelowMd, () => false);
+}
 
 export interface TableProps extends Omit<HTMLAttributes<HTMLTableElement>, "children"> {
   /** Names the table for assistive technology and for the scroll region. Always required. */
@@ -72,13 +94,14 @@ export function Table({
   ...props
 }: TableProps) {
   const captionId = useId();
+  const belowMd = useBelowMd();
   return (
     <DensityContext.Provider value={density}>
       <StackedContext.Provider value={stacked}>
         {/* A scroll container must be focusable so that the keyboard can scroll it. */}
         <div
           role="region"
-          tabIndex={0}
+          tabIndex={stacked && belowMd ? undefined : 0}
           aria-labelledby={captionId}
           data-sticky-header={stickyHeader || undefined}
           data-stacked={stacked || undefined}
@@ -154,7 +177,9 @@ export function TableFooter({ className, ...props }: HTMLAttributes<HTMLTableSec
       role={stacked ? "rowgroup" : undefined}
       className={cn(
         "border-border bg-surface-muted type-label border-t",
-        stacked && "max-md:mt-3 max-md:block max-md:rounded-lg max-md:border",
+        // The footer is the card; its rows must not draw a second card inside it.
+        stacked &&
+          "max-md:mt-3 max-md:block max-md:rounded-lg max-md:border max-md:[&_tr]:rounded-none max-md:[&_tr]:border-0 max-md:[&_tr]:bg-transparent",
         className,
       )}
       {...props}
@@ -333,7 +358,11 @@ export function TableStateRow({ columns, children }: TableStateRowProps) {
   const stacked = useContext(StackedContext);
   return (
     <TableRow interactive={false} className={stacked ? "max-md:p-0" : undefined}>
-      <td colSpan={columns} role={stacked ? "cell" : undefined} className="p-0 max-md:block">
+      <td
+        colSpan={columns}
+        role={stacked ? "cell" : undefined}
+        className={cn("p-0", stacked && "max-md:block")}
+      >
         {children}
       </td>
     </TableRow>
