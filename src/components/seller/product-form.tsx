@@ -16,6 +16,7 @@ import { type FieldErrors, messageForCode, serverFieldErrors } from "./form-vali
 import { ImageSetEditor } from "./image-set-editor";
 import {
   EMPTY_PRODUCT_VALUES,
+  PRODUCT_COPY,
   PRODUCT_FIELDS,
   type ProductField,
   type ProductFormValues,
@@ -67,6 +68,8 @@ export function ProductForm({
   const [formMessage, setFormMessage] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // A picture is attached by saving its key; saving while one is in flight would lose or orphan it.
+  const [uploading, setUploading] = useState(false);
 
   const returnTo = saved ? sellerProductHref(saved.id) : SELLER_ROUTES.newProduct;
   const locked = pending || disabled;
@@ -78,7 +81,7 @@ export function ProductForm({
   function showServerFailure(response: ApiFailure) {
     if (response.code === "VALIDATION_ERROR") {
       const mapped = serverFieldErrors(response.fields, PRODUCT_FIELDS, (field, code) =>
-        messageForCode(th.seller.fieldErrors[field], code),
+        messageForCode(PRODUCT_COPY[field], code),
       );
       setErrors(mapped.errors);
       if (mapped.unplaced) setFormMessage(th.seller.common.formInvalid);
@@ -98,7 +101,7 @@ export function ProductForm({
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (locked) return;
+    if (locked || uploading) return;
     setFailure(null);
     setFormMessage(null);
     setSuccess(null);
@@ -254,10 +257,11 @@ export function ProductForm({
           disabled={locked}
           returnTo={returnTo}
           onChange={(images) => set("images", images)}
+          onBusyChange={setUploading}
         />
         {errors.imageKeys ? <Alert tone="danger">{errors.imageKeys}</Alert> : null}
         <div>
-          <Button type="submit" loading={pending} disabled={disabled}>
+          <Button type="submit" loading={pending} disabled={disabled || uploading}>
             {saved ? th.seller.products.form.save : th.seller.products.form.create}
           </Button>
         </div>

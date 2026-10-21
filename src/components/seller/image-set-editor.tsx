@@ -29,6 +29,7 @@ export function ImageSetEditor({
   disabled = false,
   returnTo,
   onChange,
+  onBusyChange,
 }: {
   label: string;
   images: readonly ImageRef[];
@@ -36,6 +37,8 @@ export function ImageSetEditor({
   disabled?: boolean;
   returnTo: string;
   onChange: (images: ImageRef[]) => void;
+  /** Called with true while an upload is in flight, so the parent can hold its save button. */
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const inputId = useId();
   const messageId = `${inputId}-message`;
@@ -57,7 +60,12 @@ export function ImageSetEditor({
     const room = single ? 1 : max - images.length;
     let next = [...images];
     setUploading(true);
+    onBusyChange?.(true);
     let uploadedAny = false;
+    // Files beyond the room left are not uploaded; say so instead of dropping them silently.
+    if (files.length > room) {
+      setProblem(fill(th.seller.images.skipped, { count: files.length - room }));
+    }
     for (const file of files.slice(0, room)) {
       if (!(UPLOAD_CONTENT_TYPES as readonly string[]).includes(file.type)) {
         setProblem(th.seller.images.wrongType);
@@ -78,6 +86,7 @@ export function ImageSetEditor({
       uploadedAny = true;
     }
     setUploading(false);
+    onBusyChange?.(false);
     if (uploadedAny) {
       onChange(next);
       setNotice(th.seller.images.uploaded);

@@ -280,3 +280,23 @@ describe("StoreForm follows the stored store (CR-99)", () => {
     ).toBe(true);
   });
 });
+
+describe("StoreForm holds save during an upload (CR-103)", () => {
+  it("disables the save button until the picture has arrived", async () => {
+    const user = userEvent.setup();
+    let finish: (value: unknown) => void = () => undefined;
+    uploadImage.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    const { container } = render(<StoreForm store={store} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, new File(["abc"], "logo.png", { type: "image/png" }));
+    const save = screen.getByRole("button", { name: th.seller.store.save }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    finish({
+      ok: true,
+      status: 201,
+      data: { key: "abc", url: "/api/files/abc", contentType: "image/png", sizeBytes: 3 },
+    });
+    await screen.findByText(th.seller.images.uploaded);
+    expect(save.disabled).toBe(false);
+  });
+});

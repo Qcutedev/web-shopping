@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fill } from "@/i18n/fill";
@@ -489,5 +489,63 @@ describe("ProductForm follows the stored product (CR-99)", () => {
     expect(
       (screen.getByLabelText(new RegExp(th.seller.products.form.title)) as HTMLInputElement).value,
     ).toBe("stored-title");
+  });
+});
+
+describe("ProductForm images and copy (CR-101, CR-103)", () => {
+  const categories = [{ id: "c1", name: "x", isActive: true }];
+
+  it("says a product description may be 5,000 characters, not 2,000", async () => {
+    const user = userEvent.setup();
+    render(<ProductForm categories={categories} />);
+    fireEvent.change(screen.getByLabelText(new RegExp(th.seller.products.form.description)), {
+      target: { value: "ก".repeat(5001) },
+    });
+    await user.click(screen.getByRole("button", { name: th.seller.products.form.create }));
+    expect(screen.getByText(th.seller.fieldErrors.productDescription.tooLong)).toBeTruthy();
+    expect(
+      screen.getByText(th.seller.fieldErrors.productDescription.tooLong).textContent,
+    ).toContain("5,000");
+  });
+
+  it("holds the save button while a picture uploads", async () => {
+    const user = userEvent.setup();
+    let finish: (value: unknown) => void = () => undefined;
+    api.uploadImage.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    const { container } = render(<ProductForm categories={categories} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, new File(["abc"], "a.png", { type: "image/png" }));
+    const save = screen.getByRole("button", {
+      name: th.seller.products.form.create,
+    }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    finish({
+      ok: true,
+      status: 201,
+      data: { key: "k1", url: "/api/files/k1", contentType: "image/png", sizeBytes: 3 },
+    });
+    await screen.findByText(th.seller.images.uploaded);
+    expect(save.disabled).toBe(false);
+  });
+
+  it("says when files beyond the limit are left out", async () => {
+    const user = userEvent.setup();
+    const images = Array.from({ length: 7 }, (_, index) => ({ key: `k${index}`, url: "/x" }));
+    api.uploadImage.mockResolvedValue({
+      ok: true,
+      status: 201,
+      data: { key: "new", url: "/api/files/new", contentType: "image/png", sizeBytes: 3 },
+    });
+    const { container } = render(
+      <ProductForm product={{ ...product, images }} categories={categories} />,
+    );
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, [
+      new File(["a"], "a.png", { type: "image/png" }),
+      new File(["b"], "b.png", { type: "image/png" }),
+      new File(["c"], "c.png", { type: "image/png" }),
+    ]);
+    expect(await screen.findByText(fill(th.seller.images.skipped, { count: 2 }))).toBeTruthy();
+    expect(api.uploadImage).toHaveBeenCalledTimes(1);
   });
 });

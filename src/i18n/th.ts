@@ -597,6 +597,8 @@ export const th = {
       uploading: "กำลังอัปโหลดรูปภาพ",
       uploaded: "อัปโหลดรูปภาพแล้ว กดบันทึกเพื่อใช้รูปนี้",
       tooBig: "ไฟล์ใหญ่เกิน 5 MB",
+      // {count} is the number of chosen files that were left out because the limit is reached.
+      skipped: "เกินจำนวนที่เพิ่มได้ จึงไม่รับอีก {count} ไฟล์",
       wrongType: "รองรับเฉพาะไฟล์ JPEG, PNG และ WebP",
       empty: "ยังไม่มีรูปภาพ",
       listLabel: "รูปภาพ",
@@ -717,6 +719,12 @@ export const th = {
       description: {
         required: "กรุณากรอกรายละเอียด",
         tooLong: "รายละเอียดต้องไม่เกิน 2,000 ตัวอักษร",
+        invalid: "รายละเอียดมีอักขระที่ไม่รองรับ",
+      },
+      // The product description allows 5,000 characters (API_CONTRACTS 5.7.2.1).
+      productDescription: {
+        required: "กรุณากรอกรายละเอียด",
+        tooLong: "รายละเอียดสินค้าต้องไม่เกิน 5,000 ตัวอักษร",
         invalid: "รายละเอียดมีอักขระที่ไม่รองรับ",
       },
       contactPhone: {

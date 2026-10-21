@@ -96,7 +96,12 @@ export function parseIntegerInput(text: string, signed = false): IntegerInput {
   return { ok: true, value: Number(trimmed) };
 }
 
-const COPY = th.seller.fieldErrors;
+/** Messages of the product form: its description has its own limit (5,000, not the store's 2,000). */
+export const PRODUCT_COPY = {
+  ...th.seller.fieldErrors,
+  description: th.seller.fieldErrors.productDescription,
+};
+const COPY = PRODUCT_COPY;
 
 export type ProductValidation<T> =
   { ok: true; body: T } | { ok: false; errors: FieldErrors<ProductField>; unplaced: boolean };

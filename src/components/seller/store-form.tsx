@@ -83,12 +83,14 @@ export function StoreForm({ store }: { store: SellerStoreDto }) {
   const [formMessage, setFormMessage] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // A logo is attached by saving its key; saving while one is in flight would lose or orphan it.
+  const [uploading, setUploading] = useState(false);
 
   const suspended = saved.status === "SUSPENDED";
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (pending || suspended) return;
+    if (pending || suspended || uploading) return;
     setFailure(null);
     setFormMessage(null);
     setSuccess(null);
@@ -203,10 +205,11 @@ export function StoreForm({ store }: { store: SellerStoreDto }) {
           disabled={pending || suspended}
           returnTo={SELLER_ROUTES.store}
           onChange={(images) => setLogo(images[0] ?? null)}
+          onBusyChange={setUploading}
         />
         {errors.logoKey ? <Alert tone="danger">{th.seller.common.formInvalid}</Alert> : null}
         <div className="flex flex-wrap gap-3">
-          <Button type="submit" loading={pending} disabled={suspended}>
+          <Button type="submit" loading={pending} disabled={suspended || uploading}>
             {th.seller.store.save}
           </Button>
           {saved.status === "APPROVED" ? (

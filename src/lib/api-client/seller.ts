@@ -17,17 +17,10 @@ import type {
   SubmitApplicationBody,
   UpdateStoreBody,
 } from "@/modules/sellers/schema";
+import type { UploadDto } from "@/modules/uploads/schema";
 import { type ApiResult, apiRequest, apiUploadFile } from "./http";
 
 export type Fetcher = typeof fetch;
-
-/** `data` of `POST /seller/uploads` (API_CONTRACTS 5.8). */
-export interface UploadedImage {
-  key: string;
-  url: string;
-  contentType: string;
-  sizeBytes: number;
-}
 
 function productPath(id: string, suffix = ""): string {
   return `/api/v1/seller/products/${encodeURIComponent(id)}${suffix}`;
@@ -51,8 +44,8 @@ export function updateStore(
   return apiRequest<SellerStoreDto>("/api/v1/seller/store", { method: "PATCH", body, fetchImpl });
 }
 
-export function uploadImage(file: File, fetchImpl?: Fetcher): Promise<ApiResult<UploadedImage>> {
-  return apiUploadFile<UploadedImage>("/api/v1/seller/uploads", file, fetchImpl);
+export function uploadImage(file: File, fetchImpl?: Fetcher): Promise<ApiResult<UploadDto>> {
+  return apiUploadFile<UploadDto>("/api/v1/seller/uploads", file, fetchImpl);
 }
 
 export function createProduct(
