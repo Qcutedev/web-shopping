@@ -1,4 +1,4 @@
-﻿export type SearchParams = Record<string, string | string[] | undefined>;
+export type SearchParams = Record<string, string | string[] | undefined>;
 
 /**
  * Address-bar parameters as URLSearchParams. An empty value is dropped: a GET form sends

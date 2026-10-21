@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { orderListQueryFrom, ordersHref } from "./orders-query";
 import { productListQueryFrom, productsHref } from "./products-query";
 

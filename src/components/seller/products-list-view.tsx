@@ -19,6 +19,7 @@ import {
   PRODUCT_STATUSES,
   type SellerProductDto,
 } from "@/modules/inventory/schema";
+import { formatCount } from "./format-count";
 import { hasProductFilter, productsHref } from "./products-query";
 import { SELLER_ROUTES, sellerProductHref } from "./routes";
 import { ModerationBadge, ProductStatusBadge } from "./status-badges";
@@ -128,7 +129,7 @@ function ProductRow({ product }: { product: SellerProductDto }) {
           <dt className="sr-only">{th.seller.products.row.stock}</dt>
           <dd className="type-small text-foreground-secondary">
             {th.seller.products.row.stock}:{" "}
-            {fill(th.seller.products.row.stockCount, { count: product.stock })}
+            {fill(th.seller.products.row.stockCount, { count: formatCount(product.stock) })}
           </dd>
         </div>
       </dl>
@@ -162,7 +163,7 @@ export function ProductsListView({
     body = (
       <>
         <p role="status" className="type-small text-foreground-secondary">
-          {fill(th.seller.products.count, { count: total })}
+          {fill(th.seller.products.count, { count: formatCount(total) })}
         </p>
         <ul aria-label={th.seller.products.listLabel} className="flex flex-col gap-3">
           {items.map((product) => (

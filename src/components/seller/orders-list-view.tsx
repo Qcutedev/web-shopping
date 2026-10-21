@@ -16,6 +16,7 @@ import {
 import { FULFILMENT_STATUSES } from "@/modules/orders/state";
 import { ordersHref } from "./orders-query";
 import { SELLER_ROUTES, sellerOrderHref } from "./routes";
+import { formatCount } from "./format-count";
 import { FulfilmentBadge, PaymentBadge } from "./status-badges";
 
 function FilterForm({ query }: { query: ListSellerOrdersQuery }) {
@@ -68,8 +69,9 @@ function OrderRow({ order }: { order: SellerOrderListItemDto }) {
         <PaymentBadge status={order.paymentStatus} />
       </div>
       <p className="type-small text-foreground-secondary">
-        {th.seller.orders.row.placedAt} {formatDateTime(order.createdAt)} {" · "}
-        {fill(th.seller.orders.row.itemCount, { count: order.items.length })}
+        {th.seller.orders.row.placedAt} {formatDateTime(order.createdAt)}{" "}
+        {th.seller.common.dotSeparator}
+        {fill(th.seller.orders.row.itemCount, { count: formatCount(order.items.length) })}
       </p>
       {order.cancellationKind !== null ? (
         <p className="type-small text-danger">{th.seller.orders.row.cancelledNote}</p>
@@ -126,7 +128,7 @@ export function OrdersListView({
     body = (
       <>
         <p role="status" className="type-small text-foreground-secondary">
-          {fill(th.seller.orders.count, { count: total })}
+          {fill(th.seller.orders.count, { count: formatCount(total) })}
         </p>
         <ul aria-label={th.seller.orders.listLabel} className="flex flex-col gap-3">
           {items.map((order) => (

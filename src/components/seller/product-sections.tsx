@@ -1,6 +1,8 @@
 import { listCategories } from "@/modules/catalog";
 import { MAX_PAGE_SIZE } from "@/modules/catalog/schema";
 import { getOwnProduct } from "@/modules/inventory";
+import { productIdParamsSchema } from "@/modules/inventory/schema";
+import { notFound } from "@/server/errors";
 import { SellerNotFoundState } from "./load-state";
 import { ProductDetailView } from "./product-detail-view";
 import { type CategoryOption, ProductForm } from "./product-form";
@@ -41,8 +43,11 @@ export async function ProductDetailSection({
   return renderForSeller(
     returnTo,
     async (actor) => {
+      // An id that cannot be one (NUL, too long) is the same not-found as an unknown id.
+      const parsed = productIdParamsSchema.safeParse({ id });
+      if (!parsed.success) throw notFound();
       const [product, categories] = await Promise.all([
-        getOwnProduct(actor, id),
+        getOwnProduct(actor, parsed.data.id),
         loadCategoryOptions(),
       ]);
       return (

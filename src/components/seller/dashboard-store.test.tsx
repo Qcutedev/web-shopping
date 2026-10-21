@@ -300,3 +300,18 @@ describe("StoreForm holds save during an upload (CR-103)", () => {
     expect(save.disabled).toBe(false);
   });
 });
+
+describe("DashboardView tiles (CR-105)", () => {
+  it("renders the counts as stat cards with grouped thousands, each linking to its list", () => {
+    render(
+      <DashboardView
+        summary={{ ...summary, lowStockCount: 1234 }}
+        store={{ name: "x", status: "APPROVED", isSample: false }}
+      />,
+    );
+    const link = screen.getByText(th.seller.dashboard.lowStock).closest("a");
+    expect(link?.getAttribute("href")).toBe("/seller/products?lowStock=true");
+    expect(within(link as HTMLElement).getByText("1,234")).toBeTruthy();
+    expect(link?.closest("li")).toBeTruthy();
+  });
+});

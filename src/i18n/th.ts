@@ -303,6 +303,9 @@ export const th = {
       cancel: "ยกเลิก",
       edit: "แก้ไข",
       notProvided: "ยังไม่ได้ระบุ",
+      // Separators between figures in a line of text (3 ×, date · count).
+      timesSign: "×",
+      dotSeparator: "·",
       backToStore: "กลับไปที่ภาพรวมร้านค้า",
       formInvalid: "กรุณาตรวจสอบข้อมูลในช่องที่มีข้อความแจ้งเตือน",
     },

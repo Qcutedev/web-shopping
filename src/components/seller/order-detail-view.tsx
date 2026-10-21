@@ -76,7 +76,7 @@ export function OrderDetailView({ order }: { order: SellerOrderViewDto }) {
                   {detail.sku}: <UserName>{item.productSku}</UserName>
                 </p>
                 <p className="type-small text-foreground-secondary">
-                  <Price satang={item.unitPriceSatang} /> {" × "}
+                  <Price satang={item.unitPriceSatang} /> {th.seller.common.timesSign}
                   {fill(detail.pieces, { count: item.quantity })}
                 </p>
               </div>

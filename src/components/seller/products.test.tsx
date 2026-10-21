@@ -549,3 +549,24 @@ describe("ProductForm images and copy (CR-101, CR-103)", () => {
     expect(api.uploadImage).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("product page ids (CR-106) and counts (CR-105)", () => {
+  it("shows not-found for an id that cannot be one, without calling the service", async () => {
+    getActor.mockResolvedValue(seller);
+    render(
+      await ProductDetailSection({
+        params: Promise.resolve({ id: "x".repeat(201) }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+    expect(screen.getByText(th.seller.guard.notFoundTitle)).toBeTruthy();
+    expect(getOwnProduct).not.toHaveBeenCalled();
+  });
+
+  it("groups thousands in the stock panel", () => {
+    render(<StockPanel product={{ id: "p1", stock: 12345 }} />);
+    expect(
+      screen.getByText(fill(th.seller.products.stock.currentCount, { count: "12,345" })),
+    ).toBeTruthy();
+  });
+});

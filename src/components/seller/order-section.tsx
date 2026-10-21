@@ -1,5 +1,7 @@
 import { th } from "@/i18n/th";
 import { getOwnSellerOrder } from "@/modules/orders";
+import { sellerOrderIdParamsSchema } from "@/modules/orders/seller-schema";
+import { notFound } from "@/server/errors";
 import { SellerNotFoundState } from "./load-state";
 import { OrderDetailView } from "./order-detail-view";
 import { SELLER_ROUTES, sellerOrderHref } from "./routes";
@@ -14,7 +16,12 @@ export async function OrderSection({ params }: { params: Promise<{ id: string }>
   const { id } = await params;
   return renderForSeller(
     sellerOrderHref(id),
-    async (actor) => <OrderDetailView order={await getOwnSellerOrder(actor, id)} />,
+    async (actor) => {
+      // An id that cannot be one (NUL, too long) is the same not-found as an unknown id.
+      const parsed = sellerOrderIdParamsSchema.safeParse({ id });
+      if (!parsed.success) throw notFound();
+      return <OrderDetailView order={await getOwnSellerOrder(actor, parsed.data.id)} />;
+    },
     {
       notFound: (
         <SellerNotFoundState

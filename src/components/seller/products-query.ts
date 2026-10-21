@@ -1,4 +1,4 @@
-﻿import { DEFAULT_PAGE_SIZE } from "@/modules/catalog/schema";
+import { DEFAULT_PAGE_SIZE } from "@/modules/catalog/schema";
 import {
   type ListSellerProductsQuery,
   listSellerProductsQuerySchema,

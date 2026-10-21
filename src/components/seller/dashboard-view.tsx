@@ -4,29 +4,20 @@ import { Card, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { NoticeLabel } from "@/components/ui/notice-label";
 import { Price } from "@/components/ui/price";
+import { StatCard } from "@/components/ui/stat-card";
 import { USER_NAME_CONTAINER_CLASS, UserName } from "@/components/user-name";
 import { th } from "@/i18n/th";
 import type { SellerSummaryDto } from "@/modules/orders/seller-schema";
 import { FULFILMENT_STATUSES } from "@/modules/orders/state";
 import type { SellerStoreDto } from "@/modules/sellers/schema";
 import { PRODUCT_STATUSES } from "@/modules/inventory/state";
+import { formatCount } from "./format-count";
 import { SELLER_ROUTES } from "./routes";
 import { StoreStatusBadge } from "./status-badges";
 
 function Tile({ href, label, value }: { href: string; label: string; value: number }) {
-  return (
-    <li>
-      <Link
-        href={href}
-        className="border-border hover:bg-surface-muted focus-ring flex h-full flex-col gap-1 rounded-lg border p-4 transition-colors duration-150"
-      >
-        <span className="type-small text-foreground-secondary">{label}</span>
-        <span className="type-section-title tabular-nums">{value.toLocaleString("th-TH")}</span>
-      </Link>
-    </li>
-  );
+  return <StatCard as="li" href={href} label={label} value={formatCount(value)} />;
 }
-
 /**
  * The seller dashboard (REQ-S-03). Every figure is a count or a sum the server computed from the
  * store's rows; nothing here adds, estimates, or filters. Each figure links to the list it counts.

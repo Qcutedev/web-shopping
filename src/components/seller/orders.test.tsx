@@ -1,6 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fill } from "@/i18n/fill";
 import { th } from "@/i18n/th";
 import { formatSatang } from "@/lib/format";
 import { notFound } from "@/server/errors";
@@ -357,5 +358,27 @@ describe("OrderStatusPanel follows the stored status (CR-98)", () => {
     rerender(<OrderStatusPanel orderId="so1" status="SHIPPED" />);
     expect(screen.queryByRole("button", { name: th.seller.orders.actions.confirm })).toBeNull();
     expect(screen.getByRole("button", { name: th.seller.orders.actions.deliver })).toBeTruthy();
+  });
+});
+
+describe("order page ids (CR-106) and display (CR-105)", () => {
+  it("shows not-found for an id that cannot be one, without calling the service", async () => {
+    getActor.mockResolvedValue(seller);
+    render(await OrderSection({ params: Promise.resolve({ id: "x".repeat(201) }) }));
+    expect(screen.getByText(th.seller.guard.notFoundTitle)).toBeTruthy();
+    expect(getOwnSellerOrder).not.toHaveBeenCalled();
+  });
+
+  it("groups thousands in the order count and uses the shared separators", async () => {
+    getActor.mockResolvedValue(seller);
+    listOwnSellerOrders.mockResolvedValue({
+      items: [listItem],
+      page: 1,
+      pageSize: 20,
+      total: 1234,
+    });
+    render(await OrdersSection({ searchParams: Promise.resolve({}) }));
+    expect(screen.getByText(fill(th.seller.orders.count, { count: "1,234" }))).toBeTruthy();
+    expect(screen.getByText(new RegExp(th.seller.common.dotSeparator))).toBeTruthy();
   });
 });

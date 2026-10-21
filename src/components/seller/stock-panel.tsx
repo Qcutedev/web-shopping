@@ -10,6 +10,7 @@ import { fill } from "@/i18n/fill";
 import { th } from "@/i18n/th";
 import { changeStock } from "@/lib/api-client/seller";
 import { type StockBody, stockBodySchema } from "@/modules/inventory/schema";
+import { formatCount } from "./format-count";
 import { parseIntegerInput } from "./product-form-model";
 import { SellerRequestError, type SellerFailure } from "./request-error";
 import { sellerProductHref } from "./routes";
@@ -81,7 +82,9 @@ export function StockPanel({
       </CardTitle>
       <p className="type-body mt-2" role="status">
         {th.seller.products.stock.current}:{" "}
-        <strong>{fill(th.seller.products.stock.currentCount, { count: stock })}</strong>
+        <strong>
+          {fill(th.seller.products.stock.currentCount, { count: formatCount(stock) })}
+        </strong>
       </p>
       <p className="type-small text-foreground-muted">{th.seller.products.stock.note}</p>
       {notice ? (
