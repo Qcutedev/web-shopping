@@ -196,6 +196,10 @@ For `POST /seller/uploads` (kind K5) and the file-serving route (kind K1). Fixtu
 | Served file | The recorded image content type and `nosniff`; unknown key gives 404; a traversal key gives 404 and reads nothing outside the storage directory |
 | Rate limit | Requests over the documented limit get 429 |
 
+### Seller isolation (T-045)
+
+Built in `tests/integration/seller-isolation/`. `endpoints.test.ts` is the matrix over every seller route: a foreign id answers 404 like a missing id, leaks nothing, changes nothing; a store named in query, body, header, or cookie does not widen a read or redirect a write; callers without the SELLER role are refused before the lookup. It includes `POST /seller/uploads`: anonymous 401, customer and admin 403, no `Upload` row and no file written, a seller's identical request accepted as control; and a `storeId` form field naming another store never makes the upload belong to that store (the test accepts either ignoring the field or refusing the request, which is question T4). `gaps.test.ts` holds three paths the matrix missed (security review, 2026-10-21): `DELIVERED` and `SHIPPED` on a foreign order from the one state where the move is valid, and the store scope of `lowStockCount` and `soldOutCount` in `GET /seller/summary`. A copy of the same cases stays in `tests/security/t045-isolation-gaps.itest.ts`, which security owns and qa may not edit; security may delete it.
+
 ## Concurrency tests (T-033)
 
 These run against the real database with real parallel connections and committed transactions; nothing is mocked except the payment provider, which is replaced through the provider interface. Each parallel test is repeated enough times (count fixed in T-033 and reported) to make a lost race likely to show, and each asserts on database rows afterwards, not only on responses.

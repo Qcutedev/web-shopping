@@ -15,10 +15,16 @@
  * Real PostgreSQL, real session cookies, route modules called in process. Every case builds its
  * own users and stores, because the database is emptied once per file, not per case.
  */
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { GET as getProductRoute } from "@/app/api/v1/seller/products/[id]/route";
 import { GET as getStoreRoute, PATCH as patchStoreRoute } from "@/app/api/v1/seller/store/route";
+import { POST as postUploadRoute } from "@/app/api/v1/seller/uploads/route";
+import { jpegBytes, multipartBody, multipartContentType } from "@/modules/uploads/test-fixtures";
 import { db } from "@/server/db";
 
 import {
@@ -31,13 +37,22 @@ import {
   MISSING_ID,
 } from "../../helpers/factories";
 import { diffSnapshots, snapshotDatabase } from "../../helpers/snapshot";
-import { APP_URL, resetProcessRateLimiter, stubAuthEnvironment } from "../auth/support";
+import { APP_ORIGIN, APP_URL, resetProcessRateLimiter, stubAuthEnvironment } from "../auth/support";
 import { call as productCall, request, type CallOptions } from "../inventory/support";
 import { call as orderCall } from "../seller-orders/support";
 import { errorCode, json, signedIn, type SignedIn } from "../sellers/support";
 
-beforeAll(() => {
+let uploadRoot: string;
+
+beforeAll(async () => {
   stubAuthEnvironment();
+  uploadRoot = await mkdtemp(join(tmpdir(), "t045-uploads-"));
+  process.env["UPLOAD_DIR"] = join(uploadRoot, "uploads");
+});
+
+afterAll(async () => {
+  delete process.env["UPLOAD_DIR"];
+  await rm(uploadRoot, { recursive: true, force: true });
 });
 
 beforeEach(() => {
@@ -211,6 +226,36 @@ async function errorOf(response: Response): Promise<{ status: number; error: unk
   return { status: response.status, error: { code, message, details } };
 }
 
+/** Every file under the upload root, as relative paths. */
+async function filesUnder(dir: string): Promise<string[]> {
+  try {
+    const entries = await readdir(dir, { recursive: true, withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isFile())
+      .map((entry) => join(entry.parentPath, entry.name).slice(dir.length + 1))
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+/** A multipart upload of a small JPEG; `fields` are extra form fields (same boundary). */
+function uploadRequest(cookie: string | undefined, fields: Record<string, string> = {}): Request {
+  const headers = new Headers({ origin: APP_ORIGIN, "content-type": multipartContentType() });
+  if (cookie !== undefined) headers.set("cookie", cookie);
+  return new Request(`${APP_URL}/api/v1/seller/uploads`, {
+    method: "POST",
+    headers,
+    body: multipartBody([
+      { name: "file", filename: "photo.jpg", contentType: "image/jpeg", bytes: jpegBytes() },
+      ...Object.entries(fields).map(([name, value]) => ({
+        name,
+        bytes: new TextEncoder().encode(value),
+      })),
+    ]),
+    duplex: "half",
+  } as RequestInit);
+}
 function expectNoSecrets(text: string, secrets: readonly string[]): void {
   for (const secret of secrets) expect(text).not.toContain(secret);
 }
@@ -746,6 +791,47 @@ describe("callers without the SELLER role", () => {
         expect(response.status, `${caller} ${name}`).toBe(status);
       }
       await expectUnchanged(before);
+    }
+  });
+
+  it("POST /seller/uploads refuses anonymous, customer, and admin callers, stores no file, writes no row", async () => {
+    const customer = await signedIn("CUSTOMER");
+    const admin = await signedIn("ADMIN");
+    for (const [caller, cookie, status, code] of [
+      ["anonymous", undefined, 401, "UNAUTHENTICATED"],
+      ["customer", customer.cookie, 403, "FORBIDDEN"],
+      ["admin", admin.cookie, 403, "FORBIDDEN"],
+    ] as const) {
+      const before = await snapshot();
+      const response = await postUploadRoute(uploadRequest(cookie));
+      expect(response.status, caller).toBe(status);
+      expect(await errorCode(response), caller).toBe(code);
+      await expectUnchanged(before);
+      expect(await filesUnder(uploadRoot), caller).toEqual([]);
+    }
+    // Control: a seller's identical request is accepted, so the refusals above are about the role.
+    const sellerWho = await seller();
+    const accepted = await postUploadRoute(uploadRequest(sellerWho.cookie));
+    expect(accepted.status).toBe(201);
+    expect(await db.upload.count({ where: { storeId: sellerWho.storeId } })).toBe(1);
+  });
+
+  it("POST /seller/uploads stores the file for the session's store even when the form names another store", async () => {
+    const attacker = await seller();
+    const victim = await seller();
+    const response = await postUploadRoute(
+      uploadRequest(attacker.cookie, { storeId: victim.storeId }),
+    );
+    // Either the field is ignored (201, owned by the attacker) or refused (4xx, nothing stored).
+    if (response.status === 201) {
+      expect(await db.upload.count({ where: { storeId: victim.storeId } })).toBe(0);
+      expect(await db.upload.count({ where: { storeId: attacker.storeId } })).toBe(1);
+    } else {
+      expect(response.status).toBeGreaterThanOrEqual(400);
+      expect(response.status).toBeLessThan(500);
+      expect(
+        await db.upload.count({ where: { storeId: { in: [attacker.storeId, victim.storeId] } } }),
+      ).toBe(0);
     }
   });
 });
