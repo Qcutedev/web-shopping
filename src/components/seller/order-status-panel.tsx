@@ -24,6 +24,7 @@ import {
 } from "./form-validation";
 import { SellerRequestError, type SellerFailure } from "./request-error";
 import { sellerOrderHref } from "./routes";
+import { useSyncedState } from "./use-synced-state";
 
 const SHIP_FIELDS = ["carrierName", "trackingNumber"] as const;
 type ShipField = (typeof SHIP_FIELDS)[number];
@@ -51,13 +52,15 @@ const DONE_MESSAGE: Record<SellerTargetStatus, string> = {
  */
 export function OrderStatusPanel({
   orderId,
-  status: initialStatus,
+  status: serverStatus,
 }: {
   orderId: string;
   status: FulfilmentStatusValue;
 }) {
   const router = useRouter();
-  const [status, setStatus] = useState(initialStatus);
+  // Follows the stored status the page passes in, so a refresh after a refused move (409) or a
+  // missing order replaces the moves offered instead of keeping the stale ones.
+  const [status, setStatus] = useSyncedState(serverStatus);
   const [pending, setPending] = useState<SellerTargetStatus | null>(null);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   const [carrierName, setCarrierName] = useState("");

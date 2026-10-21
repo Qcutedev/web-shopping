@@ -269,3 +269,14 @@ describe("StoreSection and StoreForm", () => {
     expect(uploadImage).not.toHaveBeenCalled();
   });
 });
+
+describe("StoreForm follows the stored store (CR-99)", () => {
+  it("shows the form read-only when the page passes a suspended store", () => {
+    const { rerender } = render(<StoreForm store={store} />);
+    rerender(<StoreForm store={{ ...store, status: "SUSPENDED" }} />);
+    expect(screen.getByText(th.seller.store.suspendedNote)).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: th.seller.store.save }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+});

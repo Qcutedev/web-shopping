@@ -13,6 +13,7 @@ import { type StockBody, stockBodySchema } from "@/modules/inventory/schema";
 import { parseIntegerInput } from "./product-form-model";
 import { SellerRequestError, type SellerFailure } from "./request-error";
 import { sellerProductHref } from "./routes";
+import { useSyncedState } from "./use-synced-state";
 
 type Mode = "set" | "adjust";
 
@@ -29,7 +30,7 @@ export function StockPanel({
   disabled?: boolean;
 }) {
   const router = useRouter();
-  const [stock, setStock] = useState(product.stock);
+  const [stock, setStock] = useSyncedState(product.stock);
   const [text, setText] = useState<Record<Mode, string>>({ set: "", adjust: "" });
   const [errors, setErrors] = useState<Partial<Record<Mode, string>>>({});
   const [pending, setPending] = useState<Mode | null>(null);

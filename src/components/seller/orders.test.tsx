@@ -345,3 +345,17 @@ describe("OrderStatusPanel", () => {
     ).toBe(false);
   });
 });
+
+describe("OrderStatusPanel follows the stored status (CR-98)", () => {
+  it("replaces the moves offered when the page passes a new status after a 409", async () => {
+    const user = userEvent.setup();
+    changeOrderStatus.mockResolvedValue(failure("INVALID_STATE_TRANSITION", 409));
+    const { rerender } = render(<OrderStatusPanel orderId="so1" status="PENDING" />);
+    await user.click(screen.getByRole("button", { name: th.seller.orders.actions.confirm }));
+    await screen.findByText(th.seller.errors.invalidTransition);
+    // The refresh brings the order as stored: it was already shipped from another tab.
+    rerender(<OrderStatusPanel orderId="so1" status="SHIPPED" />);
+    expect(screen.queryByRole("button", { name: th.seller.orders.actions.confirm })).toBeNull();
+    expect(screen.getByRole("button", { name: th.seller.orders.actions.deliver })).toBeTruthy();
+  });
+});

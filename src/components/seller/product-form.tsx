@@ -54,6 +54,14 @@ export function ProductForm({
   const [values, setValues] = useState<ProductFormValues>(
     product ? valuesOfProduct(product) : EMPTY_PRODUCT_VALUES,
   );
+  // The product the page passes in wins when it changes (after a refresh).
+  const productKey = JSON.stringify(product ?? null);
+  const [seenProductKey, setSeenProductKey] = useState(productKey);
+  if (seenProductKey !== productKey) {
+    setSeenProductKey(productKey);
+    setSaved(product);
+    setValues(product ? valuesOfProduct(product) : EMPTY_PRODUCT_VALUES);
+  }
   const [errors, setErrors] = useState<FieldErrors<ProductField>>({});
   const [failure, setFailure] = useState<SellerFailure | null>(null);
   const [formMessage, setFormMessage] = useState<string | null>(null);

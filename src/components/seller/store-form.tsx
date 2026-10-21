@@ -66,6 +66,18 @@ export function StoreForm({ store }: { store: SellerStoreDto }) {
   const [description, setDescription] = useState(store.description ?? "");
   const [contactPhone, setContactPhone] = useState(store.contactPhone);
   const [logo, setLogo] = useState<ImageRef | null>(store.logo);
+  // The store the page passes in wins when it changes (after a refresh), so a status moved by
+  // the server (suspended, or no longer approved) is not hidden behind the copy kept here.
+  const storeKey = JSON.stringify(store);
+  const [seenStoreKey, setSeenStoreKey] = useState(storeKey);
+  if (seenStoreKey !== storeKey) {
+    setSeenStoreKey(storeKey);
+    setSaved(store);
+    setName(store.name);
+    setDescription(store.description ?? "");
+    setContactPhone(store.contactPhone);
+    setLogo(store.logo);
+  }
   const [errors, setErrors] = useState<FieldErrors<Field>>({});
   const [failure, setFailure] = useState<SellerFailure | null>(null);
   const [formMessage, setFormMessage] = useState<string | null>(null);

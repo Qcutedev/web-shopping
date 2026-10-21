@@ -1,6 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fill } from "@/i18n/fill";
 import { th } from "@/i18n/th";
 import { notFound } from "@/server/errors";
 
@@ -60,6 +61,7 @@ vi.mock("@/lib/api-client/seller", () => ({
 }));
 
 import { ProductActions } from "./product-actions";
+import { ProductForm } from "./product-form";
 import { NewProductSection, ProductDetailSection } from "./product-sections";
 import { ProductsSection } from "./products-section";
 import { StockPanel } from "./stock-panel";
@@ -464,5 +466,28 @@ describe("StockPanel", () => {
         }) as HTMLButtonElement
       ).disabled,
     ).toBe(true);
+  });
+});
+
+describe("StockPanel follows the stored stock (CR-99)", () => {
+  it("shows the new stock when the page passes a new value", () => {
+    const { rerender } = render(<StockPanel product={{ id: "p1", stock: 4 }} />);
+    rerender(<StockPanel product={{ id: "p1", stock: 9 }} />);
+    expect(
+      screen.getByText(fill(th.seller.products.stock.currentCount, { count: 9 })),
+    ).toBeTruthy();
+  });
+});
+
+describe("ProductForm follows the stored product (CR-99)", () => {
+  it("shows the stored title when the page passes a changed product", () => {
+    const categories = [{ id: "c1", name: "x", isActive: true }];
+    const { rerender } = render(<ProductForm product={product} categories={categories} />);
+    rerender(
+      <ProductForm product={{ ...product, title: "stored-title" }} categories={categories} />,
+    );
+    expect(
+      (screen.getByLabelText(new RegExp(th.seller.products.form.title)) as HTMLInputElement).value,
+    ).toBe("stored-title");
   });
 });
