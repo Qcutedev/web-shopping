@@ -59,3 +59,15 @@ Verdict: CHANGES REQUIRED (CR-114 blocking). Checks by reviewer: vitest on table
 - **CR-120 (Low, product decision)** `store-form.tsx:86-92`, `dashboard-store.test.tsx:313-323`: a form locked by a refresh (SUSPENDED, archived) keeps unsaved typed values in disabled fields. Decide: re-seed to stored values on lock, or keep and record why. Owner question if unsure.
 
 Checked and correct: re-seed logic follows the editable fields only; excluded fields are right; image keys are stable; default Table path unchanged apart from CR-114; per-cell label is aria-hidden so no double announcement; tailwind-merge resolves fine.
+
+## Re-review of 41dda4e and c829e6c (ninetieth session)
+
+Verdict: APPROVE. CR-114 to CR-119 hold. No blocking finding. Checks by reviewer: vitest on table, products, dashboard-store tests 83 passed; eslint on the 5 changed sources and `pnpm typecheck` exit 0. Not run: browser, `pnpm format:check`, `pnpm verify`; "test fails without the fix" checked by reading, not by reverting.
+
+- **CR-121 (Low, ui-ux-design)** `src/components/ui/table.tsx:34`: `BELOW_MD_QUERY` is `(max-width: 767.98px)`; Tailwind `max-md:` is `48rem`. With a smaller default font the table scrolls but has lost its tab stop (WCAG 2.1.1). Fix: `(width < 48rem)`.
+- **CR-122 (Low, frontend)** `src/components/seller/editable-key.ts:9`: docstring says "unit tested", no `editable-key.test.ts` exists. Add one or drop the claim.
+- **CR-123 (Low, ui-ux-design)** `table.test.tsx:241,245`: the footer-row `max-md:block` assertion passes with or without the CR-117 fix. Remove or replace.
+- **CR-124 (Low, frontend/qa)** `products.test.tsx:562`, `dashboard-store.test.tsx:326`: no case for save to K1, type, refresh with K2 (must re-seed).
+- **CR-125 (Info, ui-ux-design)** `table.tsx:97`: `useBelowMd()` adds a matchMedia listener for every Table, also unstacked ones.
+- **CR-126 (Info, frontend)** `product-form.tsx:66-80`, `store-form.tsx`: `seenEditableKey` and `ownKey` overlap; could merge. Behaviour correct.
+- **CR-127 (Info)** CR-118 Playwright half (qa) and CR-120 (product decision) remain open.
