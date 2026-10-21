@@ -263,6 +263,20 @@ Not yet written or not marked here: CC-08, CC-09, CC-10, CC-11, CC-13, CC-14.
 
 REQ-N-02 names three widths, and all three are used: **360, 768, and 1280 pixels**. Journeys 1 to 9 and 11 to 16 run at 1280. Journey 10 repeats journeys 2 to 5 at 360 and at 768. At every width the journey also asserts that the page does not scroll sideways and that the controls it uses are reachable without zooming.
 
+### Built so far: stacked Table check (CR-118)
+
+The first Playwright part exists and ran: `e2e/stacked-table.spec.ts`, 19 cases, Chromium, against the seller products page (the stacked `Table` of `src/components/ui/table.tsx`, T-044 review finding CR-118, fix in commit 41dda4e). It is not one of the journeys above.
+
+| Width | What is asserted |
+| --- | --- |
+| 360 and 767 (below `md`) | The wrapper has no `tabindex` and Tab never lands on it; neither page nor wrapper scrolls sideways; the header row is clipped (box 1 px or less) yet its four column headers stay in the accessibility tree; a real `<button>` placed in a header cell and focused makes the header row painted, and blurring hides it again; the cell shows its column name (`aria-hidden`); body rows are separate full-width blocks stacked vertically |
+| 768 and 1280 (`md` and wider) | The wrapper has `tabindex="0"` and an `aria-labelledby`, and Tab reaches it; the header row is painted; per-cell labels are hidden; cells of a row sit side by side |
+| 1280 to 360 to 1280 | The wrapper's keyboard stop is removed and restored as the viewport crosses `md` |
+
+Limits, stated plainly: no page uses a sortable stacked column yet, so the sort-button case injects a plain button into the real header cell and tests the CSS rule `:not(:focus-within)`, not the sort logic (that is `table.test.tsx`). Only Chromium. Only the products table is visited; the orders table uses the same component and is not visited. Mutation check run locally and restored: forcing `tabIndex={0}` fails the 360 wrapper case; changing the header class to `max-md:sr-only` fails the focus case; removing it fails the hidden and focus cases.
+
+How it runs: `pnpm test:e2e` (`playwright.config.ts`). It starts its own `next dev` on port 3100 and uses its own database `marketplace_e2e` on the db-test container (URL derived from `DATABASE_URL_TEST`, only the database name replaced). `e2e/global-setup.ts` runs `prisma migrate deploy`, empties every table, registers a seller through the real sign-up endpoint, promotes it and adds a store and three products through `tests/e2e-support/database.ts` (under `tests/` because only `tests/**` may import the database layer), signs in through the real endpoint, and saves the cookie to `e2e/.auth/seller.json` (git-ignored). Needs: `docker compose up -d db-test`, `pnpm exec playwright install chromium`. The remaining journeys, CI wiring, and the production-build variant are still T-060.
+
 ### Accessibility checks
 
 REQ-N-03 asks for WCAG 2.1 AA contrast, keyboard operability, and labelled forms. What the suite checks, and what it does not:
