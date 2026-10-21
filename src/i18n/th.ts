@@ -286,4 +286,137 @@ export const th = {
     // Shown above a form when the server refused it and no single field is to blame.
     formInvalid: "กรุณาตรวจสอบข้อมูลในช่องที่มีข้อความแจ้งเตือน",
   },
+  // Proposals (T-044 seller pages): wording written by the frontend agent, not yet approved by the
+  // owner. Status labels follow the status badge mapping of docs/DESIGN_SYSTEM.md. A name in
+  // braces is a placeholder filled with `fill`.
+  seller: {
+    navLabel: "เมนูร้านค้าของฉัน",
+    loading: "กำลังโหลด",
+    nav: {
+      dashboard: "ภาพรวม",
+      store: "ตั้งค่าร้านค้า",
+      products: "สินค้า",
+      orders: "คำสั่งซื้อ",
+    },
+    common: {
+      save: "บันทึก",
+      cancel: "ยกเลิก",
+      edit: "แก้ไข",
+      notProvided: "ยังไม่ได้ระบุ",
+      backToStore: "กลับไปที่ภาพรวมร้านค้า",
+      formInvalid: "กรุณาตรวจสอบข้อมูลในช่องที่มีข้อความแจ้งเตือน",
+    },
+    // What a signed-in person who is not a seller sees on a seller page.
+    guard: {
+      customerTitle: "คุณยังไม่มีร้านค้า",
+      customerBody: "สมัครเปิดร้านค้าเพื่อเริ่มขายสินค้า ผู้ดูแลระบบจะตรวจสอบใบสมัครก่อนอนุมัติ",
+      customerAction: "สมัครเปิดร้านค้า",
+      forbiddenTitle: "ไม่สามารถใช้งานส่วนนี้ได้",
+      forbiddenBody: "บัญชีนี้ไม่มีสิทธิ์ใช้งานส่วนร้านค้า",
+      notFoundTitle: "ไม่พบข้อมูลที่ต้องการ",
+      notFoundBody: "รายการนี้อาจถูกลบไปแล้ว หรือไม่ใช่ของร้านค้าของคุณ",
+    },
+    // Shown on every seller page while the store is suspended (REQ-S-09, BR-14).
+    suspended: {
+      title: "ร้านค้าถูกระงับ",
+      body: "คุณยังดูข้อมูลและจัดการคำสั่งซื้อที่มีอยู่ได้ แต่แก้ไขร้านค้า สินค้า และสต็อกไม่ได้จนกว่าร้านค้าจะได้รับการคืนสถานะ",
+      // Label before the reason an admin gave.
+      reasonLabel: "เหตุผล",
+    },
+    status: {
+      fulfilment: {
+        PENDING: "รอร้านค้ายืนยัน",
+        PROCESSING: "กำลังเตรียมสินค้า",
+        SHIPPED: "จัดส่งแล้ว",
+        DELIVERED: "จัดส่งสำเร็จ",
+        CANCELLED: "ยกเลิกแล้ว",
+      },
+      payment: {
+        PENDING: "รอชำระเงิน",
+        PAID: "ชำระเงินแล้ว",
+        FAILED: "ชำระเงินไม่สำเร็จ",
+      },
+      product: {
+        DRAFT: "ฉบับร่าง",
+        PUBLISHED: "เผยแพร่แล้ว",
+        ARCHIVED: "เก็บถาวรแล้ว",
+      },
+      moderation: {
+        PENDING: "รอตรวจสอบ",
+        APPROVED: "ผ่านการตรวจสอบ",
+        REJECTED: "ไม่ผ่านการตรวจสอบ",
+        TAKEN_DOWN: "ถูกถอดออกจากการขาย",
+      },
+      store: {
+        APPROVED: "อนุมัติแล้ว",
+        SUSPENDED: "ถูกระงับ",
+      },
+      application: {
+        PENDING: "รอการอนุมัติ",
+        APPROVED: "อนุมัติแล้ว",
+        REJECTED: "ไม่ผ่านการอนุมัติ",
+      },
+    },
+    // Messages for a refused request, by the `details.reason` of a 409 or by error code.
+    errors: {
+      sellerNotApproved: "ร้านค้าถูกระงับ ไม่สามารถแก้ไขข้อมูลได้ในขณะนี้",
+      invalidTransition: "สถานะปัจจุบันไม่รองรับการดำเนินการนี้ รายการอาจถูกเปลี่ยนไปแล้ว",
+      conflict: "ข้อมูลขัดแย้งกับข้อมูลที่มีอยู่ กรุณาตรวจสอบแล้วลองอีกครั้ง",
+      payloadTooLarge: "ข้อมูลหรือไฟล์ใหญ่เกินกำหนด",
+      unsupportedMedia: "ไฟล์ไม่ใช่รูปภาพที่รองรับ (JPEG, PNG หรือ WebP)",
+      reasons: {
+        OPEN_APPLICATION: "คุณมีใบสมัครที่รอการตรวจสอบอยู่แล้ว",
+        STORE_NAME_TAKEN: "มีร้านค้าใช้ชื่อนี้แล้ว กรุณาเลือกชื่ออื่น",
+        STORE_NAME_RESERVED: "ชื่อนี้ถูกสงวนไว้ กรุณาเลือกชื่ออื่น",
+        DUPLICATE_SKU: "รหัสสินค้า (SKU) นี้ถูกใช้กับสินค้าอื่นของร้านแล้ว",
+        UPLOAD_IN_USE: "รูปภาพนี้ถูกใช้กับสินค้าอื่นแล้ว",
+        UPLOAD_LIMIT:
+          "มีรูปที่อัปโหลดไว้แต่ยังไม่ได้ใช้ครบกำหนดแล้ว กรุณาใช้งานรูปเหล่านั้นก่อนอัปโหลดเพิ่ม",
+        CATEGORY_INACTIVE: "หมวดหมู่นี้ปิดใช้งานอยู่ กรุณาเลือกหมวดหมู่อื่น",
+        PRODUCT_LIMIT: "ร้านค้ามีสินค้าครบจำนวนสูงสุดแล้ว กรุณาเก็บถาวรหรือลบสินค้าก่อนเพิ่มใหม่",
+        NEGATIVE_STOCK: "สต็อกต้องไม่ต่ำกว่า 0",
+        STOCK_LIMIT: "สต็อกต้องไม่เกิน 1,000,000 ชิ้น",
+        SLUG_TAKEN: "ไม่สามารถสร้างสินค้าได้ในขณะนี้ กรุณาลองอีกครั้ง",
+      },
+    },
+    apply: {
+      title: "สมัครเปิดร้านค้า",
+      description: "กรอกข้อมูลร้านค้า ผู้ดูแลระบบจะตรวจสอบก่อนอนุมัติ",
+      formTitle: "ข้อมูลร้านค้า",
+      fields: {
+        storeName: "ชื่อร้านค้า",
+        description: "รายละเอียดร้านค้า",
+        contactPhone: "เบอร์โทรติดต่อร้านค้า",
+      },
+      phoneHelper: "กรอกเป็นตัวเลขเท่านั้น เช่น 0812345678 หรือ +66812345678",
+      submit: "ส่งใบสมัคร",
+      submitted: "ส่งใบสมัครแล้ว รอผู้ดูแลระบบตรวจสอบ",
+      statusTitle: "สถานะใบสมัคร",
+      statusLabel: "สถานะ",
+      sentAt: "ส่งเมื่อ",
+      reviewedAt: "ตรวจสอบเมื่อ",
+      rejectReason: "เหตุผลที่ไม่ผ่านการอนุมัติ",
+      pendingNote: "ใบสมัครอยู่ระหว่างการตรวจสอบ ส่งใบสมัครใหม่ไม่ได้จนกว่าจะมีผล",
+      approvedNote: "ใบสมัครได้รับอนุมัติแล้ว",
+      reapplyTitle: "ส่งใบสมัครใหม่",
+      reapplyNote: "แก้ไขข้อมูลตามเหตุผลข้างต้นแล้วส่งใบสมัครใหม่ได้",
+    },
+    fieldErrors: {
+      storeName: {
+        required: "กรุณากรอกชื่อร้านค้า",
+        tooLong: "ชื่อร้านค้าต้องไม่เกิน 100 ตัวอักษร",
+        invalid: "ชื่อร้านค้ามีอักขระที่ไม่รองรับ",
+      },
+      description: {
+        required: "กรุณากรอกรายละเอียด",
+        tooLong: "รายละเอียดต้องไม่เกิน 2,000 ตัวอักษร",
+        invalid: "รายละเอียดมีอักขระที่ไม่รองรับ",
+      },
+      contactPhone: {
+        required: "กรุณากรอกเบอร์โทรศัพท์",
+        tooLong: "เบอร์โทรศัพท์ยาวเกินไป",
+        invalid: "เบอร์โทรศัพท์ต้องเป็นตัวเลขเท่านั้น (ขึ้นต้นด้วย 0 หรือ +66)",
+      },
+    },
+  },
 } as const;

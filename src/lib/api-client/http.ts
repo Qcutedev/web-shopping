@@ -19,6 +19,8 @@ export interface ApiFailure {
   status: number;
   /** Error code of the envelope, `NETWORK_ERROR` or `UNKNOWN` when there is none. */
   code: string;
+  /** `details.reason` of a `409 CONFLICT` (API_CONTRACTS 2.3), when the envelope carries one. */
+  reason?: string;
   fields: ApiFieldError[];
   requestId: string | null;
 }
@@ -82,7 +84,37 @@ export async function apiRequest<T>(
   } catch {
     return failure(0, "NETWORK_ERROR");
   }
+  return readEnvelope<T>(response);
+}
 
+/**
+ * One file as `multipart/form-data` in the field `file` (the seller upload, API_CONTRACTS 5.8). No
+ * `Content-Type` header is set: the browser adds it with the boundary.
+ */
+export async function apiUploadFile<T>(
+  path: string,
+  file: File,
+  fetchImpl?: typeof fetch,
+): Promise<ApiResult<T>> {
+  const doFetch = fetchImpl ?? fetch;
+  const form = new FormData();
+  form.append("file", file);
+  let response: Response;
+  try {
+    response = await doFetch(path, {
+      method: "POST",
+      headers: { Accept: "application/json" },
+      body: form,
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+  } catch {
+    return failure(0, "NETWORK_ERROR");
+  }
+  return readEnvelope<T>(response);
+}
+
+async function readEnvelope<T>(response: Response): Promise<ApiResult<T>> {
   let json: unknown;
   try {
     json = await response.json();
@@ -99,10 +131,15 @@ export async function apiRequest<T>(
 
   const error = isRecord(json) && isRecord(json.error) ? json.error : null;
   if (error === null) return failure(response.status, "UNKNOWN");
+  const reason =
+    isRecord(error.details) && typeof error.details.reason === "string"
+      ? error.details.reason
+      : undefined;
   return {
     ok: false,
     status: response.status,
     code: typeof error.code === "string" ? error.code : "UNKNOWN",
+    ...(reason === undefined ? {} : { reason }),
     fields: readFields(error.details),
     requestId: typeof error.requestId === "string" ? error.requestId : null,
   };
