@@ -1,23 +1,19 @@
 import Link from "next/link";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { NoticeLabel } from "@/components/ui/notice-label";
 import { Pagination } from "@/components/ui/pagination";
-import { Price } from "@/components/ui/price";
 import { SelectField } from "@/components/ui/select";
 import { fill } from "@/i18n/fill";
 import { th } from "@/i18n/th";
-import { formatDateTime } from "@/lib/format";
 import {
   type ListSellerOrdersQuery,
   type SellerOrderListItemDto,
 } from "@/modules/orders/seller-schema";
 import { FULFILMENT_STATUSES } from "@/modules/orders/state";
+import { OrdersTable } from "./orders-table";
 import { ordersHref } from "./orders-query";
-import { SELLER_ROUTES, sellerOrderHref } from "./routes";
+import { SELLER_ROUTES } from "./routes";
 import { formatCount } from "./format-count";
-import { FulfilmentBadge, PaymentBadge } from "./status-badges";
 
 function FilterForm({ query }: { query: ListSellerOrdersQuery }) {
   return (
@@ -53,60 +49,6 @@ function FilterForm({ query }: { query: ListSellerOrdersQuery }) {
   );
 }
 
-function OrderRow({ order }: { order: SellerOrderListItemDto }) {
-  return (
-    <Card as="li" className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <h2 className="type-card-title">
-          <Link
-            href={sellerOrderHref(order.id)}
-            className="focus-ring rounded-sm underline-offset-4 hover:underline"
-          >
-            {th.seller.orders.row.orderNumber} {order.orderNumber}
-          </Link>
-        </h2>
-        <FulfilmentBadge status={order.fulfilmentStatus} />
-        <PaymentBadge status={order.paymentStatus} />
-      </div>
-      <p className="type-small text-foreground-secondary">
-        {th.seller.orders.row.placedAt} {formatDateTime(order.createdAt)}{" "}
-        {th.seller.common.dotSeparator}
-        {fill(th.seller.orders.row.itemCount, { count: formatCount(order.items.length) })}
-      </p>
-      {order.cancellationKind !== null ? (
-        <p className="type-small text-danger">{th.seller.orders.row.cancelledNote}</p>
-      ) : null}
-      <dl className="flex flex-wrap gap-x-8 gap-y-1">
-        <div className="flex gap-2">
-          <dt className="type-small text-foreground-secondary">{th.seller.orders.row.subtotal}</dt>
-          <dd className="type-label">
-            <Price satang={order.itemsSubtotalSatang} />
-          </dd>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <dt className="type-small text-foreground-secondary">
-            {th.seller.orders.row.shippingFee}
-          </dt>
-          <dd className="type-label">
-            <Price satang={order.shippingFeeSatang} />
-          </dd>
-          {order.shippingFeeIsSimulated ? (
-            <NoticeLabel>{th.notice.simulatedShipping}</NoticeLabel>
-          ) : null}
-        </div>
-      </dl>
-      <div>
-        <Link
-          href={sellerOrderHref(order.id)}
-          className={buttonVariants({ variant: "secondary", size: "sm" })}
-        >
-          {th.seller.orders.row.view}
-        </Link>
-      </div>
-    </Card>
-  );
-}
-
 /**
  * One page of the store's paid orders with the status filter (REQ-S-07). Rows are the store's own
  * portion of each order as the server returned it; no total of a whole order is shown.
@@ -130,11 +72,7 @@ export function OrdersListView({
         <p role="status" className="type-small text-foreground-secondary">
           {fill(th.seller.orders.count, { count: formatCount(total) })}
         </p>
-        <ul aria-label={th.seller.orders.listLabel} className="flex flex-col gap-3">
-          {items.map((order) => (
-            <OrderRow key={order.id} order={order} />
-          ))}
-        </ul>
+        <OrdersTable items={items} />
       </>
     );
   } else if (total > 0) {

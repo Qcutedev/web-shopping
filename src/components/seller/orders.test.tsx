@@ -113,7 +113,7 @@ describe("OrdersSection", () => {
       pageSize: 20,
       fulfilmentStatus: "PENDING",
     });
-    const list = screen.getByRole("list", { name: th.seller.orders.listLabel });
+    const list = screen.getByRole("table", { name: th.seller.orders.listLabel });
     expect(within(list).getByText(/OD2610110000042/)).toBeTruthy();
     expect(within(list).getByText(formatSatang(77_700))).toBeTruthy();
     expect(within(list).getByText(th.notice.simulatedShipping)).toBeTruthy();
@@ -395,6 +395,22 @@ describe("order page ids (CR-106) and display (CR-105)", () => {
     });
     render(await OrdersSection({ searchParams: Promise.resolve({}) }));
     expect(screen.getByText(fill(th.seller.orders.count, { count: "1,234" }))).toBeTruthy();
-    expect(screen.getByText(new RegExp(th.seller.common.dotSeparator))).toBeTruthy();
+  });
+
+  it("shows each order as a table row under named column headers, with a link to its page", async () => {
+    getActor.mockResolvedValue(seller);
+    listOwnSellerOrders.mockResolvedValue({ items: [listItem], page: 1, pageSize: 20, total: 1 });
+    render(await OrdersSection({ searchParams: Promise.resolve({}) }));
+    const table = screen.getByRole("table", { name: th.seller.orders.listLabel });
+    for (const name of [
+      th.seller.orders.columns.order,
+      th.seller.orders.columns.placedAt,
+      th.seller.orders.columns.status,
+      th.seller.orders.columns.subtotal,
+    ]) {
+      expect(within(table).getByRole("columnheader", { name })).toBeTruthy();
+    }
+    const row = within(table).getByRole("rowheader", { name: /OD2610110000042/ });
+    expect(row.querySelector("a")?.getAttribute("href")).toBe(`/seller/orders/${listItem.id}`);
   });
 });

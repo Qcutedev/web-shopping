@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fill } from "@/i18n/fill";
 import { th } from "@/i18n/th";
+import { formatSatang } from "@/lib/format";
 import { notFound } from "@/server/errors";
 
 class RedirectSignal extends Error {
@@ -131,13 +132,26 @@ describe("ProductsSection", () => {
       lowStock: true,
       status: "PUBLISHED",
     });
-    const list = screen.getByRole("list", { name: th.seller.products.listLabel });
+    const list = screen.getByRole("table", { name: th.seller.products.listLabel });
     expect(within(list).getByText("เสื้อยืด")).toBeTruthy();
     expect(within(list).getByText(th.seller.products.row.lowStock)).toBeTruthy();
     expect(screen.getByRole("navigation", { name: th.pagination.label })).toBeTruthy();
     expect(screen.getByRole("link", { name: th.pagination.next }).getAttribute("href")).toBe(
       "/seller/products?status=PUBLISHED&lowStock=true&page=2",
     );
+  });
+
+  it("shows the products as table rows under named column headers, with a link to each", async () => {
+    getActor.mockResolvedValue(seller);
+    listOwnProducts.mockResolvedValue({ items: [product], page: 1, pageSize: 20, total: 1 });
+    render(await ProductsSection({ searchParams: Promise.resolve({}) }));
+    const table = screen.getByRole("table", { name: th.seller.products.listLabel });
+    for (const name of Object.values(th.seller.products.columns)) {
+      expect(within(table).getByRole("columnheader", { name })).toBeTruthy();
+    }
+    const row = within(table).getByRole("rowheader", { name: /เสื้อยืด/ });
+    expect(row.querySelector("a")?.getAttribute("href")).toBe("/seller/products/p1");
+    expect(within(table).getByText(formatSatang(25_900))).toBeTruthy();
   });
 
   it("falls back to the unfiltered first page for an invalid query", async () => {

@@ -1,16 +1,10 @@
 import Link from "next/link";
-import { ProductImage } from "@/components/catalog/product-image";
 import { Alert } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { EmptyState } from "@/components/ui/empty-state";
-import { NoticeLabel } from "@/components/ui/notice-label";
 import { Pagination } from "@/components/ui/pagination";
-import { Price } from "@/components/ui/price";
 import { SelectField } from "@/components/ui/select";
-import { USER_NAME_CONTAINER_CLASS, UserName } from "@/components/user-name";
 import { fill } from "@/i18n/fill";
 import { th } from "@/i18n/th";
 import {
@@ -21,8 +15,8 @@ import {
 } from "@/modules/inventory/schema";
 import { formatCount } from "./format-count";
 import { hasProductFilter, productsHref } from "./products-query";
-import { SELLER_ROUTES, sellerProductHref } from "./routes";
-import { ModerationBadge, ProductStatusBadge } from "./status-badges";
+import { ProductsTable } from "./products-table";
+import { SELLER_ROUTES } from "./routes";
 
 function FilterForm({ query }: { query: ListSellerProductsQuery }) {
   return (
@@ -85,58 +79,6 @@ function FilterForm({ query }: { query: ListSellerProductsQuery }) {
   );
 }
 
-function ProductRow({ product }: { product: SellerProductDto }) {
-  return (
-    <Card as="li" className="flex flex-col gap-3 sm:flex-row sm:items-start">
-      <ProductImage
-        image={product.images[0] ?? null}
-        alt=""
-        sizes="80px"
-        className="size-20 shrink-0"
-      />
-      <div className="flex min-w-0 flex-1 flex-col gap-2">
-        <h2 className={`type-card-title ${USER_NAME_CONTAINER_CLASS}`}>
-          <Link
-            href={sellerProductHref(product.id)}
-            className="focus-ring rounded-sm underline-offset-4 hover:underline"
-          >
-            <UserName>{product.title}</UserName>
-          </Link>
-        </h2>
-        <p className={`type-small text-foreground-secondary ${USER_NAME_CONTAINER_CLASS}`}>
-          {th.seller.products.row.sku}: <UserName>{product.sku}</UserName>
-        </p>
-        <div className="flex flex-wrap items-center gap-2">
-          <ProductStatusBadge status={product.status} />
-          <ModerationBadge status={product.moderationStatus} />
-          {product.lowStock ? (
-            <Badge variant="warning">{th.seller.products.row.lowStock}</Badge>
-          ) : null}
-          {product.soldOut ? (
-            <Badge variant="danger">{th.seller.products.row.soldOut}</Badge>
-          ) : null}
-          {product.isSample ? <NoticeLabel>{th.notice.sampleData}</NoticeLabel> : null}
-        </div>
-      </div>
-      <dl className="grid shrink-0 grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-1 sm:text-right">
-        <div>
-          <dt className="sr-only">{th.seller.products.form.price}</dt>
-          <dd className="type-label">
-            <Price satang={product.priceSatang} />
-          </dd>
-        </div>
-        <div>
-          <dt className="sr-only">{th.seller.products.row.stock}</dt>
-          <dd className="type-small text-foreground-secondary">
-            {th.seller.products.row.stock}:{" "}
-            {fill(th.seller.products.row.stockCount, { count: formatCount(product.stock) })}
-          </dd>
-        </div>
-      </dl>
-    </Card>
-  );
-}
-
 /**
  * One page of the seller's products with the filter form (REQ-S-04). Presentation of the rows the
  * service returned; the counts and flags (`lowStock`, `soldOut`) are the server's.
@@ -165,11 +107,7 @@ export function ProductsListView({
         <p role="status" className="type-small text-foreground-secondary">
           {fill(th.seller.products.count, { count: formatCount(total) })}
         </p>
-        <ul aria-label={th.seller.products.listLabel} className="flex flex-col gap-3">
-          {items.map((product) => (
-            <ProductRow key={product.id} product={product} />
-          ))}
-        </ul>
+        <ProductsTable items={items} />
       </>
     );
   } else if (total > 0) {

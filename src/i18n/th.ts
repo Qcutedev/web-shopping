@@ -455,6 +455,13 @@ export const th = {
         soldOut: "สินค้าหมด",
         noImage: "ไม่มีรูป",
       },
+      // Column headers of the product table.
+      columns: {
+        product: "สินค้า",
+        status: "สถานะ",
+        price: "ราคา",
+        stock: "สต็อก",
+      },
       newTitle: "เพิ่มสินค้า",
       newDescription: "สินค้าที่สร้างใหม่เป็นฉบับร่าง และต้องผ่านการตรวจสอบก่อนแสดงในร้าน",
       created: "สร้างสินค้าแล้ว เป็นฉบับร่าง เผยแพร่ได้เมื่อพร้อม",
@@ -553,6 +560,16 @@ export const th = {
         shippingFee: "ค่าจัดส่ง",
         view: "ดูรายละเอียด",
         cancelledNote: "ยกเลิกแล้ว คืนเงินนอกระบบ",
+      },
+      // Column headers of the order table.
+      columns: {
+        order: "คำสั่งซื้อ",
+        placedAt: "สั่งเมื่อ",
+        status: "สถานะ",
+        items: "รายการสินค้า",
+        subtotal: "ราคาสินค้า",
+        shippingFee: "ค่าจัดส่ง",
+        actions: "การดำเนินการ",
       },
       detailTitle: "รายละเอียดคำสั่งซื้อ",
       backToList: "กลับไปรายการคำสั่งซื้อ",
