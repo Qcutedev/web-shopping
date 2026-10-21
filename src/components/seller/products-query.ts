@@ -1,35 +1,23 @@
+﻿import { DEFAULT_PAGE_SIZE } from "@/modules/catalog/schema";
 import {
   type ListSellerProductsQuery,
   listSellerProductsQuerySchema,
   queryRecord,
 } from "@/modules/inventory/schema";
 import { SELLER_ROUTES } from "./routes";
+import { type SearchParams, toUrlSearchParams } from "./search-params";
 
-type SearchParams = Record<string, string | string[] | undefined>;
-
-function toUrlSearchParams(searchParams: SearchParams): URLSearchParams {
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(searchParams)) {
-    if (Array.isArray(value)) value.forEach((entry) => params.append(key, entry));
-    else if (value !== undefined) params.append(key, value);
-  }
-  return params;
-}
-
-/** The query of a product list page. Same schema as the endpoint. */
-export function productListQueryFrom(searchParams: SearchParams): {
-  query: ListSellerProductsQuery;
-  /** False when the address bar held an invalid query and the defaults were used instead. */
-  valid: boolean;
-} {
+/**
+ * The query of a product list page. Same schema as the endpoint; an invalid query falls back to
+ * the unfiltered first page.
+ */
+export function productListQueryFrom(searchParams: SearchParams): ListSellerProductsQuery {
   const parsed = listSellerProductsQuerySchema.safeParse(
     queryRecord(toUrlSearchParams(searchParams)),
   );
-  if (parsed.success) return { query: parsed.data, valid: true };
-  return {
-    query: listSellerProductsQuerySchema.parse(queryRecord(new URLSearchParams())),
-    valid: false,
-  };
+  return parsed.success
+    ? parsed.data
+    : listSellerProductsQuerySchema.parse(queryRecord(new URLSearchParams()));
 }
 
 /** Address of a product list page: only the parameters that differ from the defaults. */
@@ -39,6 +27,7 @@ export function productsHref(query: ListSellerProductsQuery, page: number): stri
   if (query.moderationStatus !== undefined) search.set("moderationStatus", query.moderationStatus);
   if (query.lowStock === true) search.set("lowStock", "true");
   if (query.soldOut === true) search.set("soldOut", "true");
+  if (query.pageSize !== DEFAULT_PAGE_SIZE) search.set("pageSize", String(query.pageSize));
   if (Number.isSafeInteger(page) && page > 1) search.set("page", String(page));
   const text = search.toString();
   return text === "" ? SELLER_ROUTES.products : `${SELLER_ROUTES.products}?${text}`;

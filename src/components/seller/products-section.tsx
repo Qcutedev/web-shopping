@@ -15,7 +15,7 @@ type SearchParams = Record<string, string | string[] | undefined>;
  */
 export async function ProductsSection({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const raw = await searchParams;
-  const { query } = productListQueryFrom(raw);
+  const query = productListQueryFrom(raw);
   // Set by the product page after a delete, so the list can confirm it.
   const notice = raw[REMOVED_PARAM] === "deleted" ? th.seller.products.actions.deleted : undefined;
   return renderForSeller(SELLER_ROUTES.products, async (actor) => {
