@@ -343,5 +343,9 @@ describe("DashboardView tiles (CR-105)", () => {
     expect(link?.getAttribute("href")).toBe("/seller/products?lowStock=true");
     expect(within(link as HTMLElement).getByText("1,234")).toBeTruthy();
     expect(link?.closest("li")).toBeTruthy();
+    // Only StatCard puts a space between label and value (accessible name reads label, then value)
+    // and gives the link the surface card classes. The old hand-written tile had neither.
+    expect(link?.textContent).toBe(`${th.seller.dashboard.lowStock} 1,234`);
+    expect(link?.className).toContain("bg-surface");
   });
 });
