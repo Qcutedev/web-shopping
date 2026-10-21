@@ -13,6 +13,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import * as ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { ProductCard } from "@/components/catalog/product-card";
 import { ProductDetailView } from "@/components/catalog/product-detail-view";
@@ -376,6 +377,214 @@ const altsOf = (html: string) =>
 const altSuffix = (index: number, count: number) =>
   fill(th.catalog.product.imageAlt, { title: "", index, count });
 
+/** Non-test source under src/app and src/components: every place that can render a title. */
+function rendererFiles(): string[] {
+  return [
+    ...filesUnder(join(ROOT, "src", "app"), (path) => /\.tsx?$/.test(path)),
+    ...filesUnder(join(ROOT, "src", "components"), (path) => /\.tsx?$/.test(path)),
+  ].filter((path) => !/\.test\.tsx?$/.test(path));
+}
+
+const TITLE_FIELDS = new Set(["title", "productTitle"]);
+
+/** The identifier at the start of `a.b["c"]!.d`, or null when it starts with a call or literal. */
+function rootIdentifier(node: ts.Expression): ts.Identifier | null {
+  let current: ts.Expression = node;
+  while (
+    ts.isPropertyAccessExpression(current) ||
+    ts.isElementAccessExpression(current) ||
+    ts.isNonNullExpression(current) ||
+    ts.isParenthesizedExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return ts.isIdentifier(current) ? current : null;
+}
+
+/** True when the file binds the local name `th` to `th` from "@/i18n/th" (static Thai copy). */
+function importsThaiCopy(file: ts.SourceFile): boolean {
+  return file.statements.some((statement) => {
+    if (!ts.isImportDeclaration(statement)) return false;
+    if (!ts.isStringLiteral(statement.moduleSpecifier)) return false;
+    if (statement.moduleSpecifier.text !== "@/i18n/th") return false;
+    const bindings = statement.importClause?.namedBindings;
+    if (bindings === undefined || !ts.isNamedImports(bindings)) return false;
+    return bindings.elements.some(
+      (element) =>
+        element.name.text === "th" && (element.propertyName ?? element.name).text === "th",
+    );
+  });
+}
+
+/** `<UserName>{node}</UserName>` with nothing else inside but white space. */
+function isSoleUserNameChild(node: ts.Node): boolean {
+  const container = node.parent;
+  if (!ts.isJsxExpression(container) || container.expression !== node) return false;
+  const element = container.parent;
+  if (!ts.isJsxElement(element)) return false;
+  const tag = element.openingElement.tagName;
+  if (!ts.isIdentifier(tag) || tag.text !== "UserName") return false;
+  const children = element.children.filter(
+    (child) => !(ts.isJsxText(child) && child.containsOnlyTriviaWhiteSpaces),
+  );
+  return children.length === 1 && children[0] === container;
+}
+
+/** `${FSI}${stripIsolateControls(node)}${PDI}`, adjacent, in one template literal. */
+function isStrippedIsolateWrap(node: ts.Node): boolean {
+  const call = node.parent;
+  if (!ts.isCallExpression(call) || call.arguments.length !== 1 || call.arguments[0] !== node) {
+    return false;
+  }
+  if (!ts.isIdentifier(call.expression) || call.expression.text !== "stripIsolateControls") {
+    return false;
+  }
+  const span = call.parent;
+  if (!ts.isTemplateSpan(span) || span.expression !== call) return false;
+  const spans = span.parent.templateSpans;
+  const index = spans.indexOf(span);
+  const before = spans[index - 1];
+  const after = spans[index + 1];
+  return (
+    before !== undefined &&
+    after !== undefined &&
+    ts.isIdentifier(before.expression) &&
+    before.expression.text === "FSI" &&
+    before.literal.text === "" &&
+    span.literal.text === "" &&
+    ts.isIdentifier(after.expression) &&
+    after.expression.text === "PDI"
+  );
+}
+
+/** An identifier that reads a variable (not a declaration, property name, or type name). */
+function isValueReference(id: ts.Identifier): boolean {
+  const parent = id.parent;
+  if (ts.isShorthandPropertyAssignment(parent)) return true;
+  if (ts.isQualifiedName(parent) || ts.isTypeReferenceNode(parent)) return false;
+  if ("name" in parent && parent.name === id) return false;
+  if ("propertyName" in parent && parent.propertyName === id) return false;
+  return true;
+}
+
+/**
+ * Every read of a `title` or `productTitle` field in one source file that is not isolated, as
+ * source text, in file order. Found by syntax tree, not by variable name (CR-107):
+ * - any `x.title`, `x?.title`, `x["title"]`, whatever `x` is called; reads rooted at `th`
+ *   imported from "@/i18n/th" are static Thai copy and are skipped;
+ * - every reference to a local bound by destructuring `{ title }` or `{ title: name }`.
+ * Isolated means the sole child of `<UserName>`, or `${FSI}${stripIsolateControls(read)}${PDI}`
+ * in a file that defines FSI and PDI as U+2068 and U+2069. Any other read is reported, including
+ * a copy into a local (`const t = x.title`), so an alias cannot carry a title past the scan.
+ */
+function unsafeTitleReads(fileName: string, source: string): string[] {
+  const file = ts.createSourceFile(
+    fileName,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    fileName.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+  const thaiCopy = importsThaiCopy(file);
+  const isolateConstants =
+    /\bconst FSI = String\.fromCodePoint\(0x2068\);/.test(source) &&
+    /\bconst PDI = String\.fromCodePoint\(0x2069\);/.test(source);
+  const reads: ts.Node[] = [];
+  const boundNames = new Set<string>();
+  const declarations = new Set<ts.Node>();
+
+  const collect = (node: ts.Node): void => {
+    const field = ts.isPropertyAccessExpression(node)
+      ? node.name.text
+      : ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)
+        ? node.argumentExpression.text
+        : null;
+    if (field !== null && TITLE_FIELDS.has(field)) {
+      const root = rootIdentifier((node as ts.PropertyAccessExpression).expression);
+      if (!(thaiCopy && root?.text === "th")) reads.push(node);
+    }
+    if (ts.isBindingElement(node) && ts.isObjectBindingPattern(node.parent)) {
+      const key = node.propertyName ?? node.name;
+      if (
+        (ts.isIdentifier(key) || ts.isStringLiteral(key)) &&
+        TITLE_FIELDS.has(key.text) &&
+        ts.isIdentifier(node.name)
+      ) {
+        boundNames.add(node.name.text);
+        declarations.add(node.name);
+      }
+    }
+    ts.forEachChild(node, collect);
+  };
+  collect(file);
+
+  if (boundNames.size > 0) {
+    const references = (node: ts.Node): void => {
+      if (
+        ts.isIdentifier(node) &&
+        boundNames.has(node.text) &&
+        !declarations.has(node) &&
+        isValueReference(node)
+      ) {
+        reads.push(node);
+      }
+      ts.forEachChild(node, references);
+    };
+    references(file);
+  }
+
+  return reads
+    .sort((a, b) => a.getStart(file) - b.getStart(file))
+    .filter((node) => !isSoleUserNameChild(node))
+    .filter((node) => !(isolateConstants && isStrippedIsolateWrap(node)))
+    .map((node) => node.getText(file));
+}
+
+/**
+ * Files allowed to read a title outside `UserName` or the attribute wrap, with every such read
+ * pinned as source text, in file order. A new read, a removed read, or a renamed variable in one
+ * of these files fails the scan until security re-checks it and updates the pin (CR-107).
+ */
+const STATIC_TITLE_PROP =
+  "Destructured `title` prop of a layout or design-system part, rendered as a heading. Every " +
+  "caller passes Thai copy from th.ts (checked 2026-10-21); a caller that passes a product " +
+  "title must read a title field itself, and that read is scanned in the caller's file.";
+
+const TITLE_READ_EXCLUSIONS: Record<string, { reads: string[]; reason: string }> = {
+  "src/components/account/account-frame.tsx": { reads: ["title"], reason: STATIC_TITLE_PROP },
+  "src/components/seller/application-form.tsx": { reads: ["title"], reason: STATIC_TITLE_PROP },
+  "src/components/seller/seller-frame.tsx": { reads: ["title"], reason: STATIC_TITLE_PROP },
+  "src/components/ui/alert.tsx": { reads: ["title", "title"], reason: STATIC_TITLE_PROP },
+  "src/components/ui/dialog.tsx": { reads: ["title"], reason: STATIC_TITLE_PROP },
+  "src/components/ui/empty-state.tsx": { reads: ["title"], reason: STATIC_TITLE_PROP },
+  "src/components/ui/error-state.tsx": { reads: ["title", "title"], reason: STATIC_TITLE_PROP },
+  "src/components/catalog/product-list-view.tsx": {
+    reads: ["empty.title"],
+    reason:
+      "The empty-list heading from the `empty` prop; all four callers build it from th.ts " +
+      "(page.tsx, search/page.tsx, categories/[slug]/page.tsx, store-section.tsx).",
+  },
+  "src/components/seller/product-form.tsx": {
+    reads: ["values.title", "errors.title"],
+    reason:
+      "`values.title` is the value of the seller's own title input (a form control, not text in " +
+      "a sentence); `errors.title` is a validation message from th.ts.",
+  },
+  "src/components/seller/product-form-model.ts": {
+    reads: [
+      "stored.title",
+      "values.title",
+      "values.title",
+      "saved.title",
+      "changes.title",
+      "values.title",
+    ],
+    reason:
+      "Renders nothing (.ts, no JSX): copies the stored title into form values, the form values " +
+      "into the request body, and compares them for the edit diff (CR-107).",
+  },
+};
+
 describe("SEC-057 re-check: product titles in attributes and new places", () => {
   it("every gallery image alt wraps the title, and the isolate closes before the shop's words", () => {
     const alts = altsOf(detailWith("Plain title", 3));
@@ -407,23 +616,113 @@ describe("SEC-057 re-check: product titles in attributes and new places", () => 
     expect((alt ?? "").slice(isolateEnd(alt ?? "", 0) + 1)).toBe(altSuffix(1, 1));
   });
 
-  it("every product title in storefront source is in UserName or an FSI ... PDI wrap", () => {
-    const files = [
-      ...filesUnder(join(ROOT, "src", "app"), (path) => /\.tsx?$/.test(path)),
-      ...filesUnder(join(ROOT, "src", "components"), (path) => /\.tsx?$/.test(path)),
-    ].filter((path) => !/\.test\.tsx?$/.test(path));
-    const bare: string[] = [];
-    for (const path of files) {
-      const source = readFileSync(path, "utf8");
-      const all = source.match(/\b(?:product|item|line)\.(?:title|productTitle)\b/g) ?? [];
-      const wrapped =
-        source.match(
-          /<UserName>\{\s*(?:product|item|line)\.(?:title|productTitle)\s*\}<\/UserName>|\$\{FSI\}\$\{(?:product|item|line)\.(?:title|productTitle)\}\$\{PDI\}/g,
-        ) ?? [];
-      if (all.length !== wrapped.length)
-        bare.push(`${posix(path)}: ${all.length - wrapped.length}`);
+  // Replaced 2026-10-21 (CR-107): the earlier scan matched only the receiver names `product`,
+  // `item`, and `line`, so commit 10ef332 took reads out of it by renaming a variable. The scan
+  // below is `unsafeTitleReads`: any receiver, and destructured bindings, by syntax tree.
+  it("every product title read in storefront source is isolated or pinned (any variable name)", () => {
+    const found: Record<string, string[]> = {};
+    for (const path of rendererFiles()) {
+      const unsafe = unsafeTitleReads(path, readFileSync(path, "utf8"));
+      if (unsafe.length > 0) found[posix(path)] = unsafe;
     }
-    expect(bare).toEqual([]);
+    const pinned = Object.fromEntries(
+      Object.entries(TITLE_READ_EXCLUSIONS).map(([path, entry]) => [path, entry.reads]),
+    );
+    expect(found).toEqual(pinned);
+  });
+
+  it("every pinned exclusion is a file that renders nothing or a static or form-field use", () => {
+    for (const [path, entry] of Object.entries(TITLE_READ_EXCLUSIONS)) {
+      expect(entry.reason.length, path).toBeGreaterThan(20);
+      // A .ts file holds no JSX; it can still build a string, so its reads are pinned one by one.
+      if (path.endsWith(".ts")) {
+        expect(readFileSync(join(ROOT, path), "utf8"), path).not.toMatch(/createElement|<bdi/);
+      }
+    }
+  });
+
+  describe("the scan finds a title rendered without isolation, whatever the variable is called", () => {
+    const tsx = (body: string) =>
+      `import { th } from "@/i18n/th";\nimport { UserName } from "@/components/user-name";\n${body}`;
+    const cases: [string, string, string[]][] = [
+      ["bare product.title", "export const A = (p) => <h1>{p.title}</h1>;", ["p.title"]],
+      [
+        "renamed receiver (10ef332)",
+        "const B = (stored) => <h1>{stored.title}</h1>;",
+        ["stored.title"],
+      ],
+      ["optional chain", "const C = (x) => <p>{x?.productTitle}</p>;", ["x?.productTitle"]],
+      ["element access", 'const D = (x) => <p>{x["title"]}</p>;', ['x["title"]']],
+      [
+        "alias through a const",
+        "const E = (x) => { const t = x.title; return <p>{t}</p>; };",
+        ["x.title"],
+      ],
+      ["renamed destructuring", "const F = ({ title: name }) => <h2>{name}</h2>;", ["name"]],
+      ["shorthand destructuring", "const G = ({ title }) => <h2>{title}</h2>;", ["title"]],
+      [
+        "a sentence inside UserName",
+        "const H = (x) => <UserName>{fill(th.a.b, { t: x.title })}</UserName>;",
+        ["x.title"],
+      ],
+      [
+        "text next to it in UserName",
+        "const I = (x) => <UserName>{x.title} shop</UserName>;",
+        ["x.title"],
+      ],
+      ["an attribute", "const J = (x) => <img alt={x.title} />;", ["x.title"]],
+      [
+        "FSI wrap without stripIsolateControls",
+        "const FSI = String.fromCodePoint(0x2068);\nconst PDI = String.fromCodePoint(0x2069);\nconst K = (x) => <img alt={`${FSI}${x.title}${PDI}`} />;",
+        ["x.title"],
+      ],
+      [
+        "stripped wrap with FSI and PDI that are not the isolate characters",
+        'const FSI = "";\nconst PDI = "";\nconst L = (x) => <img alt={`${FSI}${stripIsolateControls(x.title)}${PDI}`} />;',
+        ["x.title"],
+      ],
+      ["th as a member, not the root", "const M = (x) => <p>{x.th.title}</p>;", ["x.th.title"]],
+    ];
+    it.each(cases)("%s", (_, body, unsafe) => {
+      expect(unsafeTitleReads("case.tsx", tsx(body))).toEqual(unsafe);
+    });
+
+    it("a `th` that is not the Thai copy import is not exempt", () => {
+      const source = [
+        'import { th as copy } from "@/i18n/th";',
+        'const th = { a: { title: "" } };',
+        "const O = () => <p>{th.a.title}{copy.a.title}</p>;",
+      ].join("\n");
+      expect(unsafeTitleReads("case.tsx", source)).toEqual(["th.a.title", "copy.a.title"]);
+    });
+
+    it("isolated forms are not reported", () => {
+      const source = tsx(
+        [
+          "const FSI = String.fromCodePoint(0x2068);",
+          "const PDI = String.fromCodePoint(0x2069);",
+          "const N = (z) => <h1 title={th.x.title}>",
+          "  <UserName>{z.title}</UserName>",
+          "  <UserName>",
+          "    {z?.productTitle}",
+          "  </UserName>",
+          "  <img alt={fill(th.y, { t: `${FSI}${stripIsolateControls(z.title)}${PDI}` })} />",
+          "</h1>;",
+        ].join("\n"),
+      );
+      expect(unsafeTitleReads("case.tsx", source)).toEqual([]);
+    });
+
+    it("the real product card with its UserName removed and the variable renamed is caught", () => {
+      const path = join(ROOT, "src", "components", "catalog", "product-card.tsx");
+      const original = readFileSync(path, "utf8");
+      expect(unsafeTitleReads(path, original)).toEqual([]);
+      const bypass = original.replace("<UserName>{product.title}</UserName>", "{stored.title}");
+      expect(bypass).not.toBe(original);
+      // The old receiver-name pattern does not see it; this scan does.
+      expect(bypass.match(/\b(?:product|item|line)\.(?:title|productTitle)\b/g)).toBeNull();
+      expect(unsafeTitleReads(path, bypass)).toEqual(["stored.title"]);
+    });
   });
 });
 
