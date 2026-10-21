@@ -60,9 +60,7 @@ export function ProductForm({
   // change or product action also refreshes the page and must not wipe unsaved edits (CR-109).
   // Stock is not edited here after create, so it is left out of the key.
   const productKey = JSON.stringify(product ?? null);
-  const editableKey = JSON.stringify(
-    product ? { ...valuesOfProduct(product), stock: "" } : null,
-  );
+  const editableKey = JSON.stringify(product ? { ...valuesOfProduct(product), stock: "" } : null);
   const [seenProductKey, setSeenProductKey] = useState(productKey);
   const [seenEditableKey, setSeenEditableKey] = useState(editableKey);
   if (seenProductKey !== productKey) {
