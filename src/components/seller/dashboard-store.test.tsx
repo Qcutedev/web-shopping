@@ -127,6 +127,36 @@ describe("DashboardSection", () => {
   });
 });
 
+describe("suspended store is read once per request (CR-108)", () => {
+  const suspendedStore = { ...store, status: "SUSPENDED" as const, statusReason: "ตรวจสอบ" };
+  const suspended = { ...seller, storeStatus: "SUSPENDED" };
+
+  it("dashboard: one getOwnStore call serves the banner and the view", async () => {
+    getActor.mockResolvedValue(suspended);
+    getSellerSummary.mockResolvedValue(summary);
+    getOwnStore.mockResolvedValue(suspendedStore);
+    render(await DashboardSection());
+    expect(getOwnStore).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("ตรวจสอบ")).toBeTruthy();
+  });
+
+  it("store page: one getOwnStore call serves the banner and the form", async () => {
+    getActor.mockResolvedValue(suspended);
+    getOwnStore.mockResolvedValue(suspendedStore);
+    render(await StoreSection());
+    expect(getOwnStore).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("ตรวจสอบ")).toBeTruthy();
+  });
+
+  it("a failed read for the banner is retried by the section instead of cached", async () => {
+    getActor.mockResolvedValue(suspended);
+    getOwnStore.mockRejectedValueOnce(new Error("db blip")).mockResolvedValue(suspendedStore);
+    render(await StoreSection());
+    expect(getOwnStore).toHaveBeenCalledTimes(2);
+    expect(screen.getByLabelText(new RegExp(th.seller.store.fields.name))).toBeTruthy();
+  });
+});
+
 describe("DashboardView", () => {
   it("shows the empty state with the way to add a product when nothing exists", () => {
     render(

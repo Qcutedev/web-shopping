@@ -35,9 +35,36 @@ export function SuspendedNotice({ reason }: { reason: string | null }) {
   );
 }
 
-async function readSuspensionReason(actor: Actor): Promise<string | null> {
+export type OwnStore = Awaited<ReturnType<typeof getOwnStore>>;
+
+/** Handed to `render`: the store of the session, read at most once per request (CR-108). */
+export interface SellerContext {
+  getStore: () => Promise<OwnStore>;
+}
+
+/**
+ * Reads the actor's store through the service and remembers a successful read, so the suspension
+ * banner and the section share one read. A failed read is not remembered: the next call tries again.
+ */
+function storeReader(actor: Actor): SellerContext {
+  let stored: Promise<OwnStore> | null = null;
+  return {
+    getStore() {
+      if (stored === null) {
+        const read = getOwnStore(actor);
+        stored = read;
+        read.catch(() => {
+          if (stored === read) stored = null;
+        });
+      }
+      return stored;
+    },
+  };
+}
+
+async function readSuspensionReason(context: SellerContext): Promise<string | null> {
   try {
-    return (await getOwnStore(actor)).statusReason;
+    return (await context.getStore()).statusReason;
   } catch (error) {
     unstable_rethrow(error);
     return null;
@@ -53,7 +80,7 @@ async function readSuspensionReason(actor: Actor): Promise<string | null> {
  */
 export async function renderForSeller(
   returnTo: string,
-  render: (actor: Actor) => Promise<ReactNode>,
+  render: (actor: Actor, context: SellerContext) => Promise<ReactNode>,
   options: WithSellerOptions = {},
 ): Promise<ReactNode> {
   const { access = "seller", retryHref = returnTo, notFound } = options;
@@ -75,11 +102,12 @@ export async function renderForSeller(
   }
 
   const suspended = actor.role === "SELLER" && actor.storeStatus === "SUSPENDED";
-  const reason = suspended ? await readSuspensionReason(actor) : null;
+  const context = storeReader(actor);
+  const reason = suspended ? await readSuspensionReason(context) : null;
 
   let content: ReactNode;
   try {
-    content = await render(actor);
+    content = await render(actor, context);
   } catch (error) {
     unstable_rethrow(error);
     if (isAppError(error)) {

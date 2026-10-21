@@ -97,7 +97,10 @@ describe("renderForSeller", () => {
     getActor.mockResolvedValue(seller);
     const render_ = vi.fn().mockResolvedValue(<p>content</p>);
     render(await renderForSeller("/seller", render_));
-    expect(render_).toHaveBeenCalledWith(seller);
+    expect(render_).toHaveBeenCalledWith(
+      seller,
+      expect.objectContaining({ getStore: expect.any(Function) }),
+    );
     expect(screen.getByText("content")).toBeTruthy();
     expect(screen.queryByText(th.seller.suspended.title)).toBeNull();
   });

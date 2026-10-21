@@ -1,5 +1,4 @@
 import { getSellerSummary } from "@/modules/orders";
-import { getOwnStore } from "@/modules/sellers";
 import { DashboardView } from "./dashboard-view";
 import { SELLER_ROUTES } from "./routes";
 import { renderForSeller } from "./with-seller";
@@ -9,8 +8,8 @@ import { renderForSeller } from "./with-seller";
  * the session's store. Reads the session, so it renders behind a Suspense boundary.
  */
 export async function DashboardSection() {
-  return renderForSeller(SELLER_ROUTES.dashboard, async (actor) => {
-    const [summary, store] = await Promise.all([getSellerSummary(actor), getOwnStore(actor)]);
+  return renderForSeller(SELLER_ROUTES.dashboard, async (actor, { getStore }) => {
+    const [summary, store] = await Promise.all([getSellerSummary(actor), getStore()]);
     return <DashboardView summary={summary} store={store} />;
   });
 }
