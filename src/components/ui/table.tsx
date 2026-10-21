@@ -16,6 +16,8 @@ type CellAlign = "start" | "end" | "center";
 export type SortDirection = "ascending" | "descending";
 
 const DensityContext = createContext<TableDensity>("comfortable");
+/** True when the table turns into stacked cards below `md`. */
+const StackedContext = createContext(false);
 
 const ALIGN: Record<CellAlign, string> = {
   start: "text-left",
@@ -40,6 +42,13 @@ export interface TableProps extends Omit<HTMLAttributes<HTMLTableElement>, "chil
    * area, so also give the table wrapper a height limit, for example `wrapperClassName="max-h-[28rem]"`.
    */
   stickyHeader?: boolean;
+  /**
+   * Below `md` each body row becomes a card and each cell shows its column name beside its value
+   * (give every `TableCell` a `label`). From `md` it is the normal table. Off by default, so
+   * existing tables are unchanged. Below `md` the header row is hidden, except that it appears
+   * while a sort button has keyboard focus.
+   */
+  stacked?: boolean;
   /** Class names of the scroll wrapper. `className` goes to the table element. */
   wrapperClassName?: string;
   /** `thead`, `tbody`, and optionally `tfoot`. */
@@ -56,6 +65,7 @@ export function Table({
   captionHidden = false,
   density = "comfortable",
   stickyHeader = false,
+  stacked = false,
   wrapperClassName,
   className,
   children,
@@ -64,48 +74,89 @@ export function Table({
   const captionId = useId();
   return (
     <DensityContext.Provider value={density}>
-      {/* A scroll container must be focusable so that the keyboard can scroll it. */}
-      <div
-        role="region"
-        tabIndex={0}
-        aria-labelledby={captionId}
-        data-sticky-header={stickyHeader || undefined}
-        className={cn(
-          "group/table border-border bg-surface focus-ring w-full overflow-auto rounded-lg border",
-          wrapperClassName,
-        )}
-      >
-        <table
-          className={cn("type-small text-foreground w-full border-collapse", className)}
-          {...props}
+      <StackedContext.Provider value={stacked}>
+        {/* A scroll container must be focusable so that the keyboard can scroll it. */}
+        <div
+          role="region"
+          tabIndex={0}
+          aria-labelledby={captionId}
+          data-sticky-header={stickyHeader || undefined}
+          data-stacked={stacked || undefined}
+          className={cn(
+            "group/table border-border bg-surface focus-ring w-full overflow-auto rounded-lg border",
+            stacked && "max-md:overflow-visible max-md:border-0 max-md:bg-transparent",
+            wrapperClassName,
+          )}
         >
-          <caption
-            id={captionId}
+          <table
+            // Changing `display` can make browsers drop table semantics, so name the roles when stacked.
+            role={stacked ? "table" : undefined}
             className={cn(
-              captionHidden ? "sr-only" : "type-label text-foreground px-4 py-3 text-left",
+              "type-small text-foreground w-full border-collapse",
+              stacked && "max-md:block",
+              className,
             )}
+            {...props}
           >
-            {caption}
-          </caption>
-          {children}
-        </table>
-      </div>
+            <caption
+              id={captionId}
+              className={cn(
+                captionHidden ? "sr-only" : "type-label text-foreground px-4 py-3 text-left",
+              )}
+            >
+              {caption}
+            </caption>
+            {children}
+          </table>
+        </div>
+      </StackedContext.Provider>
     </DensityContext.Provider>
   );
 }
 
 export function TableHeader({ className, ...props }: HTMLAttributes<HTMLTableSectionElement>) {
-  return <thead className={cn("bg-surface-muted", className)} {...props} />;
+  const stacked = useContext(StackedContext);
+  return (
+    <thead
+      role={stacked ? "rowgroup" : undefined}
+      className={cn(
+        "bg-surface-muted",
+        // Each cell carries its own label below md, so the header is hidden there (still read by
+        // assistive technology) and shows while a sort button inside it has focus.
+        stacked &&
+          "max-md:block max-md:[&_th]:border-b-0 max-md:[&_tr]:flex max-md:[&_tr]:flex-wrap max-md:[&:not(:focus-within)]:sr-only",
+        className,
+      )}
+      {...props}
+    />
+  );
 }
 
 export function TableBody({ className, ...props }: HTMLAttributes<HTMLTableSectionElement>) {
-  return <tbody className={cn("divide-border divide-y", className)} {...props} />;
+  const stacked = useContext(StackedContext);
+  return (
+    <tbody
+      role={stacked ? "rowgroup" : undefined}
+      className={cn(
+        "divide-border divide-y",
+        stacked && "max-md:flex max-md:flex-col max-md:gap-3 max-md:divide-y-0",
+        className,
+      )}
+      {...props}
+    />
+  );
 }
 
 export function TableFooter({ className, ...props }: HTMLAttributes<HTMLTableSectionElement>) {
+  const stacked = useContext(StackedContext);
   return (
     <tfoot
-      className={cn("border-border bg-surface-muted type-label border-t", className)}
+      role={stacked ? "rowgroup" : undefined}
+      className={cn(
+        "border-border bg-surface-muted type-label border-t",
+        stacked && "max-md:mt-3 max-md:block max-md:rounded-lg max-md:border",
+        className,
+      )}
       {...props}
     />
   );
@@ -117,10 +168,14 @@ export interface TableRowProps extends HTMLAttributes<HTMLTableRowElement> {
 }
 
 export function TableRow({ interactive = true, className, ...props }: TableRowProps) {
+  const stacked = useContext(StackedContext);
   return (
     <tr
+      role={stacked ? "row" : undefined}
       className={cn(
         interactive && "hover:bg-surface-muted transition-colors duration-150",
+        stacked &&
+          "max-md:border-border max-md:bg-surface max-md:block max-md:rounded-lg max-md:border max-md:px-4 max-md:py-2",
         className,
       )}
       {...props}
@@ -155,10 +210,12 @@ export function TableHead({
   ...props
 }: TableHeadProps) {
   const density = useContext(DensityContext);
+  const stacked = useContext(StackedContext);
   const isSortable = sortable && onSort !== undefined;
   return (
     <th
       scope={scope}
+      role={stacked ? "columnheader" : undefined}
       aria-sort={isSortable ? (sortDirection ?? "none") : undefined}
       className={cn(
         "type-label text-foreground-secondary border-border border-b align-middle font-semibold",
@@ -199,36 +256,67 @@ export interface TableCellProps extends Omit<TdHTMLAttributes<HTMLTableCellEleme
   align?: CellAlign;
   /** Renders a row header (`th scope="row"`) for the cell that names the row. */
   rowHeader?: boolean;
+  /**
+   * Column name for a stacked table; give one to every cell that is not the row header. Shown
+   * beside the value below `md` only (from `md` the column header names the cell). It is hidden
+   * from assistive technology, which already reads the column header. Ignored unless the Table
+   * has `stacked`.
+   */
+  label?: ReactNode;
 }
 
 export function TableCell({
   align = "start",
   rowHeader = false,
+  label,
   className,
   children,
   ...props
 }: TableCellProps) {
   const density = useContext(DensityContext);
+  const stacked = useContext(StackedContext);
   const classes = cn(
     "text-foreground align-middle break-words",
     CELL_PADDING[density],
     ALIGN[align],
+    stacked && "max-md:block max-md:px-0",
     className,
   );
   if (rowHeader) {
     return (
       <th
         scope="row"
-        className={cn(classes, "font-medium")}
+        role={stacked ? "rowheader" : undefined}
+        className={cn(classes, "font-medium", stacked && "max-md:pb-2 max-md:text-left")}
         {...(props as ThHTMLAttributes<HTMLTableCellElement>)}
       >
         {children}
       </th>
     );
   }
+  const labelled = stacked && label !== undefined;
   return (
-    <td className={classes} {...props}>
-      {children}
+    <td
+      role={stacked ? "cell" : undefined}
+      className={cn(
+        classes,
+        labelled && "max-md:flex max-md:items-baseline max-md:justify-between max-md:gap-4",
+      )}
+      {...props}
+    >
+      {labelled ? (
+        <>
+          <span
+            aria-hidden="true"
+            className="type-label text-foreground-secondary shrink-0 font-semibold md:hidden"
+          >
+            {label}
+          </span>
+          <span className="min-w-0 max-md:text-right">{children}</span>
+        </>
+      ) : (
+        children
+      )}
     </td>
   );
 }
@@ -242,9 +330,10 @@ export interface TableStateRowProps {
 
 /** One full-width row for the empty or error presentation of a data table. */
 export function TableStateRow({ columns, children }: TableStateRowProps) {
+  const stacked = useContext(StackedContext);
   return (
-    <TableRow interactive={false}>
-      <td colSpan={columns} className="p-0">
+    <TableRow interactive={false} className={stacked ? "max-md:p-0" : undefined}>
+      <td colSpan={columns} role={stacked ? "cell" : undefined} className="p-0 max-md:block">
         {children}
       </td>
     </TableRow>

@@ -150,6 +150,65 @@ describe("Table", () => {
     expect(screen.getByRole("cell", { name: "ไม่มีรายการ" }).getAttribute("colspan")).toBe("4");
   });
 
+  describe("stacked", () => {
+    function Stacked({ stacked = true }: { stacked?: boolean }) {
+      return (
+        <Table caption="รายการคำสั่งซื้อ" stacked={stacked}>
+          <TableHeader>
+            <TableRow interactive={false}>
+              <TableHead>เลขที่</TableHead>
+              <TableHead align="end" sortable onSort={() => {}}>
+                ยอดรวม
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow>
+              <TableCell rowHeader>A-001</TableCell>
+              <TableCell align="end" label="ยอดรวม">
+                ฿290.00
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      );
+    }
+
+    it("shows the column label in each cell, visible only below md, hidden from assistive technology", () => {
+      render(<Stacked />);
+      const cell = screen.getByRole("cell");
+      const label = cell.querySelector("span[aria-hidden='true']");
+      expect(label?.textContent).toBe("ยอดรวม");
+      expect(label?.classList.contains("md:hidden")).toBe(true);
+      expect(cell.textContent).toContain("฿290.00");
+    });
+
+    it("keeps table roles explicit and the column headers in the tree", () => {
+      render(<Stacked />);
+      expect(screen.getByRole("table", { name: "รายการคำสั่งซื้อ" })).toBeTruthy();
+      expect(screen.getAllByRole("columnheader")).toHaveLength(2);
+      expect(screen.getByRole("rowheader", { name: "A-001" })).toBeTruthy();
+      expect(screen.getAllByRole("row")).toHaveLength(2);
+    });
+
+    it("turns rows into cards below md and hides the header unless focused", () => {
+      render(<Stacked />);
+      const body = document.querySelector("tbody") as HTMLElement;
+      expect(body.className).toContain("max-md:flex");
+      expect(body.querySelector("tr")?.className).toContain("max-md:block");
+      expect(document.querySelector("thead")?.className).toContain("sr-only");
+    });
+
+    it("leaves the table unchanged when stacked is off", () => {
+      render(<Stacked stacked={false} />);
+      const cell = screen.getByRole("cell");
+      expect(cell.querySelector("span[aria-hidden]")).toBeNull();
+      expect(cell.className).not.toContain("max-md:");
+      expect(document.querySelector("table")?.getAttribute("role")).toBeNull();
+      expect(document.querySelector("thead")?.className).not.toContain("max-md:");
+    });
+  });
+
   it("renders hidden skeleton rows", () => {
     render(
       <Table caption="x" aria-busy="true">
