@@ -643,6 +643,32 @@ describe("ProductForm images and copy (CR-101, CR-103)", () => {
     expect(await screen.findByText(fill(th.seller.images.skipped, { count: 2 }))).toBeTruthy();
     expect(api.uploadImage).toHaveBeenCalledTimes(1);
   });
+
+  it("shows the skipped message together with the wrong-type message (CR-113)", async () => {
+    const user = userEvent.setup({ applyAccept: false });
+    const images = Array.from({ length: 7 }, (_, index) => ({ key: `k${index}`, url: "/x" }));
+    const { container } = render(
+      <ProductForm product={{ ...product, images }} categories={categories} />,
+    );
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, [
+      new File(["a"], "a.gif", { type: "image/gif" }),
+      new File(["b"], "b.png", { type: "image/png" }),
+      new File(["c"], "c.png", { type: "image/png" }),
+    ]);
+    const skipped = fill(th.seller.images.skipped, { count: 2 });
+    expect(
+      await screen.findByText((_, element) => {
+        const text = element?.textContent ?? "";
+        return (
+          element?.children.length === 0 &&
+          text.includes(th.seller.images.wrongType) &&
+          text.includes(skipped)
+        );
+      }),
+    ).toBeTruthy();
+    expect(api.uploadImage).not.toHaveBeenCalled();
+  });
 });
 
 describe("product page ids (CR-106) and counts (CR-105)", () => {

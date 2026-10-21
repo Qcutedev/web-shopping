@@ -73,18 +73,20 @@ export function ImageSetEditor({
     setUploading(true);
     onBusyChange?.(true);
     let uploadedAny = false;
-    // Files beyond the room left are not uploaded; say so instead of dropping them silently.
-    if (files.length > room) {
-      setProblem(fill(th.seller.images.skipped, { count: files.length - room }));
-    }
+    // Files beyond the room left are not uploaded; say so instead of dropping them silently. A
+    // later type or size message is shown together with this one, not instead of it (CR-113).
+    const skipped =
+      files.length > room ? fill(th.seller.images.skipped, { count: files.length - room }) : null;
+    const showProblem = (text: string) => setProblem([text, skipped].filter(Boolean).join(" "));
+    if (skipped) setProblem(skipped);
     for (const { file, id } of batch) {
       if (!(UPLOAD_CONTENT_TYPES as readonly string[]).includes(file.type)) {
-        setProblem(th.seller.images.wrongType);
+        showProblem(th.seller.images.wrongType);
         setItem(id, { status: "error", statusText: th.fileUpload.failed });
         break;
       }
       if (file.size > MAX_UPLOAD_FILE_BYTES) {
-        setProblem(th.seller.images.tooBig);
+        showProblem(th.seller.images.tooBig);
         setItem(id, { status: "error", statusText: th.fileUpload.failed });
         break;
       }
