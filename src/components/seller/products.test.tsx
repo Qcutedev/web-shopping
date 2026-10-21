@@ -566,6 +566,34 @@ describe("ProductForm images and copy (CR-101, CR-103)", () => {
     expect(save.disabled).toBe(false);
   });
 
+  it("uses the FileUpload primitive: limits, choose button, and a per-file status", async () => {
+    const user = userEvent.setup();
+    api.uploadImage.mockResolvedValue({
+      ok: true,
+      status: 201,
+      data: { key: "k1", url: "/api/files/k1", contentType: "image/png", sizeBytes: 3 },
+    });
+    const { container } = render(<ProductForm categories={categories} />);
+    const group = screen.getByRole("group", { name: th.seller.products.form.images });
+    expect(within(group).getByRole("button", { name: th.fileUpload.choosePictures })).toBeTruthy();
+    expect(within(group).getByText(new RegExp(th.seller.images.helper))).toBeTruthy();
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, new File(["abc"], "front.png", { type: "image/png" }));
+    const row = (await within(group).findByText("front.png")).closest("li") as HTMLElement;
+    expect(within(row).getByText(th.fileUpload.done)).toBeTruthy();
+  });
+
+  it("marks the file that failed in the per-file list", async () => {
+    const user = userEvent.setup({ applyAccept: false });
+    const { container } = render(<ProductForm categories={categories} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, new File(["x"], "a.gif", { type: "image/gif" }));
+    const row = (await screen.findByText("a.gif")).closest("li") as HTMLElement;
+    expect(within(row).getByText(th.fileUpload.failed)).toBeTruthy();
+    expect(screen.getByText(th.seller.images.wrongType)).toBeTruthy();
+    expect(api.uploadImage).not.toHaveBeenCalled();
+  });
+
   it("says when files beyond the limit are left out", async () => {
     const user = userEvent.setup();
     const images = Array.from({ length: 7 }, (_, index) => ({ key: `k${index}`, url: "/x" }));

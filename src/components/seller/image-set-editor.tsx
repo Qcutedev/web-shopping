@@ -1,14 +1,13 @@
 "use client";
 
-import { type ChangeEvent, useId, useState } from "react";
+import { useState } from "react";
 import { ProductImage } from "@/components/catalog/product-image";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { FieldMessage, Label } from "@/components/ui/field";
+import { FileUpload, type FileUploadItem } from "@/components/ui/file-upload";
 import { fill } from "@/i18n/fill";
 import { th } from "@/i18n/th";
 import { uploadImage } from "@/lib/api-client/seller";
-import { cn } from "@/lib/utils";
 import type { ImageRef } from "@/modules/catalog/schema";
 import { MAX_UPLOAD_FILE_BYTES, UPLOAD_CONTENT_TYPES } from "@/modules/uploads/schema";
 import { SellerRequestError, type SellerFailure } from "./request-error";
@@ -40,9 +39,8 @@ export function ImageSetEditor({
   /** Called with true while an upload is in flight, so the parent can hold its save button. */
   onBusyChange?: (busy: boolean) => void;
 }) {
-  const inputId = useId();
-  const messageId = `${inputId}-message`;
   const [uploading, setUploading] = useState(false);
+  const [items, setItems] = useState<FileUploadItem[]>([]);
   const [problem, setProblem] = useState<string | null>(null);
   const [failure, setFailure] = useState<SellerFailure | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -50,15 +48,28 @@ export function ImageSetEditor({
   const single = max === 1;
   const full = !single && images.length >= max;
 
-  async function onFiles(event: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(event.target.files ?? []);
-    event.target.value = "";
+  function setItem(id: string, patch: Partial<FileUploadItem>) {
+    setItems((current) => current.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+  }
+
+  async function onFiles(files: File[]) {
     if (files.length === 0 || uploading) return;
     setProblem(null);
     setFailure(null);
     setNotice(null);
     const room = single ? 1 : max - images.length;
     let next = [...images];
+    const batch = files
+      .slice(0, room)
+      .map((file, index) => ({ file, id: `${index}-${file.name}` }));
+    setItems(
+      batch.map(({ file, id }) => ({
+        id,
+        name: file.name,
+        status: "uploading" as const,
+        statusText: th.seller.images.uploading,
+      })),
+    );
     setUploading(true);
     onBusyChange?.(true);
     let uploadedAny = false;
@@ -66,20 +77,24 @@ export function ImageSetEditor({
     if (files.length > room) {
       setProblem(fill(th.seller.images.skipped, { count: files.length - room }));
     }
-    for (const file of files.slice(0, room)) {
+    for (const { file, id } of batch) {
       if (!(UPLOAD_CONTENT_TYPES as readonly string[]).includes(file.type)) {
         setProblem(th.seller.images.wrongType);
+        setItem(id, { status: "error", statusText: th.fileUpload.failed });
         break;
       }
       if (file.size > MAX_UPLOAD_FILE_BYTES) {
         setProblem(th.seller.images.tooBig);
+        setItem(id, { status: "error", statusText: th.fileUpload.failed });
         break;
       }
       const response = await uploadImage(file);
       if (!response.ok) {
         setFailure(response);
+        setItem(id, { status: "error", statusText: th.fileUpload.failed });
         break;
       }
+      setItem(id, { status: "done", statusText: th.fileUpload.done });
       next = single
         ? [{ key: response.data.key, url: response.data.url }]
         : [...next, { key: response.data.key, url: response.data.url }];
@@ -109,7 +124,6 @@ export function ImageSetEditor({
 
   return (
     <div className="flex flex-col gap-2">
-      <Label htmlFor={inputId}>{label}</Label>
       {failure ? <SellerRequestError failure={failure} returnTo={returnTo} /> : null}
       {notice ? <Alert tone="success">{notice}</Alert> : null}
 
@@ -166,29 +180,11 @@ export function ImageSetEditor({
         </ul>
       )}
 
-      <div className="flex flex-wrap items-center gap-3">
-        <input
-          id={inputId}
-          type="file"
-          accept={ACCEPT}
-          multiple={!single}
-          disabled={disabled || uploading || full}
-          aria-describedby={messageId}
-          onChange={onFiles}
-          className={cn(
-            "type-small file:border-control-border file:bg-surface file:text-foreground focus-ring file:type-label max-w-full file:mr-3 file:h-11 file:rounded-sm file:border file:px-4",
-            "disabled:cursor-not-allowed",
-          )}
-        />
-        {uploading ? (
-          <span role="status" className="type-small text-foreground-secondary">
-            {th.seller.images.uploading}
-          </span>
-        ) : null}
-      </div>
-      <FieldMessage
-        id={messageId}
-        helperText={[
+      <FileUpload
+        label={label}
+        dropText={th.fileUpload.drop}
+        buttonLabel={th.fileUpload.choosePictures}
+        limitsText={[
           th.seller.images.helper,
           single ? null : fill(th.seller.images.limit, { max }),
           single ? null : th.seller.images.firstNote,
@@ -196,6 +192,13 @@ export function ImageSetEditor({
           .filter(Boolean)
           .join(" ")}
         errorText={problem ?? undefined}
+        removeLabel={(name) => fill(th.fileUpload.remove, { name })}
+        progressLabel={(name) => fill(th.fileUpload.progress, { name })}
+        items={items}
+        onFiles={(files) => void onFiles(files)}
+        accept={ACCEPT}
+        multiple={!single}
+        disabled={disabled || uploading || full}
       />
     </div>
   );
