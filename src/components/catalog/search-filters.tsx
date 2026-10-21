@@ -2,8 +2,8 @@ import { unstable_rethrow } from "next/navigation";
 import { connection } from "next/server";
 import { FilterForm } from "@/components/catalog/filter-form";
 import type { PriceFilterError } from "@/components/catalog/price-filter";
-import { listCategories } from "@/modules/catalog";
-import { type CategoryDto, MAX_PAGE_SIZE, type ProductSort } from "@/modules/catalog/schema";
+import { listAllActiveCategories } from "@/components/catalog/all-categories";
+import type { CategoryDto, ProductSort } from "@/modules/catalog/schema";
 
 export { FilterFormSkeleton } from "@/components/catalog/filter-form";
 
@@ -24,7 +24,7 @@ export async function SearchFilters(props: {
   await connection();
   let categories: CategoryDto[] = [];
   try {
-    categories = (await listCategories({ page: 1, pageSize: MAX_PAGE_SIZE })).items;
+    categories = await listAllActiveCategories();
   } catch (error) {
     unstable_rethrow(error);
   }

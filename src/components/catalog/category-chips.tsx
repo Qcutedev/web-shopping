@@ -1,8 +1,8 @@
 import { unstable_rethrow } from "next/navigation";
 import { connection } from "next/server";
 import { CategoryChipsView } from "@/components/catalog/category-chips-view";
-import { listCategories } from "@/modules/catalog";
-import { type CategoryDto, MAX_PAGE_SIZE } from "@/modules/catalog/schema";
+import { listAllActiveCategories } from "@/components/catalog/all-categories";
+import type { CategoryDto } from "@/modules/catalog/schema";
 
 export { CategoryChipsSkeleton } from "@/components/catalog/category-chips-view";
 
@@ -14,7 +14,7 @@ export async function CategoryChips({ currentSlug }: { currentSlug?: string }) {
   await connection();
   let categories: CategoryDto[];
   try {
-    categories = (await listCategories({ page: 1, pageSize: MAX_PAGE_SIZE })).items;
+    categories = await listAllActiveCategories();
   } catch (error) {
     unstable_rethrow(error);
     return null;

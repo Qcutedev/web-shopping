@@ -196,6 +196,28 @@ describe("ProductsSection", () => {
   });
 });
 
+describe("NewProductSection categories (CR-100)", () => {
+  it("offers an active category that is only on page 2 of the category list", async () => {
+    getActor.mockResolvedValue(seller);
+    const first = Array.from({ length: 50 }, (_, index) => ({
+      id: `c${index}`,
+      name: `หมวด ${index}`,
+      slug: `cat-${index}`,
+      isSample: false,
+    }));
+    const second = [{ id: "late", name: "หมวดท้าย", slug: "late", isSample: false }];
+    listCategories.mockReset();
+    listCategories.mockImplementation(async (query: { page: number }) => ({
+      items: query.page === 1 ? first : second,
+      page: query.page,
+      pageSize: 50,
+      total: 51,
+    }));
+    render(await NewProductSection());
+    expect(screen.getByRole("option", { name: "หมวดท้าย" })).toBeTruthy();
+  });
+});
+
 describe("ProductDetailSection", () => {
   const props = (id = "p1", search: Record<string, string> = {}) => ({
     params: Promise.resolve({ id }),

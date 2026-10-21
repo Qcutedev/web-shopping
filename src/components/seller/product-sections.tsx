@@ -1,5 +1,4 @@
-import { listCategories } from "@/modules/catalog";
-import { MAX_PAGE_SIZE } from "@/modules/catalog/schema";
+import { listAllActiveCategories } from "@/components/catalog/all-categories";
 import { getOwnProduct } from "@/modules/inventory";
 import { productIdParamsSchema } from "@/modules/inventory/schema";
 import { notFound } from "@/server/errors";
@@ -14,8 +13,8 @@ type SearchParams = Record<string, string | string[] | undefined>;
 
 /** The categories a seller may file a product in: the active ones (REQ-S-04, BR-23). */
 async function loadCategoryOptions(): Promise<CategoryOption[]> {
-  const page = await listCategories({ page: 1, pageSize: MAX_PAGE_SIZE });
-  return page.items.map((category) => ({ id: category.id, name: category.name, isActive: true }));
+  const categories = await listAllActiveCategories();
+  return categories.map((category) => ({ id: category.id, name: category.name, isActive: true }));
 }
 
 /** Server Component: the create form with the active categories. Behind a Suspense boundary. */
