@@ -9,6 +9,7 @@ import { fill } from "@/i18n/fill";
 import { th } from "@/i18n/th";
 import { formatDateTime } from "@/lib/format";
 import type { SellerOrderViewDto } from "@/modules/orders/seller-schema";
+import { formatCount } from "./format-count";
 import { OrderStatusPanel } from "./order-status-panel";
 import { FulfilmentBadge, PaymentBadge } from "./status-badges";
 
@@ -76,8 +77,8 @@ export function OrderDetailView({ order }: { order: SellerOrderViewDto }) {
                   {detail.sku}: <UserName>{item.productSku}</UserName>
                 </p>
                 <p className="type-small text-foreground-secondary">
-                  <Price satang={item.unitPriceSatang} /> {th.seller.common.timesSign}
-                  {fill(detail.pieces, { count: item.quantity })}
+                  <Price satang={item.unitPriceSatang} /> {th.seller.common.timesSign}{" "}
+                  {fill(detail.pieces, { count: formatCount(item.quantity) })}
                 </p>
               </div>
               <p className="type-label">

@@ -385,6 +385,22 @@ describe("order page ids (CR-106) and display (CR-105)", () => {
     expect(getOwnSellerOrder).not.toHaveBeenCalled();
   });
 
+  it("writes unit price, times sign, and grouped quantity with single spaces (CR-110, CR-112)", async () => {
+    getActor.mockResolvedValue(seller);
+    getOwnSellerOrder.mockResolvedValue({
+      ...detail,
+      items: [{ ...detail.items[0]!, quantity: 1234 }],
+    });
+    render(await OrderSection({ params: Promise.resolve({ id: "so1" }) }));
+    const line = fill(th.seller.orders.detail.pieces, { count: "1,234" });
+    const paragraph = screen.getByText(
+      (_, element) => element?.tagName === "P" && (element.textContent ?? "").includes(line),
+    );
+    expect(paragraph.textContent?.replace(/\s+/g, " ")).toBe(
+      `${formatSatang(25_900)} ${th.seller.common.timesSign} ${line}`,
+    );
+  });
+
   it("groups thousands in the order count and uses the shared separators", async () => {
     getActor.mockResolvedValue(seller);
     listOwnSellerOrders.mockResolvedValue({
