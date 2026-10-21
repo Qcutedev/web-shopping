@@ -323,6 +323,27 @@ describe("StoreForm follows the stored store (CR-99)", () => {
   });
 });
 
+describe("StoreForm after a save (CR-119)", () => {
+  it("keeps text typed after the save when the refresh brings the saved store", async () => {
+    const user = userEvent.setup();
+    const savedStore = { ...store, name: "saved-name" };
+    updateStore.mockResolvedValue({ ok: true, status: 200, data: savedStore });
+    const { rerender } = render(<StoreForm store={store} />);
+    const name = screen.getByLabelText(new RegExp(th.seller.store.fields.name));
+    await user.clear(name);
+    await user.type(name, "saved-name");
+    await user.click(screen.getByRole("button", { name: th.seller.store.save }));
+    expect(await screen.findByText(th.seller.store.saved)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(new RegExp(th.seller.store.fields.name)), {
+      target: { value: "typed-after-save" },
+    });
+    rerender(<StoreForm store={savedStore} />);
+    expect(
+      (screen.getByLabelText(new RegExp(th.seller.store.fields.name)) as HTMLInputElement).value,
+    ).toBe("typed-after-save");
+  });
+});
+
 describe("StoreForm holds save during an upload (CR-103)", () => {
   it("disables the save button until the picture has arrived", async () => {
     const user = userEvent.setup();

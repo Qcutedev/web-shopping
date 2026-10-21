@@ -23,6 +23,7 @@ import {
   serverFieldErrors,
   validateWith,
 } from "./form-validation";
+import { storeEditableKey } from "./editable-key";
 import { ImageSetEditor } from "./image-set-editor";
 import { SellerRequestError, type SellerFailure } from "./request-error";
 import { SELLER_ROUTES } from "./routes";
@@ -71,24 +72,25 @@ export function StoreForm({ store }: { store: SellerStoreDto }) {
   // baseline `saved` always follows; the typed values are replaced only when an editable field
   // changed, so a refresh for another reason keeps unsaved edits (CR-109).
   const storeKey = JSON.stringify(store);
-  const editableKey = JSON.stringify([
-    store.name,
-    store.description,
-    store.contactPhone,
-    store.logo,
-  ]);
+  const editableKey = storeEditableKey(store);
   const [seenStoreKey, setSeenStoreKey] = useState(storeKey);
   const [seenEditableKey, setSeenEditableKey] = useState(editableKey);
+  // Key of the record the typed values were last seeded from: the page's store, or the server's
+  // answer to a save. The refresh after a save brings that same record and must not re-seed (CR-119).
+  const [ownKey, setOwnKey] = useState(editableKey);
   if (seenStoreKey !== storeKey) {
     setSeenStoreKey(storeKey);
     setSaved(store);
   }
   if (seenEditableKey !== editableKey) {
     setSeenEditableKey(editableKey);
-    setName(store.name);
-    setDescription(store.description ?? "");
-    setContactPhone(store.contactPhone);
-    setLogo(store.logo);
+    if (editableKey !== ownKey) {
+      setOwnKey(editableKey);
+      setName(store.name);
+      setDescription(store.description ?? "");
+      setContactPhone(store.contactPhone);
+      setLogo(store.logo);
+    }
   }
   const [errors, setErrors] = useState<FieldErrors<Field>>({});
   const [failure, setFailure] = useState<SellerFailure | null>(null);
@@ -133,6 +135,7 @@ export function StoreForm({ store }: { store: SellerStoreDto }) {
       setDescription(response.data.description ?? "");
       setContactPhone(response.data.contactPhone);
       setLogo(response.data.logo);
+      setOwnKey(storeEditableKey(response.data));
       setSuccess(th.seller.store.saved);
       router.refresh();
       return;

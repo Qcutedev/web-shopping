@@ -13,6 +13,7 @@ import type { ApiFailure } from "@/lib/api-client/http";
 import { createProduct, updateProduct } from "@/lib/api-client/seller";
 import type { SellerProductDto } from "@/modules/inventory/schema";
 import { type FieldErrors, messageForCode, serverFieldErrors } from "./form-validation";
+import { productEditableKey } from "./editable-key";
 import { ImageSetEditor } from "./image-set-editor";
 import {
   EMPTY_PRODUCT_VALUES,
@@ -60,16 +61,22 @@ export function ProductForm({
   // change or product action also refreshes the page and must not wipe unsaved edits (CR-109).
   // Stock is not edited here after create, so it is left out of the key.
   const productKey = JSON.stringify(product ?? null);
-  const editableKey = JSON.stringify(product ? { ...valuesOfProduct(product), stock: "" } : null);
+  const editableKey = productEditableKey(product);
   const [seenProductKey, setSeenProductKey] = useState(productKey);
   const [seenEditableKey, setSeenEditableKey] = useState(editableKey);
+  // Key of the record the typed values were last seeded from: the page's product, or the server's
+  // answer to a save. The refresh after a save brings that same record and must not re-seed (CR-119).
+  const [ownKey, setOwnKey] = useState(editableKey);
   if (seenProductKey !== productKey) {
     setSeenProductKey(productKey);
     setSaved(product);
   }
   if (seenEditableKey !== editableKey) {
     setSeenEditableKey(editableKey);
-    setValues(product ? valuesOfProduct(product) : EMPTY_PRODUCT_VALUES);
+    if (editableKey !== ownKey) {
+      setOwnKey(editableKey);
+      setValues(product ? valuesOfProduct(product) : EMPTY_PRODUCT_VALUES);
+    }
   }
   const [errors, setErrors] = useState<FieldErrors<ProductField>>({});
   const [failure, setFailure] = useState<SellerFailure | null>(null);
@@ -151,6 +158,7 @@ export function ProductForm({
     if (response.ok) {
       setSaved(response.data);
       setValues(valuesOfProduct(response.data));
+      setOwnKey(productEditableKey(response.data));
       setSuccess(th.seller.products.form.saved);
       router.refresh();
       return;
