@@ -58,6 +58,14 @@ export function ChevronRightIcon(props: IconProps) {
   );
 }
 
+export function CloseIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M5.5 5.5l9 9M14.5 5.5l-9 9" />
+    </Icon>
+  );
+}
+
 export function MinusIcon(props: IconProps) {
   return (
     <Icon {...props}>
