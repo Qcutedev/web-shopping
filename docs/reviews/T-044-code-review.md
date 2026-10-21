@@ -33,3 +33,14 @@ Money only through `<Price>`/`formatSatang`, integer math in `parsePriceInput`. 
 ## Not verified
 
 Build, browser, E2E, integration, CR-106 database behaviour. Approval here does not replace a security review.
+
+
+## Re-review of fix commits e52dae7, b21a1bf, d67809c, a5f72a6 (eighty-sixth session)
+
+Verdict: CHANGES REQUIRED. CR-97 to CR-99 and CR-101 to CR-106 are fixed (each new test fails without its fix), BOM strip confirmed. Checks by reviewer: `pnpm lint`, `typecheck`, `format:check` exit 0; seller + stat-card tests 8 files, 118 passed on a clean worktree. Not run: build, browser, e2e, integration.
+
+- **CR-109 (Medium, frontend)** `product-form.tsx:58-65`: re-seed key is `JSON.stringify(product)` (whole DTO). A stock change or product action calls `router.refresh()`, the new prop replaces all unsaved form values and orphans uploaded images (the CR-103 harm). Reproduced by probe: typed title lost after stock-only rerender. `store-form.tsx:69-80` same design, lower risk. Fix: key on editable fields only, or re-seed `values` only when not dirty; always update `saved`. Add the probe as a test.
+- **CR-110 (Low, frontend)** `order-detail-view.tsx:79-80`, `orders-list-view.tsx:71-73`: JSX drops the spaces around `{timesSign}` / `{dotSeparator}`; text reads "฿259.00 ×2 ชิ้น". Add `{" "}`; tighten the loose RegExp test.
+- **CR-111 (Info, qa)** `dashboard-store.test.tsx:333-346` passes against the old `Tile`; assert something only `StatCard` gives or label it a regression guard.
+- **CR-112 (Info, frontend)** `order-detail-view.tsx:80` raw `item.quantity` not through `formatCount`.
+- **CR-113 (Info, frontend)** `image-set-editor.tsx:65-77` a later `wrongType`/`tooBig` message hides the `skipped` message from the same pick.
