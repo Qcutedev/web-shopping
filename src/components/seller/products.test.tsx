@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fill } from "@/i18n/fill";
@@ -555,6 +555,50 @@ describe("ProductForm follows the stored product (CR-99)", () => {
     ) as HTMLInputElement;
     expect(title.value).toBe(product.title);
     expect(title.disabled).toBe(true);
+  });
+
+  it("keeps the create-mode draft and locks the form on suspension (CR-166)", () => {
+    const categories = [{ id: "c1", name: "x", isActive: true }];
+    const { rerender } = render(<ProductForm categories={categories} />);
+    fireEvent.change(screen.getByLabelText(new RegExp(th.seller.products.form.title)), {
+      target: { value: "draft-title" },
+    });
+    fireEvent.change(screen.getByLabelText(new RegExp(th.seller.products.form.description)), {
+      target: { value: "draft-description" },
+    });
+    rerender(<ProductForm categories={categories} disabled />);
+    const title = screen.getByLabelText(
+      new RegExp(th.seller.products.form.title),
+    ) as HTMLInputElement;
+    expect(title.value).toBe("draft-title");
+    expect(title.disabled).toBe(true);
+    expect(
+      (screen.getByLabelText(new RegExp(th.seller.products.form.description)) as HTMLInputElement)
+        .value,
+    ).toBe("draft-description");
+  });
+
+  it("discards a picture that finishes uploading after the form locked (CR-165)", async () => {
+    const user = userEvent.setup();
+    const categories = [{ id: "c1", name: "x", isActive: true }];
+    let finish: (value: unknown) => void = () => undefined;
+    api.uploadImage.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    const { container, rerender } = render(<ProductForm categories={categories} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, new File(["abc"], "late.png", { type: "image/png" }));
+    rerender(<ProductForm categories={categories} disabled />);
+    await act(async () => {
+      finish({
+        ok: true,
+        status: 201,
+        data: { key: "late", url: "/api/files/late", contentType: "image/png", sizeBytes: 3 },
+      });
+    });
+    expect(screen.queryByText(th.seller.images.uploaded)).toBeNull();
+    expect(screen.getByText(th.seller.images.empty)).toBeTruthy();
+    // Lifting the lock afterwards does not bring the late picture back.
+    rerender(<ProductForm categories={categories} />);
+    expect(screen.getByText(th.seller.images.empty)).toBeTruthy();
   });
 
   it("keeps a typed title when only the stock changes (CR-109)", () => {

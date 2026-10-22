@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ProductImage } from "@/components/catalog/product-image";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -45,6 +45,16 @@ export function ImageSetEditor({
   const [failure, setFailure] = useState<SellerFailure | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  // An upload that finishes after the parent locked the control is discarded (CR-165). The
+  // closure of `onFiles` is from the render that started the upload, so the lock is read from refs
+  // kept current by an effect. `lockedDuringUpload` stays set even if the lock lifts again.
+  const disabledRef = useRef(disabled);
+  const lockedDuringUpload = useRef(false);
+  useEffect(() => {
+    disabledRef.current = disabled;
+    if (disabled) lockedDuringUpload.current = true;
+  }, [disabled]);
+
   const single = max === 1;
   const full = !single && images.length >= max;
 
@@ -72,6 +82,7 @@ export function ImageSetEditor({
     );
     setUploading(true);
     onBusyChange?.(true);
+    lockedDuringUpload.current = disabledRef.current;
     let uploadedAny = false;
     // Files beyond the room left are not uploaded; say so instead of dropping them silently. A
     // later type or size message is shown together with this one, not instead of it (CR-113).
@@ -104,7 +115,7 @@ export function ImageSetEditor({
     }
     setUploading(false);
     onBusyChange?.(false);
-    if (uploadedAny) {
+    if (uploadedAny && !lockedDuringUpload.current && !disabledRef.current) {
       onChange(next);
       setNotice(th.seller.images.uploaded);
     }

@@ -77,15 +77,16 @@ export function ProductForm({
     setSeenProductKey(productKey);
     setSaved(product);
   }
-  // A refresh that locks the form (archived product or suspended store) drops unsaved typed values
-  // and shows the stored ones (CR-120). The keys are brought level so the check below does not
+  // A refresh that locks an existing product (archived product or suspended store) drops unsaved
+  // typed values and shows the stored ones (CR-120). A create-mode draft has no stored record, so
+  // it is kept and only locked (CR-166). The keys are brought level so the check below does not
   // seed a second time.
   const [seenDisabled, setSeenDisabled] = useState(disabled);
   if (seenDisabled !== disabled) setSeenDisabled(disabled);
   if (!seenDisabled && disabled) {
     setSeenEditableKey(editableKey);
     setOwnKey(editableKey);
-    setValues(product ? valuesOfProduct(product) : EMPTY_PRODUCT_VALUES);
+    if (product) setValues(valuesOfProduct(product));
     setErrors({});
     setFormMessage(null);
   } else if (seenEditableKey !== editableKey) {
