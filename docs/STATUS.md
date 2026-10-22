@@ -12,22 +12,22 @@ Not started: checkout UI (T-034), reviews, seller onboarding and seller products
 
 ## Resume here
 
-Session 103 started. Running 3 agents in parallel: (1) security re-check SEC-081 + T-034 `checkout-view.tsx`, `order-detail-view.tsx` (paths: docs/SECURITY.md, docs/reviews/), (2) code-review T-034 (read-only, report only), (3) backend-api 50-address cap per user per D-044 (paths: src/modules/addresses or equivalent, its tests, docs/API_CONTRACTS.md).
+Session 103 finished. No agent is running. Local commits, not pushed.
 
 Read first in a new session: CLAUDE.md, this file, `git status`, `git diff`.
 
-Done in session 102 (local commits, not pushed): T-033 CC-12 test `tests/integration/cart/return-race.test.ts` (4 passed; cart+checkout integration set 129 passed). SEC-080 re-checked FIXED (security). T-034 cart, checkout, order confirmation/history UI `cb07d84` (IMPLEMENTED; `pnpm test` 4779 passed, typecheck, lint, build ok). SEC-081 fix landed by orchestrator in `eslint.config.mjs` (hardened guard for `src`, 23 probes flipped, `pnpm lint` and `pnpm verify` ok); security must re-check and set the status in SECURITY.md.
+Done in session 103: security re-check `7cfa321` (SEC-081 stays OPEN; T-034 UI no security finding, `docs/reviews/T-034-security.md`). Code review of T-034: CHANGES REQUIRED (1 blocking, 8 Low; report was returned in chat, not saved to a file). Address cap 50 per user `5afa1fa` (409 CONFLICT, `details.reason` ADDRESS_LIMIT; profile+checkout integration 86 passed; `pnpm test` 4803 passed).
 
 Open:
-- SEC-081: security re-check, then mark FIXED. SEC-082 (Low, qa): scanner pass 2 must cover `DATABASE_URL`, then flip its `it.fails`.
-- T-034 owner questions answered: D-044. Follow-ups: product-requirements approves the new Thai copy; backend-api adds a 50-address cap per user.
-- T-034 not VERIFIED: no browser check at 360/768/1280 px, no e2e, no code review, security re-check of `checkout-view.tsx` and `order-detail-view.tsx`. No add-to-cart UI yet; header cart count not wired.
+- T-034 blocking (frontend): `checkout-view.tsx` while outcome is `unknown`, disable submit and inputs so only "ตรวจสอบสถานะ" proceeds; add test. Low items: refresh on 404 address, cart-write INSUFFICIENT_STOCK uses sold-out copy, `checkout.refusedLowered` wording vs D-026, `failedBody` when `cartReturn.items` is empty, unused `th.ts` keys, test strength, double message on unknown, raw `payment.provider`, `orders/[id]/page.tsx` props type.
+- SEC-081 OPEN (orchestrator, `eslint.config.mjs`): remediation (a) to (e) in SECURITY.md (noInlineConfig for all `src`, refuse test-named imports from non-test files, `module`/`vm` selectors, computed member access, `?`/`#` in NOT_NORMAL). Then flip 19 `it.fails` in `tests/security/sec081-recheck.test.ts`, devops adds 19 spellings to `scripts/check-import-guards.mjs`, security re-checks. SEC-082 (Low, qa) still open.
+- Frontend: Thai copy for ADDRESS_LIMIT in `src/i18n/th.ts` and address form; product-requirements approves new Thai copy. qa: accept `tests/integration/profile/address-limit.test.ts`; `pg_stat_clear_snapshot()` fix for `profile/endpoints.test.ts`, `cart/concurrency.test.ts`.
+- T-034 not VERIFIED: no browser check at 360/768/1280 px, no e2e. No add-to-cart UI yet; header cart count not wired.
 - T-033 CC gaps still open: CC-04, CC-06, CC-08, CC-09, CC-10, CC-11, CC-13, CC-14, parts of CC-05 and CC-07.
-- Suggested: move payment transitions out of public `src/modules/orders/index.ts` (backend-api). devops optional: start-up log when NODE_ENV=production.
-- Residual: `returnItemToCart` has no 50-line cap.
+- Suggested: move payment transitions out of public `src/modules/orders/index.ts` (backend-api). Residual: `returnItemToCart` has no 50-line cap. Auth startup-hook tests may time out under load.
 
 Next, in order:
-1. Code review and security review of T-034; browser check.
+1. frontend fixes for T-034; SEC-081 guard fix; browser check.
 2. Remaining T-033 CC cases; T-031/T-032 review status re-check.
 3. Seller products/orders, admin area, E2E, CI.
 
@@ -83,7 +83,7 @@ Notes marked "stale?" were written while Docker was down; later sessions ran the
 | T-031 | Cart | IMPLEMENTED | Code review CHANGES REQUIRED (`reviews/T-031-code-review.md`); security review pending |
 | T-032 | Checkout, orders, mock payment | IMPLEMENTED | Reviewed, fixes applied; integration suite 1357 passed (session 99); open: SEC-053, SEC-056, CR-T032-08 |
 | T-033 | Concurrency tests | IMPLEMENTED | Orchestrator has not re-run; CC-12 done; other CC gaps open |
-| T-034 | Checkout UI | IMPLEMENTED | Commit `cb07d84`; open questions in Resume here; not reviewed, no browser check |
+| T-034 | Checkout UI | IMPLEMENTED | Commit `cb07d84`; code review found 1 blocking (Resume here); security ok; no browser check |
 | T-035 | Reviews | NOT STARTED | |
 | T-040 | Seller onboarding | NOT STARTED | Row not updated, but session logs say T-040 is IMPLEMENTED (commit `6c2112c` and later) and was code-reviewed. Confirm with `git log` before starting |
 | T-041 | Uploads | IMPLEMENTED | Security review done (`reviews/T-041-security.md`, no Critical or High); not VERIFIED |
