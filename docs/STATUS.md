@@ -20,8 +20,10 @@ Done in session 99: SEC-078 re-checked and FIXED (`docs/SECURITY.md`, `tests/sec
 
 CR-162: `tests/helpers/test-database-url.ts:299` "equal to DATABASE_URL" message ignores `prefix`/`where` (CR-158 incomplete; integration message must stay unchanged, pinned by `tests/integration/harness/test-database-url.test.ts:180,185`). CR-163: `dashboard-store.test.tsx:333` test name does not match what it tests. CR-164: lock tests do not assert errors/formMessage are cleared. CR-165: late `ImageSetEditor` upload can write into a locked `ProductForm`. CR-166: create-mode `ProductForm` resets the draft on suspension (confirm intended).
 
+Owner decisions (2026-10-22): SEC-056 block the mock provider when NODE_ENV=production (backend-api); SEC-053 cap a cart at 50 distinct lines (backend-api, then update CR-T032-12); CR-166 keep the create-mode draft on suspension, lock without resetting (frontend, with CR-165).
+
 Next, in order:
-1. qa: SEC-079, CR-162 to CR-164. frontend: CR-165. Owner: CR-166, SEC-056, SEC-053 (line limit number).
+1. qa: SEC-079, CR-162 to CR-164. frontend: CR-165. backend-api: SEC-056, SEC-053.
 2. T-032 follow-ups: CR-T032-10 import-guard probe (security); T-033 CC-12; T-032 and T-031 code-review/security status still need re-checking.
 3. T-034 checkout UI; seller and admin work.
 
