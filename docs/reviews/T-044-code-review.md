@@ -117,3 +117,14 @@ Verdict: CHANGES REQUIRED. Validation reuse is correct; no path reaches a non-te
 - **CR-152 (Low, qa)** no global teardown; `e2e/.auth/seller.json`, `marketplace_e2e`, `.next-e2e/` remain (git-ignored, local). Document or add teardown.
 
 Security-sensitive parts (database targeting, session cookie file) still need the security agent.
+
+## Review of a781e29 and 3a03656 (CR-143 to CR-152 fixes), ninety-fifth session
+
+Verdict: APPROVE. CR-143 to CR-152 all fixed (CR-144 and CR-152 by documentation, CR-147 uses `__dirname` because Playwright loads these files as CommonJS). `pnpm test:e2e` was run by the orchestrator: 19 passed, `git status` clean afterwards, so CR-143 is observed closed. Reviewer re-ran `pnpm format:check`, `pnpm lint`, `pnpm typecheck`: clean. Security not covered.
+
+- **CR-153 (Low, devops)** `docs/DEPLOYMENT.md:399` says `tsc` "does not check its stale types". True only while `next-env.d.ts` points at `.next`. After an e2e run it imports `./.next-e2e/dev/types/routes.d.ts`, and `exclude` does not stop imported files, so a bare `tsc` or the IDE checks them. `pnpm typecheck` is safe (`next typegen` rewrites `next-env.d.ts` first). Reword.
+- **CR-154 (Nit, qa)** `e2e/stacked-table.spec.ts:56`: docstring `*/` shares a line with `async function tabbingReaches(`. Split the line.
+- **CR-155 (Nit, qa)** `e2e/support/environment.ts:62`: source label "the .env file" is used for `.env.local` etc. and the message says "integration run". Widen the `source` parameter in `tests/helpers/test-database-url.ts:360` or give the e2e check its own message.
+- **CR-156 (Low, qa)** `e2e/support/environment.ts:83`: `otherUrls` holds `DATABASE_URL` only from process env and `.env`; a dev URL only in `.env.local` or `.env.development*` is never compared with `DATABASE_URL_TEST`. Add those files' values or narrow the doc sentence.
+
+Not verified by the reviewer: the shadow-root walk (CR-149) against a real `nextjs-portal`, `pnpm test`.
