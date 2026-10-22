@@ -12,23 +12,21 @@ Not started: checkout and orders (T-032, T-034), reviews, seller onboarding and 
 
 ## Resume here
 
-Ninety-eighth session started. Running: qa agent on next-steps 1 and 2 (SEC-078, CR-157, CR-158 to CR-160). Paths: `e2e/support/**`, `e2e/stacked-table.spec.ts`, `tests/helpers/test-database-url.ts`, `tests/security/sec074-077-recheck.test.ts`, `tests/e2e-support/**`, `docs/DEPLOYMENT.md`, `docs/TEST_STRATEGY.md`. Also running: frontend agent on CR-120 (owner chose: re-seed to stored values on lock), paths `src/components/seller/store-form.tsx`, `src/components/seller/**` tests for it, `dashboard-store.test.tsx`. If interrupted, inspect uncommitted files first. (Ninety-seventh finished cleanly.) All work is committed on `main` (no remote, nothing pushed).
+Ninety-eighth session finished. No agent is running. All work is committed on `main` (no remote, nothing pushed).
 
 Read first in a new session: CLAUDE.md, this file, `git status`, `git diff`.
 
-Done in session 97: red test fixed and SEC-074 to SEC-077 set to FIXED (`44a9c59`); code review of `d729de0`, `dc0be86` APPROVE (`8416d23`).
+Done in session 98: SEC-078 and CR-157 fixed in code (`a202868`); CR-158 to CR-161 (`914cb39`); CR-120 re-seed seller forms on lock, owner decision (`894c7c9`). Orchestrator re-ran format:check, lint, typecheck, `pnpm test` (4597 passed, 5 expected fail): exit 0.
 
 Next, in order:
-1. qa fixes SEC-078 and CR-157 in `e2e/support/env-file-scan.ts` (split lines on U+2028/U+2029, or use `@next/env` `loadEnvConfig` for the check; correct the "accepts every form dotenv accepts" comment). Then flip the two `it.fails` cases in `tests/security/sec074-077-recheck.test.ts` to `it`.
-2. qa fixes CR-158 to CR-160 (nits and test gaps in `docs/reviews/T-044-code-review.md`).
-3. Owner decision CR-120 (see `docs/reviews/T-044-code-review.md`).
-4. Then the missing features: T-032 checkout, orders, mock payment; T-034 checkout UI; seller and admin work.
+1. security re-checks SEC-078 (still marked open in `docs/SECURITY.md`); code-review of `a202868`, `914cb39`, `894c7c9`.
+2. Then the missing features: T-032 checkout, orders, mock payment; T-034 checkout UI; seller and admin work.
 
 Do not run two e2e suites at once: they share database `marketplace_e2e` and port 3100.
 
 Agents must not type backslash-u escapes in tool input: the tool turns them into real invisible characters (likely how U+FEFF reached SECURITY.md). Generate them from code points in a script.
 
-Last known test results (session 97): `pnpm test` 4568 passed, 5 expected fail (code-review agent); `pnpm test:e2e` 19 passed when run alone; `pnpm exec vitest run --project security` 1191 passed, 7 expected fail (security agent); `format:check`, `lint`, `typecheck` exit 0.
+Last known test results (session 98): `pnpm test` 4597 passed, 5 expected fail; security project 1193 passed, 5 expected fail (per qa agent); `format:check`, `lint`, `typecheck` exit 0. e2e not run this session.
 
 Standing rules from the owner (D-019): never guess, park questions here and ask in batches; commit locally after each task passes its checks, never push without being told; stop for owner review at the five milestones.
 
@@ -36,7 +34,6 @@ Standing rules from the owner (D-019): never guess, park questions here and ask 
 
 | Id | Decision | Where |
 | --- | --- | --- |
-| CR-120 | Open since session 91 | `docs/reviews/T-044-code-review.md` |
 | OQ-20 | Design details to confirm on real pages (input text size 15 or 16 px, chip and search height, required-field marking, sold-out quantity selector, negative amounts, error summary) | DESIGN_SYSTEM.md |
 | Others from session 91 | SEC-072, SR-02 split, SEC-064, SEC-066, seller header link, SEC-073 residual (a/b/c), `th.ts` proposal strings, mobile sort. They may have been answered since; check before asking | old STATUS.md in git, [SECURITY.md](SECURITY.md) |
 
