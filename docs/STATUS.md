@@ -12,7 +12,9 @@ Not started: checkout and orders (T-032, T-034), reviews, seller onboarding and 
 
 ## Resume here
 
-Ninety-eighth session finished. No agent is running. All work is committed on `main` (no remote, nothing pushed).
+Session 99 started. Running in parallel: (1) security re-check SEC-078 -> docs/SECURITY.md; (2) code-review of a202868, 914cb39, 894c7c9 -> reviews/; (3) backend-api T-032 -> src/modules/checkout|orders|payments, src/app/api/v1/checkout|orders, docs/API_CONTRACTS.md, tests. If interrupted, inspect uncommitted files before relaunching.
+
+Previous: ninety-eighth session finished. All work is committed on `main` (no remote, nothing pushed).
 
 Read first in a new session: CLAUDE.md, this file, `git status`, `git diff`.
 
