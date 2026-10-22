@@ -46,6 +46,13 @@ export type TestDatabaseInput = {
    * The test URL must name another server (host and port) than each of them.
    */
   otherUrls: readonly (string | undefined)[];
+  /**
+   * Where each value of `otherUrls` came from, same order, for example "the .env.local file".
+   * Used by the e2e run (CR-158) so a refusal names the file. Never a URL.
+   */
+  otherSources?: readonly string[];
+  /** Whose run this is; the refusals say so. Default `integration`. */
+  run?: "integration" | "e2e";
 };
 
 export type TestDatabase = {
@@ -264,7 +271,8 @@ function assertStrictForm(testUrl: string, url: URL): void {
  * Throws `TestDatabaseRefusedError` on anything that is not the local test database.
  */
 export function resolveTestDatabase(input: TestDatabaseInput): TestDatabase {
-  const { testUrl, otherUrls } = input;
+  const { testUrl, otherUrls, otherSources } = input;
+  const run = input.run ?? "integration";
   if (testUrl === undefined || testUrl.trim() === "") {
     throw new TestDatabaseRefusedError("DATABASE_URL_TEST is not set.");
   }
@@ -279,10 +287,14 @@ export function resolveTestDatabase(input: TestDatabaseInput): TestDatabase {
   }
 
   const target = driverTarget(url);
-  for (const other of otherUrls) {
+  for (const [index, other] of otherUrls.entries()) {
     if (other === undefined || other === "") {
       continue;
     }
+    const source = otherSources?.[index];
+    // CR-158: the e2e run names the file; the message holds no value.
+    const where = run === "e2e" && source !== undefined ? ` (read from ${source})` : "";
+    const prefix = run === "e2e" ? "End-to-end run refused: " : "";
     if (other === testUrl) {
       throw new TestDatabaseRefusedError("DATABASE_URL_TEST is equal to DATABASE_URL.");
     }
@@ -292,14 +304,14 @@ export function resolveTestDatabase(input: TestDatabaseInput): TestDatabase {
     const otherUrl = parsePostgresUrl(other);
     if (otherUrl === undefined) {
       throw new TestDatabaseRefusedError(
-        "DATABASE_URL is not a valid PostgreSQL URL, so it cannot be compared with DATABASE_URL_TEST; fix it or unset it for the integration run.",
+        `${prefix}DATABASE_URL${where} is not a valid PostgreSQL URL, so it cannot be compared with DATABASE_URL_TEST; fix it or unset it for the ${run} run.`,
       );
     }
     const namedHost = lastNonEmpty(otherUrl.searchParams.getAll("host")) ?? otherUrl.hostname;
     const namedPort = lastNonEmpty(otherUrl.searchParams.getAll("port")) ?? otherUrl.port;
     if (namedHost === "" || namedPort === "") {
       throw new TestDatabaseRefusedError(
-        "DATABASE_URL names no host or no port, so it cannot be compared with DATABASE_URL_TEST; write both, as the database driver would take the missing one from the environment.",
+        `${prefix}DATABASE_URL${where} names no host or no port, so it cannot be compared with DATABASE_URL_TEST; write both, as the database driver would take the missing one from the environment.`,
       );
     }
     const otherTarget = driverTarget(otherUrl);
@@ -308,14 +320,14 @@ export function resolveTestDatabase(input: TestDatabaseInput): TestDatabase {
     }
     if (otherTarget.database === target.database) {
       throw new TestDatabaseRefusedError(
-        "DATABASE_URL_TEST names the same host, port, and database as DATABASE_URL.",
+        `${prefix}DATABASE_URL_TEST names the same host, port, and database as DATABASE_URL${where}.`,
       );
     }
     // CR-34: the harness creates and drops its template and worker databases on the server of
     // DATABASE_URL_TEST, so that server must not be the one DATABASE_URL names, whatever the
     // database name.
     throw new TestDatabaseRefusedError(
-      "DATABASE_URL_TEST names the same server (host and port) as DATABASE_URL; the test database must be on a server of its own.",
+      `${prefix}DATABASE_URL_TEST names the same server (host and port) as DATABASE_URL${where}; the test database must be on a server of its own.`,
     );
   }
 

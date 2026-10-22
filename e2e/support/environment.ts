@@ -19,7 +19,12 @@ import { parseEnv } from "node:util";
 import { resolveTestDatabase, type TestDatabase } from "../../tests/helpers/test-database-url";
 
 import { E2E_DATABASE_NAME, REPO_ROOT } from "./constants";
-import { assertNoDriverOverrideForE2e, NEXT_ENV_FILE_NAMES, scanEnvText } from "./env-file-scan";
+import {
+  assertNoDriverOverrideForE2e,
+  collectDevelopmentUrls,
+  NEXT_ENV_FILE_NAMES,
+  scanEnvText,
+} from "./env-file-scan";
 
 export {
   E2E_DATABASE_NAME,
@@ -69,13 +74,16 @@ function resolveBase(): TestDatabase {
   for (const [name, content] of nextFiles) {
     assertNoDriverOverrideForE2e(content, `the ${name} file`);
   }
+  const { otherUrls, otherSources } = collectDevelopmentUrls({
+    processUrl: process.env["DATABASE_URL"],
+    envFileUrl: fileEnv["DATABASE_URL"],
+    nextFiles,
+  });
   return resolveTestDatabase({
     testUrl: nonEmpty(process.env["DATABASE_URL_TEST"]) ?? nonEmpty(fileEnv["DATABASE_URL_TEST"]),
-    otherUrls: [
-      process.env["DATABASE_URL"],
-      fileEnv["DATABASE_URL"],
-      ...nextFiles.map(([, content]) => nonEmpty(content["DATABASE_URL"])),
-    ],
+    otherUrls,
+    otherSources,
+    run: "e2e",
   });
 }
 

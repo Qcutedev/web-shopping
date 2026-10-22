@@ -1,7 +1,7 @@
 /**
  * Database steps of the end-to-end setup, run in their own process by global-setup.ts
  * (`tsx tests/e2e-support/database.ts check|empty|canary|seed`; `check` runs against the validated
- * DATABASE_URL_TEST before the e2e database exists, `empty` and `seed` against `marketplace_e2e`). They run under tsx because the generated Prisma
+ * DATABASE_URL_TEST before the e2e database exists, `empty`, `canary`, and `seed` against `marketplace_e2e`). They run under tsx because the generated Prisma
  * client is an ES module, which Playwright's own TypeScript loader cannot import.
  *
  * Refuses to do anything unless the connection is to `marketplace_e2e`.
