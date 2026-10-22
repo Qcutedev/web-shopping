@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export default function OrderPage({ params }: { params: Promise<{ id: string }> }) {
+export default function OrderPage({ params }: PageProps<"/orders/[id]">) {
   return (
     <PageFrame heading={th.orders.detailTitle}>
       <Suspense fallback={<AccountSkeleton rows={3} />}>
@@ -20,7 +20,7 @@ export default function OrderPage({ params }: { params: Promise<{ id: string }> 
   );
 }
 
-async function OrderContent({ params }: { params: Promise<{ id: string }> }) {
+async function OrderContent({ params }: Pick<PageProps<"/orders/[id]">, "params">) {
   const { id } = await params;
   return <OrderSection id={id} />;
 }

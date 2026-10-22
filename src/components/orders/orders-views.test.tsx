@@ -147,6 +147,32 @@ describe("OrderDetailView", () => {
     expect(screen.queryByText(th.orders.detail.paidAt)).toBeNull();
   });
 
+  it("does not claim items came back when nothing returned to the cart", () => {
+    for (const cartReturn of [null, { capped: false, items: [] }]) {
+      const { unmount } = render(
+        <OrderDetailView
+          order={order({
+            paymentStatus: "FAILED",
+            paidAt: null,
+            payment: { provider: "MOCK", isSimulated: true, failureReason: "SIMULATED_DECLINE" },
+            cartReturn,
+          })}
+        />,
+      );
+      const alert = screen.getByRole("alert");
+      expect(within(alert).getByText(th.orders.confirmation.failedBody)).toBeTruthy();
+      expect(alert.textContent).not.toContain(th.orders.detail.cartReturnBody);
+      unmount();
+    }
+  });
+
+  it("names the payment method with the mock label, never the raw provider", () => {
+    render(<OrderDetailView order={order()} />);
+    const term = screen.getByText(th.orders.detail.paymentMethod);
+    expect(term.nextElementSibling?.textContent).toBe(th.orders.detail.paymentMock);
+    expect(screen.queryByText("MOCK")).toBeNull();
+  });
+
   it("explains a timeout failure and a pending payment", () => {
     const { rerender } = render(
       <OrderDetailView

@@ -67,8 +67,6 @@ export const th = {
     // owner. A name in braces is a placeholder filled with `fill`.
     title: "ตะกร้าสินค้า",
     description: "ตรวจสอบสินค้าและจำนวนก่อนชำระเงิน ราคาและยอดรวมคำนวณโดยระบบ",
-    loading: "กำลังโหลดตะกร้าสินค้า",
-    listLabel: "สินค้าในตะกร้า",
     emptyTitle: "ยังไม่มีสินค้าในตะกร้า",
     emptyDescription: "เลือกสินค้าที่ถูกใจแล้วเพิ่มลงตะกร้าได้เลย",
     emptyAction: "เลือกซื้อสินค้า",
@@ -104,7 +102,6 @@ export const th = {
   checkout: {
     title: "ชำระเงิน",
     description: "เลือกที่อยู่จัดส่งและตรวจสอบยอดรวมก่อนยืนยันคำสั่งซื้อ",
-    loading: "กำลังโหลดข้อมูลการชำระเงิน",
     backToCart: "กลับไปตะกร้าสินค้า",
     emptyTitle: "ไม่มีสินค้าให้ชำระเงิน",
     emptyDescription: "ตะกร้าสินค้าว่างเปล่า เลือกสินค้าก่อนชำระเงิน",
@@ -130,7 +127,6 @@ export const th = {
     summaryTitle: "สรุปคำสั่งซื้อ",
     itemsLabel: "สินค้าที่จะสั่งซื้อ",
     submit: "ยืนยันคำสั่งซื้อ (ชำระเงินจำลอง)",
-    submitting: "กำลังดำเนินการ",
     confirmAgain: "ยืนยันคำสั่งซื้ออีกครั้ง (ชำระเงินจำลอง)",
     // The customer must confirm again after a refusal (BR-22, BR-30; D-026 OQ-30).
     refusedTitle: "ยังไม่มีการสร้างคำสั่งซื้อ",
@@ -141,9 +137,7 @@ export const th = {
     // text (SEC-033).
     refusedNotAvailable: "ไม่พร้อมจำหน่ายแล้ว ไม่นับรวมในยอด นำออกจากตะกร้าก่อนจึงจะชำระเงินได้",
     refusedSoldOut: "สินค้าหมด ไม่นับรวมในยอด นำออกจากตะกร้าก่อนจึงจะชำระเงินได้",
-    // {requested} is what the line held; {available} the new quantity.
-    refusedLowered:
-      "สินค้าเหลือ {available} ชิ้น (เดิม {requested} ชิ้น) ระบบปรับจำนวนเป็น {available} ชิ้นให้แล้ว",
+    // A lowered line uses th.quantity.lowered (approved, D-026 OQ-46).
     refusedOwnStore: "เป็นสินค้าของร้านคุณเอง สั่งซื้อไม่ได้ นำออกจากตะกร้าก่อน",
     refusedUnknownItem: "สินค้าบางรายการ",
     refusedNewTotal: "ยอดรวมใหม่",
@@ -168,7 +162,6 @@ export const th = {
     emptyAction: "เลือกซื้อสินค้า",
     pageEmptyTitle: "ไม่มีคำสั่งซื้อในหน้านี้",
     pageEmptyAction: "กลับไปหน้าแรกของรายการ",
-    loading: "กำลังโหลดคำสั่งซื้อ",
     orderNumber: "หมายเลขคำสั่งซื้อ",
     placedAt: "สั่งเมื่อ",
     total: "ยอดรวม",
@@ -197,10 +190,11 @@ export const th = {
       pendingTitle: "รอผลการชำระเงิน",
       pendingBody:
         "สร้างคำสั่งซื้อแล้ว แต่ระบบยังไม่ได้รับผลการชำระเงินจำลอง หากไม่มีผลภายใน 15 นาที คำสั่งซื้อจะถูกยกเลิกและสินค้าจะกลับเข้าตะกร้า",
-      failedBody:
-        "การชำระเงินจำลองไม่สำเร็จ คำสั่งซื้อนี้ถูกยกเลิก ไม่มีการตัดเงิน และสินค้ากลับเข้าตะกร้าของคุณแล้ว สั่งซื้ออีกครั้งได้จากตะกร้า",
+      // The return of items to the cart is stated apart (th.orders.detail.cartReturnBody), only
+      // when the order has items that returned.
+      failedBody: "การชำระเงินจำลองไม่สำเร็จ คำสั่งซื้อนี้ถูกยกเลิก ไม่มีการตัดเงิน",
       failedTimeoutBody:
-        "ระบบไม่ได้รับผลการชำระเงินจำลองภายในเวลาที่กำหนด คำสั่งซื้อนี้ถูกยกเลิก ไม่มีการตัดเงิน และสินค้ากลับเข้าตะกร้าของคุณแล้ว",
+        "ระบบไม่ได้รับผลการชำระเงินจำลองภายในเวลาที่กำหนด คำสั่งซื้อนี้ถูกยกเลิก ไม่มีการตัดเงิน",
       goToCart: "ไปที่ตะกร้าสินค้า",
     },
     detail: {
@@ -215,7 +209,6 @@ export const th = {
       itemsLabel: "สินค้าในคำสั่งซื้อ",
       // {count} is the number of pieces.
       pieces: "{count} ชิ้น",
-      unitPrice: "ราคาต่อชิ้น",
       lineTotal: "รวม",
       storeSubtotal: "ราคาสินค้าของร้านนี้",
       storeShipping: "ค่าจัดส่งของร้านนี้",
@@ -232,8 +225,6 @@ export const th = {
       grandTotal: "ยอดรวมทั้งหมด",
       cancelledPaymentFailed: "ยกเลิกโดยระบบเพราะชำระเงินไม่สำเร็จ",
       cancelledNote: "ยกเลิกแล้ว",
-      // {title} is the product title.
-      cartReturnTitle: "สินค้ากลับเข้าตะกร้า",
       cartReturnBody: "สินค้าในคำสั่งซื้อนี้ถูกคืนเข้าตะกร้าของคุณแล้ว",
     },
   },

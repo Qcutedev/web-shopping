@@ -51,17 +51,15 @@ function refusalLine(
   if (entry.reason === "OWN_STORE") {
     return { key, line, text: th.checkout.refusedOwnStore };
   }
-  if (entry.availableStock === null || entry.availableStock < 1) {
+  if (entry.availableStock === null) {
+    // The server gave no stock figure: say only that stock is short, never "sold out".
+    return { key, line, text: th.errors.insufficientStock };
+  }
+  if (entry.availableStock < 1) {
     return { key, line, text: th.checkout.refusedSoldOut };
   }
-  return {
-    key,
-    line,
-    text: fill(th.checkout.refusedLowered, {
-      requested: entry.requestedQuantity,
-      available: entry.availableStock,
-    }),
-  };
+  // The owner-approved text of a lowered quantity (D-026 OQ-46).
+  return { key, line, text: fill(th.quantity.lowered, { available: entry.availableStock }) };
 }
 
 /**
@@ -127,8 +125,8 @@ export function CheckoutView({
     busyRef.current = false;
     setPending(false);
     if (isUnknownOutcome(response)) {
+      // The unknown-outcome notice says it all; a second banner would repeat it.
       setUnknown(true);
-      setFailure(response);
       return;
     }
     // A decision of the server: the next attempt is a new customer decision with a new key.
@@ -141,6 +139,9 @@ export function CheckoutView({
         router.refresh();
         return;
       }
+      router.refresh();
+    } else if (response.status === 404) {
+      // The address (or cart) is gone: show the lists as they are now.
       router.refresh();
     }
     setFailure(response);
@@ -171,6 +172,7 @@ export function CheckoutView({
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (unknown) return;
     void send();
   }
 
@@ -284,6 +286,9 @@ export function CheckoutView({
     );
   }
 
+  // While the outcome is unknown only "ตรวจสอบสถานะ" may proceed: the key and the body of the
+  // first attempt must not change, and a new attempt must not start.
+  const locked = pending || unknown;
   const submitLabel = refusal ? th.checkout.confirmAgain : th.checkout.submit;
 
   return (
@@ -304,7 +309,7 @@ export function CheckoutView({
             <RadioGroup
               legend={th.checkout.addressLegend}
               errorText={addressError ?? undefined}
-              disabled={pending}
+              disabled={locked}
             >
               {addresses.map((address) => (
                 <Radio
@@ -359,7 +364,7 @@ export function CheckoutView({
             helperText={th.checkout.failOptionNote}
             checked={simulateFailure}
             onChange={(event) => setSimulateFailure(event.target.checked)}
-            disabled={pending}
+            disabled={locked}
             wrapperClassName="mt-2"
           />
         </Card>
@@ -385,7 +390,7 @@ export function CheckoutView({
                 )),
             )}
           </ul>
-          <Button type="submit" size="lg" fullWidth loading={pending}>
+          <Button type="submit" size="lg" fullWidth loading={pending} disabled={unknown}>
             {submitLabel}
           </Button>
           <Link href={ROUTES.cart} className={buttonVariants({ variant: "ghost" })}>

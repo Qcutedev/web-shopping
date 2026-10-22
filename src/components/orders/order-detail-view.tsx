@@ -62,7 +62,7 @@ function PaymentOutcome({ order }: { order: OrderDto }) {
       <p>
         {timedOut ? th.orders.confirmation.failedTimeoutBody : th.orders.confirmation.failedBody}
       </p>
-      {order.cartReturn ? (
+      {order.cartReturn !== null && order.cartReturn.items.length > 0 ? (
         <>
           <p className="mt-2">{th.orders.detail.cartReturnBody}</p>
           {capped.length > 0 ? (
@@ -115,9 +115,8 @@ export function OrderDetailView({ order }: { order: OrderDto }) {
               ) : null}
             </span>
           </Row>
-          <Row label={detail.paymentMethod}>
-            {order.payment.isSimulated ? detail.paymentMock : order.payment.provider}
-          </Row>
+          {/* The only provider is the mock (API_CONTRACTS 1.9): its label, never the raw name. */}
+          <Row label={detail.paymentMethod}>{detail.paymentMock}</Row>
           {order.paidAt !== null ? (
             <Row label={detail.paidAt}>{formatDateTime(order.paidAt)}</Row>
           ) : null}

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fill } from "@/i18n/fill";
@@ -179,6 +179,9 @@ describe("CheckoutView submit", () => {
     const button = submitButton();
     await userEvent.click(button);
     await waitFor(() => expect(button.disabled).toBe(true));
+    expect(
+      (screen.getByRole("checkbox", { name: th.checkout.failOption }) as HTMLInputElement).disabled,
+    ).toBe(true);
     await userEvent.click(button);
     expect(checkoutApi.placeOrder).toHaveBeenCalledTimes(1);
     resolve(placed());
@@ -190,7 +193,8 @@ describe("CheckoutView submit", () => {
     render(<CheckoutView cart={cartOf()} addresses={[address({ isDefault: true })]} />);
     await userEvent.click(submitButton());
     expect(await screen.findByText(th.checkout.unknownTitle)).toBeTruthy();
-    expect(screen.getByText(th.errors.network)).toBeTruthy();
+    // One notice, not a second banner with the network message.
+    expect(screen.queryByText(th.errors.network)).toBeNull();
     // The cart is unchanged, so the check resends with the same key.
     api.readCart.mockResolvedValue({ ok: true, status: 200, data: cartOf() });
     checkoutApi.placeOrder.mockResolvedValue(placed("o9"));
@@ -199,6 +203,93 @@ describe("CheckoutView submit", () => {
     const keys = checkoutApi.placeOrder.mock.calls.map((call) => call[1]);
     expect(keys).toHaveLength(2);
     expect(keys[0]).toBe(keys[1]);
+  });
+
+  it("locks the submit control and every input while the outcome is unknown", async () => {
+    checkoutApi.placeOrder.mockResolvedValue(failed(0, "NETWORK_ERROR"));
+    render(
+      <CheckoutView
+        cart={cartOf()}
+        addresses={[address({ id: "a1", isDefault: true }), address({ id: "a2" })]}
+      />,
+    );
+    await userEvent.click(submitButton());
+    await screen.findByText(th.checkout.unknownTitle);
+    expect(submitButton().disabled).toBe(true);
+    const inputs = [
+      ...(screen.getAllByRole("radio") as HTMLInputElement[]),
+      screen.getByRole("checkbox", { name: th.checkout.failOption }) as HTMLInputElement,
+    ];
+    expect(inputs).toHaveLength(3);
+    // The radios are disabled through their fieldset, so ask the `:disabled` pseudo-class.
+    expect(inputs.map((input) => input.matches(":disabled"))).toEqual([true, true, true]);
+    // Submitting by Enter is also ignored: no second request, the key stays as it was.
+    await userEvent.click(submitButton());
+    fireEvent.submit(submitButton().closest("form") as HTMLFormElement);
+    expect(checkoutApi.placeOrder).toHaveBeenCalledTimes(1);
+    // The check button is the one control that proceeds.
+    expect(
+      (screen.getByRole("button", { name: th.checkout.unknownCheck }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+  });
+
+  it("unlocks the form again when the check finds the cart changed", async () => {
+    checkoutApi.placeOrder.mockResolvedValue(failed(500, "INTERNAL_ERROR"));
+    render(<CheckoutView cart={cartOf()} addresses={[address({ isDefault: true })]} />);
+    await userEvent.click(submitButton());
+    await screen.findByText(th.checkout.unknownTitle);
+    api.readCart.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: cartOf([line({ quantity: 2, quantityLowered: true })], { grandTotalSatang: 1 }),
+    });
+    await userEvent.click(screen.getByRole("button", { name: th.checkout.unknownCheck }));
+    await screen.findByText(th.checkout.unknownChanged);
+    expect(submitButton().disabled).toBe(false);
+    expect((screen.getAllByRole("radio")[0] as HTMLInputElement).matches(":disabled")).toBe(false);
+  });
+
+  it("refreshes the page when the chosen address no longer exists", async () => {
+    checkoutApi.placeOrder.mockResolvedValue(failed(404, "NOT_FOUND"));
+    render(<CheckoutView cart={cartOf()} addresses={[address({ isDefault: true })]} />);
+    await userEvent.click(submitButton());
+    expect(await screen.findByText(th.errors.notFound)).toBeTruthy();
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(submitButton().disabled).toBe(false);
+  });
+
+  it("says sold out only for zero stock; an unknown figure gets the general stock text", async () => {
+    const refused = (availableStock: number | null) =>
+      failed(409, "INSUFFICIENT_STOCK", {
+        details: {
+          items: [
+            {
+              cartItemId: "l1",
+              productId: "p1",
+              reason: "INSUFFICIENT_STOCK",
+              requestedQuantity: 3,
+              availableStock,
+            },
+          ],
+        },
+      });
+    checkoutApi.placeOrder.mockResolvedValueOnce(refused(0));
+    render(<CheckoutView cart={cartOf()} addresses={[address({ isDefault: true })]} />);
+    await userEvent.click(submitButton());
+    const soldOutAlert = (await screen.findByText(th.checkout.refusedTitle)).closest(
+      "[role=status]",
+    ) as HTMLElement;
+    expect(soldOutAlert.textContent).toContain(th.checkout.refusedSoldOut);
+
+    checkoutApi.placeOrder.mockResolvedValueOnce(refused(null));
+    await userEvent.click(submitButton(th.checkout.confirmAgain));
+    await waitFor(() => expect(checkoutApi.placeOrder).toHaveBeenCalledTimes(2));
+    const alert = (await screen.findByText(th.checkout.refusedTitle)).closest(
+      "[role=status]",
+    ) as HTMLElement;
+    await waitFor(() => expect(alert.textContent).toContain(th.errors.insufficientStock));
+    expect(alert.textContent).not.toContain(th.checkout.refusedSoldOut);
   });
 
   it("does not resend when the cart changed after an unknown outcome", async () => {
@@ -243,9 +334,7 @@ describe("CheckoutView submit", () => {
     const alert = await screen.findByText(th.checkout.refusedTitle);
     const region = alert.closest("[role=status]") as HTMLElement;
     expect(within(region).getByText("ชาเขียว").tagName).toBe("BDI");
-    expect(region.textContent).toContain(
-      fill(th.checkout.refusedLowered, { requested: 5, available: 3 }),
-    );
+    expect(region.textContent).toContain(fill(th.quantity.lowered, { available: 3 }));
     expect(region.textContent).toContain("฿540.00");
     expect(refresh).toHaveBeenCalled();
     expect(checkoutApi.placeOrder).toHaveBeenCalledTimes(1);
