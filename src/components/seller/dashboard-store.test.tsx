@@ -329,7 +329,7 @@ describe("StoreForm follows the stored store (CR-99)", () => {
     expect(screen.getByText(th.seller.store.suspendedNote)).toBeTruthy();
   });
 
-  it("keeps a typed name when only a non-locking status change arrives (CR-109)", () => {
+  it("keeps a typed name when only the status reason changes (CR-109)", () => {
     const { rerender } = render(<StoreForm store={store} />);
     fireEvent.change(screen.getByLabelText(new RegExp(th.seller.store.fields.name)), {
       target: { value: "typed-name" },
@@ -338,6 +338,19 @@ describe("StoreForm follows the stored store (CR-99)", () => {
     expect(
       (screen.getByLabelText(new RegExp(th.seller.store.fields.name)) as HTMLInputElement).value,
     ).toBe("typed-name");
+  });
+
+  it("keeps a typed name when a suspended store is reinstated with the same fields (CR-163)", () => {
+    // The only status change that does not lock the form is SUSPENDED to APPROVED.
+    const { rerender } = render(<StoreForm store={{ ...store, status: "SUSPENDED" }} />);
+    fireEvent.change(screen.getByLabelText(new RegExp(th.seller.store.fields.name)), {
+      target: { value: "typed-name" },
+    });
+    rerender(<StoreForm store={store} />);
+    expect(
+      (screen.getByLabelText(new RegExp(th.seller.store.fields.name)) as HTMLInputElement).value,
+    ).toBe("typed-name");
+    expect(screen.queryByText(th.seller.store.suspendedNote)).toBeNull();
   });
 });
 
