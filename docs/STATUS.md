@@ -2,7 +2,7 @@
 
 The only place task status is recorded. Owner: orchestrator. Task definitions are in [PROJECT_PLAN.md](PROJECT_PLAN.md).
 
-Last updated: 2026-10-22 (trimmed after the ninety-sixth session). The per-session history, the old change log, the answered owner questions (OQ-01 to OQ-50, answers in [DECISIONS.md](DECISIONS.md) D-025 to D-028), and the old test-result table were removed from this file on purpose. They are in git: run `git log --oneline -- docs/STATUS.md` and `git show <commit>:docs/STATUS.md`. Review findings live in [reviews/](reviews/) and [SECURITY.md](SECURITY.md).
+Last updated: 2026-10-22 (trimmed after the ninety-seventh session). The per-session history, the old change log, the answered owner questions (OQ-01 to OQ-50, answers in [DECISIONS.md](DECISIONS.md) D-025 to D-028), and the old test-result table were removed from this file on purpose. They are in git: run `git log --oneline -- docs/STATUS.md` and `git show <commit>:docs/STATUS.md`. Review findings live in [reviews/](reviews/) and [SECURITY.md](SECURITY.md).
 
 ## Summary
 
@@ -12,18 +12,23 @@ Not started: checkout and orders (T-032, T-034), reviews, seller onboarding and 
 
 ## Resume here
 
-Ninety-seventh session started. Running: `security` agent on items 1 and 2 (touches `docs/SECURITY.md` only, plus test read); `code-review` agent on item 3 (read-only, writes `docs/reviews/T-044-code-review.md`). Ninety-sixth session finished before it. All work is committed on `main` (no remote, nothing pushed) except the owner's unstaged deletion of `run-agents.ps1`, which is left untouched.
+Ninety-seventh session finished. No agent is running. All work is committed on `main` (no remote, nothing pushed) except the owner's unstaged deletion of `run-agents.ps1`, which is left untouched.
 
 Read first in a new session: CLAUDE.md, this file, `git status`, `git diff`.
 
-Next, in order:
-1. **Red test:** `tests/security/sec039-040-cr66-recheck.test.ts` fails because `docs/SECURITY.md` SEC-074 text (lines ~1531-1533) holds literal U+FEFF characters. Security agent replaces them with the text "U+FEFF".
-2. Security re-check of SEC-074 to SEC-077 (qa fixes in `d729de0`, `856096d`), then set them to FIXED.
-3. Code review of `d729de0` (SEC-074 to SEC-077, CR-154 to CR-156) and of `dc0be86` (CR-153).
-4. Owner decision CR-120 (see `docs/reviews/T-044-code-review.md`).
-5. Then the missing features: T-032 checkout, orders, mock payment; T-034 checkout UI; seller and admin work.
+Done in session 97: red test fixed and SEC-074 to SEC-077 set to FIXED (`44a9c59`); code review of `d729de0`, `dc0be86` APPROVE (`8416d23`).
 
-Last known test results (qa, session 96): `pnpm test:e2e` 19 passed; `pnpm test` 4567 passed, 5 expected fail, 1 failed (the red test above); `format:check`, `lint`, `typecheck` exit 0. The orchestrator re-ran `pnpm test:e2e` in session 95 (exit 0, 19 passed).
+Next, in order:
+1. qa fixes SEC-078 and CR-157 in `e2e/support/env-file-scan.ts` (split lines on U+2028/U+2029, or use `@next/env` `loadEnvConfig` for the check; correct the "accepts every form dotenv accepts" comment). Then flip the two `it.fails` cases in `tests/security/sec074-077-recheck.test.ts` to `it`.
+2. qa fixes CR-158 to CR-160 (nits and test gaps in `docs/reviews/T-044-code-review.md`).
+3. Owner decision CR-120 (see `docs/reviews/T-044-code-review.md`).
+4. Then the missing features: T-032 checkout, orders, mock payment; T-034 checkout UI; seller and admin work.
+
+Do not run two e2e suites at once: they share database `marketplace_e2e` and port 3100.
+
+Agents must not type backslash-u escapes in tool input: the tool turns them into real invisible characters (likely how U+FEFF reached SECURITY.md). Generate them from code points in a script.
+
+Last known test results (session 97): `pnpm test` 4568 passed, 5 expected fail (code-review agent); `pnpm test:e2e` 19 passed when run alone; `pnpm exec vitest run --project security` 1191 passed, 7 expected fail (security agent); `format:check`, `lint`, `typecheck` exit 0.
 
 Standing rules from the owner (D-019): never guess, park questions here and ask in batches; commit locally after each task passes its checks, never push without being told; stop for owner review at the five milestones.
 
