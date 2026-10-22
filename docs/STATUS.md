@@ -13,7 +13,7 @@ Not started: checkout UI (T-034), reviews, seller onboarding and seller products
 ## Resume here
 
 
-Session 106. Task 1 of 3 (owner order: SEC-084, then T-042/T-043, then T-050): devops guard fix done, commit `84b93f6` (IMPLEMENTED, not VERIFIED; lint 215/215 probes, typecheck ok, sec081 recheck-2/3 41 passed). Now: security re-checks SEC-081/SEC-083/SEC-084; paths `docs/SECURITY.md`, `tests/security/**`. If no commit follows, inspect `git status` first.
+Session 106. Owner order: SEC-084, T-042/T-043, T-050. (1) Guard fix `84b93f6`; security re-check `b8f8171`: SEC-081, SEC-083, SEC-084 stay OPEN, new Low SEC-085, SEC-086, SEC-087 (all contributor-only lint-guard gaps). OWNER QUESTION parked: keep fixing the name-based guard (devops, then re-check again) or widen D-045 in writing to cover these classes. (2) T-042 and T-043 were already IMPLEMENTED, code reviewed and security reviewed in earlier sessions (git log); rows corrected. Docker was not running, so nothing re-verified. (3) Now: backend-api builds T-050 admin module; paths `src/modules/admin/**`, `src/app/api/v1/admin/**`, `docs/API_CONTRACTS.md`. If no commit follows, inspect `git status` first.
 
 Session 105 follow-up: owner approved the changed Thai strings (all) and chose for SEC-081: fix the guard, then accept the residual in writing (code review is the control). devops finished SEC-081/SEC-083 guard fixes (`23720f2`, IMPLEMENTED, not VERIFIED); security re-check is starting (paths `docs/SECURITY.md`, `tests/security/**`); devops had touched 6 src files (rate-limit, timeout-sweep, uploads cleanup, auth security-events, session-purge, library-error) to satisfy the new rules, for owner review; old line: paths `eslint.config.mjs`, `scripts/check-import-guards.mjs`, `tests/security/sec081-recheck-2.test.ts`, `docs/SECURITY.md`, `docs/DECISIONS.md`. If no commit follows, inspect `git status` first.
 
@@ -92,10 +92,10 @@ Notes marked "stale?" were written while Docker was down; later sessions ran the
 | T-033 | Concurrency tests | IMPLEMENTED | Orchestrator has not re-run; CC-12 done; other CC gaps open |
 | T-034 | Checkout UI | IMPLEMENTED | Commit `cb07d84`; code review found 1 blocking (Resume here); security ok; no browser check |
 | T-035 | Reviews | NOT STARTED | |
-| T-040 | Seller onboarding | NOT STARTED | Row not updated, but session logs say T-040 is IMPLEMENTED (commit `6c2112c` and later) and was code-reviewed. Confirm with `git log` before starting |
+| T-040 | Seller onboarding | IMPLEMENTED | Commit `6c2112c` and later; code reviewed; not VERIFIED |
 | T-041 | Uploads | IMPLEMENTED | Security review done (`reviews/T-041-security.md`, no Critical or High); not VERIFIED |
-| T-042 | Seller products, inventory | NOT STARTED | |
-| T-043 | Seller orders | NOT STARTED | |
+| T-042 | Seller products, inventory | IMPLEMENTED | Security review (SEC-067 to SEC-070) and code review CR-T042-01 to 08 done, follow-ups `adb37c8`; not VERIFIED |
+| T-043 | Seller orders | IMPLEMENTED | Security review, code review CR-T043-01 to 06 fixed `5b03eac`; not VERIFIED |
 | T-044 | Seller UI | IMPLEMENTED | Code reviewed through CR-156 ([reviews/T-044-code-review.md](reviews/T-044-code-review.md)); e2e 19 passed |
 | T-045 | Seller isolation tests | IMPLEMENTED | Security re-check done in session 84 (`e18965e`); no new finding |
 | T-050 | Admin module | NOT STARTED | |
