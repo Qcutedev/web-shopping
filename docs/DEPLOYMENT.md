@@ -396,6 +396,8 @@ Secrets: no repository secret is used. Generated values are masked with `::add-m
 
 Playwright (pnpm test:e2e) starts its own `next dev` with `NEXT_DIST_DIR=.next-e2e` (set in `playwright.config.ts`, read by `next.config.ts`), so it does not share `.next/` with `pnpm dev`, typegen, or `pnpm build` (CR-136). The directory is git-, prettier-, and eslint-ignored. Production builds leave the variable unset and use `.next`.
 
+Two limits remain. First, `next dev` adds `.next-e2e/types/**/*.ts` and `.next-e2e/dev/types/**/*.ts` to `include` in `tsconfig.json`; both entries are committed and `.next-e2e` is in `exclude`, so the e2e server leaves the tracked file unchanged and `tsc` does not check its stale types (CR-143). Second, the e2e server and `pnpm dev` both rewrite the git-ignored `next-env.d.ts`, so running them at the same time makes the file flip between the two; this is harmless to the checks but the file is not isolated (CR-144).
+
 Not in the workflow: Playwright end-to-end tests (T-060 is not built, and CR-49, how e2e reaches a production-mode database, is an open owner decision), a secret scan (no scanner chosen), dependency-update bot configuration, and any deployment. Workflow rules are in `.claude/agents/devops.md`.
 
 What was checked locally on 2026-10-13 (Windows, PowerShell): the YAML parses with `js-yaml`; `pnpm build` exits 0 with the per-run variables above and an unreachable `DATABASE_URL`; `pnpm audit --prod` reports "No known vulnerabilities found"; `pnpm format:check` and `pnpm lint` pass. Not checked: the `integration` job's commands (Docker was not running on the machine), the Linux runner, Corepack on the runner, or the cache.
