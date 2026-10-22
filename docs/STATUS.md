@@ -12,7 +12,7 @@ Not started: checkout and orders (T-032, T-034), reviews, seller onboarding and 
 
 ## Resume here
 
-Ninety-seventh session finished. No agent is running. All work is committed on `main` (no remote, nothing pushed) except the owner's unstaged deletion of `run-agents.ps1`, which is left untouched.
+Ninety-seventh session finished. No agent is running. All work is committed on `main` (no remote, nothing pushed).
 
 Read first in a new session: CLAUDE.md, this file, `git status`, `git diff`.
 
@@ -38,7 +38,6 @@ Standing rules from the owner (D-019): never guess, park questions here and ask 
 | --- | --- | --- |
 | CR-120 | Open since session 91 | `docs/reviews/T-044-code-review.md` |
 | OQ-20 | Design details to confirm on real pages (input text size 15 or 16 px, chip and search height, required-field marking, sold-out quantity selector, negative amounts, error summary) | DESIGN_SYSTEM.md |
-| `run-agents.ps1` | Owner's unstaged deletion: commit it or restore it | `git status` |
 | Others from session 91 | SEC-072, SR-02 split, SEC-064, SEC-066, seller header link, SEC-073 residual (a/b/c), `th.ts` proposal strings, mobile sort. They may have been answered since; check before asking | old STATUS.md in git, [SECURITY.md](SECURITY.md) |
 
 ## Blockers
