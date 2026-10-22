@@ -1,4 +1,4 @@
-# Status
+﻿# Status
 
 The only place task status is recorded. Owner: orchestrator. Task definitions are in [PROJECT_PLAN.md](PROJECT_PLAN.md).
 
@@ -12,30 +12,27 @@ Not started: checkout UI (T-034), reviews, seller onboarding and seller products
 
 ## Resume here
 
-Session 105 launching 3 agents (if no commit follows this line, they were interrupted; inspect `git status` first). Local commits, not pushed.
-- security: re-check SEC-081 `0a7ea5e`; paths `docs/SECURITY.md`, `tests/security/**`.
-- qa: remaining T-033 CC cases; paths `tests/**`, `e2e/**`.
-- frontend: T-034 verification (full `pnpm test`, `pnpm build`, browser check 360/768/1280); paths `src/components/**`, `src/app/(storefront)/**`, `src/i18n/**` only if a fix is needed.
 
-Session 104 finished.
+Session 105 finished. No agent is running. Local commits, not pushed.
 
 Read first in a new session: CLAUDE.md, this file, `git status`, `git diff`.
 
-Done in session 104: qa `61b122e` (address-limit test accepted; `pg_stat_clear_snapshot()` in 2 polling loops; profile+cart integration 117 passed, run once). Frontend `a1fce5e` (T-034 blocking and all Low items fixed; typecheck, lint, 678 component tests passed). Devops `0a7ea5e` (SEC-081 a to e; 19 `it.fails` flipped; 162 probes ok; security project 1328 passed).
+Done in session 105: qa `908f5af`, `7f6111a` (48 new tests in `tests/integration/checkout/cc-remaining.test.ts`: CC-04, CC-05, CC-07, CC-10, CC-11, CC-14, CC-06 seller side; 48 passed, neighbours 264 passed; no mutation run yet). Frontend (no commit): T-034 typecheck, lint, `pnpm test` 4828 passed, `pnpm build` ok, browser check at 360/768/1280 px on /checkout, /orders, /cart (success and failed-payment paths). Security `374ca0b`: SEC-081 stays OPEN, new SEC-083 (Low).
 
 Open:
 - Owner approval of changed Thai strings (`src/i18n/th.ts`): `orders.confirmation.failedBody` and `failedTimeoutBody` lost the "items back in cart" sentence (now in `cartReturnBody`, shown only when items exist); checkout lowered line uses OQ-46 `th.quantity.lowered`; unknown-stock refusal uses `th.errors.insufficientStock`.
-- T-034 review item "cart-write INSUFFICIENT_STOCK sold-out copy": frontend found no such use in cart-view; fixed the checkout refusal line instead. Confirm with reviewer intent.
-- SEC-081: security must re-check `0a7ea5e` and decide close. Residual: Vitest-run `*.test.ts(x)` files are exempt from loader selectors; lint selectors are name-based. SEC-082 (Low, qa) open. One timing flake seen: `t032-sec055-item1-recheck.test.ts` under load.
+- T-034 review item "cart-write INSUFFICIENT_STOCK sold-out copy": confirm with reviewer intent. T-034 browser check did not cover empty cart, INSUFFICIENT_STOCK refusal, list failure, skeletons; no e2e.
+- SEC-081 OPEN. Needs fixes (see SECURITY.md): `noInlineConfig` for all code; refuse `module`/`global`/`globalThis`/`Reflect`/`__non_webpack_require__` except as member-access object, refuse `.constructor` and computed binary/template keys (orchestrator, `eslint.config.mjs`); add probes to `scripts/check-import-guards.mjs` (devops). SEC-083 (Low): block `src` imports of `scripts|tests|e2e|prisma`. Then flip `it.fails` in `tests/security/sec081-recheck-2.test.ts`; security re-checks. Owner: accept name-based residual in writing or commission a module-graph check. SEC-082 (Low, qa) open. Flake: `t032-sec055-item1-recheck.test.ts` under load.
 - Frontend: Thai copy for ADDRESS_LIMIT in `src/i18n/th.ts` and address form; product-requirements approves copy first.
-- T-034 not VERIFIED: no browser check at 360/768/1280 px, no e2e, full `pnpm test`/`pnpm build` not run after fixes. No add-to-cart UI yet; header cart count not wired.
-- T-033 CC gaps still open: CC-04, CC-06, CC-08, CC-09, CC-10, CC-11, CC-13, CC-14, parts of CC-05 and CC-07.
+- T-033 CC-08, CC-09, CC-13 and CC-06 admin half blocked until T-050 to T-053 (no admin code). TEST_STRATEGY open item T12 (deactivated admin in-flight request) is open.
+- Header shows no cart count for signed-in user (header not wired to session); no add-to-cart UI yet. `pnpm build` and `next dev` share `.next`: do not run together.
+- Test data left in `marketplace_dev`: about 4 customers `bc*@example.com`/`bs*@example.com` and 2 orders.
 - Suggested: move payment transitions out of public `src/modules/orders/index.ts` (backend-api). Residual: `returnItemToCart` has no 50-line cap. Auth startup-hook tests may time out under load.
 
 Next, in order:
-1. frontend fixes for T-034; SEC-081 guard fix; browser check.
-2. Remaining T-033 CC cases; T-031/T-032 review status re-check.
-3. Seller products/orders, admin area, E2E, CI.
+1. SEC-081/SEC-083 guard fixes (devops), security re-check.
+2. Seller products/orders, admin area (T-050 to T-053), then the blocked CC cases.
+3. E2E, CI.
 
 Do not run two e2e suites at once: they share database `marketplace_e2e` and port 3100.
 
