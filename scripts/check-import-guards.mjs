@@ -172,85 +172,73 @@ const probes = [
   [
     "src/app/x/probe.ts",
     '/* eslint-disable no-restricted-imports */\nimport { db } from "@/server/db";',
-    "SEC-081",
+    true,
   ],
   [
     "src/app/x/probe.ts",
     '// eslint-disable-next-line no-restricted-imports\nimport { db } from "@/server/db";',
-    "SEC-081",
+    true,
   ],
-  ["src/app/x/probe.ts", '/* eslint-disable */\nimport { db } from "@/server/db";', "SEC-081"],
-  ["src/app/x/probe.ts", 'import { db } from "@/server/db"; // eslint-disable-line', "SEC-081"],
+  ["src/app/x/probe.ts", '/* eslint-disable */\nimport { db } from "@/server/db";', true],
+  ["src/app/x/probe.ts", 'import { db } from "@/server/db"; // eslint-disable-line', true],
   [
     "src/app/x/probe.ts",
     '/* eslint no-restricted-imports: "off" */\nimport { db } from "@/server/db";',
-    "SEC-081",
+    true,
   ],
-  [
-    "src/components/probe.tsx",
-    '/* eslint-disable */\nimport { db } from "@/server/db";',
-    "SEC-081",
-  ],
+  ["src/components/probe.tsx", '/* eslint-disable */\nimport { db } from "@/server/db";', true],
   // createRequire in every way of reaching it.
   [
     "src/app/x/probe.ts",
     'import { createRequire } from "node:module";\nconst m = createRequire(import.meta.url)("../../server/db");',
-    "SEC-081",
+    true,
   ],
   [
     "src/app/x/probe.ts",
     'import { createRequire as cr } from "node:module";\nconst m = cr(import.meta.url)("../../server/db");',
-    "SEC-081",
+    true,
   ],
   [
     "src/app/x/probe.ts",
     'import * as mod from "node:module";\nconst m = mod.createRequire(import.meta.url)("../../server/db");',
-    "SEC-081",
+    true,
   ],
   [
     "src/app/x/probe.ts",
     'import Module from "node:module";\nconst m = Module.createRequire(import.meta.url)("../../server/db");',
-    "SEC-081",
+    true,
   ],
   [
     "src/app/x/probe.ts",
     'import { createRequire } from "module";\nconst m = createRequire(import.meta.url)("../../server/db");',
-    "SEC-081",
+    true,
   ],
   [
     "src/app/x/probe.ts",
     'const { createRequire } = await import("node:module");\nconst m = createRequire(import.meta.url)("../../server/db");',
-    "SEC-081",
+    true,
   ],
   [
     "src/app/x/probe.ts",
     'const m = process.getBuiltinModule("node:module").createRequire(import.meta.url)("../../server/db");',
-    "SEC-081",
+    true,
   ],
   [
     "src/app/x/probe.js",
     'const m = require("node:module").createRequire(__filename)("../../server/db");',
-    "SEC-081",
+    true,
   ],
   // `require` reached other than as the callee of a direct call.
-  ["src/app/x/probe.js", 'const r = require;\nconst m = r("../../server/db");', "SEC-081"],
-  ["src/app/x/probe.js", 'const m = module.require("../../server/db");', "SEC-081"],
-  [
-    "src/app/x/probe.js",
-    'const { require: r } = module;\nconst m = r("../../server/db");',
-    "SEC-081",
-  ],
-  ["src/app/x/probe.js", 'const m = require.call(null, "../../server/db");', "SEC-081"],
-  ["src/app/x/probe.js", 'const m = require.apply(null, ["../../server/db"]);', "SEC-081"],
-  ["src/app/x/probe.js", 'const m = require["call"](null, "../../server/db");', "SEC-081"],
-  ["src/app/x/probe.js", 'const m = globalThis.require("../../server/db");', "SEC-081"],
+  ["src/app/x/probe.js", 'const r = require;\nconst m = r("../../server/db");', true],
+  ["src/app/x/probe.js", 'const m = module.require("../../server/db");', true],
+  ["src/app/x/probe.js", 'const { require: r } = module;\nconst m = r("../../server/db");', true],
+  ["src/app/x/probe.js", 'const m = require.call(null, "../../server/db");', true],
+  ["src/app/x/probe.js", 'const m = require.apply(null, ["../../server/db"]);', true],
+  ["src/app/x/probe.js", 'const m = require["call"](null, "../../server/db");', true],
+  ["src/app/x/probe.js", 'const m = globalThis.require("../../server/db");', true],
   // Code built from a string.
-  ["src/app/x/probe.js", 'const m = eval("require")("../../server/db");', "SEC-081"],
-  [
-    "src/app/x/probe.js",
-    'const m = new Function("return require")()("../../server/db");',
-    "SEC-081",
-  ],
+  ["src/app/x/probe.js", 'const m = eval("require")("../../server/db");', true],
+  ["src/app/x/probe.js", 'const m = new Function("return require")()("../../server/db");', true],
   // SEC-081 controls: the db layer, tests, and e2e support may use createRequire, and must stay
   // clean after the guard is extended.
   [

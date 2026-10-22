@@ -4,8 +4,10 @@ import nextTs from "eslint-config-next/typescript";
 
 // Architecture rule 7 (CLAUDE.md). The import specifier is matched with a regular expression so
 // that the alias form, relative forms, and deep paths are all caught. The guards stop accidental
-// violations; an inline eslint-disable, createRequire, or a re-export through an allowed folder
-// still gets past them and has to be caught in review.
+// violations. In src (not tests, not src/server/db) the guards are hardened (SEC-081): inline
+// config comments are ignored, and the ways to load a module without `import` or a direct
+// `require("...")` call are rejected. A re-export through an allowed folder still has to be
+// caught in review.
 const ALL_CODE = ["**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"];
 // Pinned by T-013: the client is generated into prisma/generated/prisma, and the driver is the
 // `pg` pool behind `@prisma/adapter-pg`. The pattern covers every `@prisma/*` package (client,
@@ -83,13 +85,46 @@ function dynamicImportRules(regexSource, message) {
   ];
 }
 
-function importGuard(patterns, message) {
+// SEC-081: other routes to a module that the rules above cannot read. Applied to src only.
+const moduleLoaderPattern = {
+  regex: "^(node:)?module$",
+  message: "Only src/server/db may use node:module (createRequire).",
+};
+const LOADER_MESSAGE =
+  "Load modules with import or a direct require(...) call so the import rules can check them (SEC-081).";
+const loaderRules = [
+  "MemberExpression[object.name='process'][property.name='getBuiltinModule']",
+  "Identifier[name='require']:not(CallExpression > Identifier.callee)",
+  "Identifier[name='createRequire']",
+  "CallExpression[callee.name='eval']",
+  "CallExpression[callee.name='Function']",
+  "NewExpression[callee.name='Function']",
+].map((selector) => ({ selector, message: LOADER_MESSAGE }));
+
+function importGuard(patterns, message, hardened = false) {
   return {
-    "no-restricted-imports": ["error", { patterns: [...patterns, normalPattern] }],
+    "no-restricted-imports": [
+      "error",
+      { patterns: [...patterns, normalPattern, ...(hardened ? [moduleLoaderPattern] : [])] },
+    ],
     "no-restricted-syntax": [
       "error",
       ...dynamicImportRules(patterns.map((pattern) => pattern.regex).join("|"), message),
+      ...(hardened ? loaderRules : []),
     ],
+  };
+}
+
+// SEC-081: the same guard again for src, where it is also hardened and inline config comments are
+// ignored. Tests and the db layer keep the plain guard (they use createRequire and test fixtures).
+const HARDENED_EXEMPT = ["src/server/db/**", "**/*.test.*", "**/*.itest.*"];
+const SRC_CODE = ["src/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"];
+function hardenedGuard(files, ignores, patterns, message) {
+  return {
+    files,
+    ignores: [...ignores, ...HARDENED_EXEMPT],
+    linterOptions: { noInlineConfig: true },
+    rules: importGuard(patterns, message, true),
   };
 }
 
@@ -132,6 +167,26 @@ const eslintConfig = defineConfig([
     ignores: ["src/server/db/**", "src/server/auth/**", "src/server/health.ts"],
     rules: importGuard([driverPattern, layerPattern, siblingPattern], layerPattern.message),
   },
+  // SEC-081: hardened copies of the blocks above for src. They come last so they win.
+  hardenedGuard([...SRC_CODE], [GENERATED_CLIENT], [driverPattern], driverPattern.message),
+  hardenedGuard(
+    [...SRC_CODE],
+    [...DB_LAYER_IMPORTERS, GENERATED_CLIENT],
+    [driverPattern, layerPattern],
+    layerPattern.message,
+  ),
+  hardenedGuard(
+    ["src/modules/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"],
+    MODULE_TESTS,
+    [driverPattern, authPattern],
+    "Only src/server/db may import the database client or driver, and modules import src/server/auth only through actor.ts (D-022).",
+  ),
+  hardenedGuard(
+    ["src/server/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"],
+    ["src/server/db/**", "src/server/auth/**", "src/server/health.ts"],
+    [driverPattern, layerPattern, siblingPattern],
+    layerPattern.message,
+  ),
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

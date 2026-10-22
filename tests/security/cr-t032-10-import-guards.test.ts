@@ -10,7 +10,7 @@
  *      route handler, component, client library, proxy, platform code) imports src/server/db in
  *      any spelling: alias, relative, deep path, type-only, side effect, re-export, dynamic
  *      import, require, TypeScript import-equals, upper case, and paths not in normal form.
- *      Spellings that get past ESLint are pinned below as `it.fails` (SEC-081).
+ *      Spellings that get past ESLint are rejected by the hardened src guard (SEC-081).
  *   2. The real tree: no inline disable of the guard rules, no createRequire outside the db layer,
  *      and no module that re-exports a database value from src/server/db.
  *   3. CR-T032-10: the payment transitions (`completeOrderPayment`, `failOrderPayment`,
@@ -193,7 +193,7 @@ describe("rule 7: ESLint rejects a forbidden import of src/server/db", () => {
 });
 
 // SEC-081: spellings that load src/server/db at run time and get past ESLint. Each case asserts
-// the secure behaviour (an error) and is expected to fail until the guard is extended.
+// the secure behaviour (an error); the guard was extended in eslint.config.mjs.
 describe("SEC-081: spellings that get past the rule 7 lint guard", () => {
   beforeAll(() => {
     eslint ??= new ESLint({ cwd: ROOT });
@@ -223,7 +223,7 @@ describe("SEC-081: spellings that get past the rule 7 lint guard", () => {
     ["module.require", "src/app/x/probe.js", 'const m = module.require("../../server/db");'],
     ["require.call", "src/app/x/probe.js", 'const m = require.call(null, "../../server/db");'],
   ] as const) {
-    it.fails(`${label} is an error`, async () => {
+    it(`${label} is an error`, async () => {
       expect(await guardErrors(file, code)).not.toEqual([]);
     });
   }
