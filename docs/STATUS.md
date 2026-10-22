@@ -12,7 +12,7 @@ Not started: checkout UI (T-034), reviews, seller onboarding and seller products
 
 ## Resume here
 
-Session 101 finished. No agent is running.
+Session 102 started. Three agents running in parallel: (1) security: SEC-080 re-check, SEC-081 probes in tests/security/cr-t032-10-import-guards.test.ts and scripts/check-import-guards.mjs; orchestrator edits eslint.config.mjs. (2) qa: T-033 CC-12 in tests/** concurrency files. (3) frontend: T-034 checkout UI in src/app/(storefront)/checkout/**, src/components/checkout/**, src/i18n/th.ts. If a session ends mid-run, inspect git status before relaunching.
 
 Read first in a new session: CLAUDE.md, this file, `git status`, `git diff`.
 
