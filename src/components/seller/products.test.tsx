@@ -543,29 +543,73 @@ describe("ProductForm follows the stored product (CR-99)", () => {
     ).toBe("stored-title");
   });
 
-  it("re-seeds typed values when a refresh locks the form (CR-120)", () => {
+  // The server refuses with one field the form knows (title) and one it does not, so the form shows
+  // both a field error and the form message.
+  const serverRefusal = {
+    ok: false as const,
+    status: 400,
+    code: "VALIDATION_ERROR",
+    fields: [
+      { path: "title", code: "too_small" },
+      { path: "unknownField", code: "invalid" },
+    ],
+    requestId: null,
+  };
+
+  function expectErrorsShown() {
+    expect(screen.getByText(th.seller.common.formInvalid)).toBeTruthy();
+    expect(
+      screen.getByLabelText(new RegExp(th.seller.products.form.title)).getAttribute("aria-invalid"),
+    ).toBe("true");
+  }
+
+  function expectErrorsCleared() {
+    expect(screen.queryByText(th.seller.common.formInvalid)).toBeNull();
+    expect(
+      screen.getByLabelText(new RegExp(th.seller.products.form.title)).getAttribute("aria-invalid"),
+    ).toBeNull();
+  }
+
+  function fillCreateForm() {
+    const set = (label: string | RegExp, value: string) =>
+      fireEvent.change(screen.getByLabelText(new RegExp(label)), { target: { value } });
+    set(th.seller.products.form.title, "draft-title");
+    set(th.seller.products.form.description, "draft-description");
+    set("รหัสสินค้า \\(SKU\\)", "SKU-9");
+    set(th.seller.products.form.category, "c1");
+    set("ราคา \\(บาท\\)", "259.50");
+    set(th.seller.products.form.stock, "10");
+  }
+
+  it("re-seeds typed values and clears errors when a refresh locks the form (CR-120)", async () => {
+    const user = userEvent.setup();
+    api.updateProduct.mockResolvedValue(serverRefusal);
     const categories = [{ id: "c1", name: "x", isActive: true }];
     const { rerender } = render(<ProductForm product={product} categories={categories} />);
     fireEvent.change(screen.getByLabelText(new RegExp(th.seller.products.form.title)), {
       target: { value: "typed-title" },
     });
+    await user.click(screen.getByRole("button", { name: th.seller.products.form.save }));
+    expect(await screen.findByText(th.seller.common.formInvalid)).toBeTruthy();
+    expectErrorsShown();
     rerender(<ProductForm product={product} categories={categories} disabled />);
     const title = screen.getByLabelText(
       new RegExp(th.seller.products.form.title),
     ) as HTMLInputElement;
     expect(title.value).toBe(product.title);
     expect(title.disabled).toBe(true);
+    expectErrorsCleared();
   });
 
-  it("keeps the create-mode draft and locks the form on suspension (CR-166)", () => {
+  it("keeps the create-mode draft, clears errors, and locks the form on suspension (CR-166)", async () => {
+    const user = userEvent.setup();
+    api.createProduct.mockResolvedValue(serverRefusal);
     const categories = [{ id: "c1", name: "x", isActive: true }];
     const { rerender } = render(<ProductForm categories={categories} />);
-    fireEvent.change(screen.getByLabelText(new RegExp(th.seller.products.form.title)), {
-      target: { value: "draft-title" },
-    });
-    fireEvent.change(screen.getByLabelText(new RegExp(th.seller.products.form.description)), {
-      target: { value: "draft-description" },
-    });
+    fillCreateForm();
+    await user.click(screen.getByRole("button", { name: th.seller.products.form.create }));
+    expect(await screen.findByText(th.seller.common.formInvalid)).toBeTruthy();
+    expectErrorsShown();
     rerender(<ProductForm categories={categories} disabled />);
     const title = screen.getByLabelText(
       new RegExp(th.seller.products.form.title),
@@ -576,6 +620,7 @@ describe("ProductForm follows the stored product (CR-99)", () => {
       (screen.getByLabelText(new RegExp(th.seller.products.form.description)) as HTMLInputElement)
         .value,
     ).toBe("draft-description");
+    expectErrorsCleared();
   });
 
   it("discards a picture that finishes uploading after the form locked (CR-165)", async () => {
@@ -583,10 +628,16 @@ describe("ProductForm follows the stored product (CR-99)", () => {
     const categories = [{ id: "c1", name: "x", isActive: true }];
     let finish: (value: unknown) => void = () => undefined;
     api.uploadImage.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    api.createProduct.mockResolvedValue(serverRefusal);
     const { container, rerender } = render(<ProductForm categories={categories} />);
+    fillCreateForm();
+    await user.click(screen.getByRole("button", { name: th.seller.products.form.create }));
+    expect(await screen.findByText(th.seller.common.formInvalid)).toBeTruthy();
+    expectErrorsShown();
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
     await user.upload(input, new File(["abc"], "late.png", { type: "image/png" }));
     rerender(<ProductForm categories={categories} disabled />);
+    expectErrorsCleared();
     await act(async () => {
       finish({
         ok: true,
