@@ -4,6 +4,8 @@
  * Order of checks (section 1.8): POST 1 `Origin`, 2 `Content-Type`, 3 the session, 6 the body,
  * 7 the schema, then the service; GET 3 the session, 7 the query, then the service. No rate limit
  * (section 6). The list is paginated (section 1.7) and holds the caller's own addresses only.
+ * POST by a caller who already holds 50 addresses is the service's `409 CONFLICT` with
+ * `details.reason` `ADDRESS_LIMIT` (D-044 point 4), mapped to the envelope by handleRequest.
  */
 import {
   createAddress,

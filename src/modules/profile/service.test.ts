@@ -9,6 +9,7 @@ import type { Actor } from "@/server/auth/actor";
 import { Prisma } from "@/server/db";
 import { AppError } from "@/server/errors";
 
+import { ADDRESS_LIMIT_REASON, MAX_ADDRESSES_PER_USER } from "./schema";
 import {
   createAddress,
   deleteAddress,
@@ -24,7 +25,13 @@ const mocks = vi.hoisted(() => {
   const calls: string[] = [];
   const tx = {
     $queryRaw: vi.fn(),
-    address: { findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn(), create: vi.fn() },
+    address: {
+      findFirst: vi.fn(),
+      findMany: vi.fn(),
+      update: vi.fn(),
+      updateMany: vi.fn(),
+      create: vi.fn(),
+    },
   };
   const db = {
     $transaction: vi.fn(),
@@ -152,7 +159,19 @@ beforeEach(() => {
     calls.push("create");
     return ADDRESS_ROW;
   });
+  tx.address.findMany.mockImplementation(async () => {
+    calls.push("count");
+    return [];
+  });
 });
+
+/** Makes the counted address ids of the create's transaction `count` rows long. */
+function holding(count: number): void {
+  tx.address.findMany.mockImplementation(async () => {
+    calls.push("count");
+    return Array.from({ length: count }, (_, i) => ({ id: `addr_${String(i)}` }));
+  });
+}
 
 describe("toProfileDto", () => {
   it("maps a customer without store or application", () => {
@@ -293,18 +312,19 @@ describe("listAddresses", () => {
 });
 
 describe("createAddress", () => {
-  it("creates a non-default address for the actor in a transaction, without lock or clear", async () => {
+  it("creates a non-default address for the actor in a transaction: lock, count, create, no clear", async () => {
     const dto = await createAddress(CUSTOMER, { ...ADDRESS_INPUT, isDefault: false });
     expect(dto).toEqual(toAddressDto(ADDRESS_ROW));
-    expect(calls).toEqual(["begin", "create", "commit"]);
+    expect(calls).toEqual(["begin", "lock", "count", "create", "commit"]);
+    expect(tx.address.updateMany).not.toHaveBeenCalled();
     expect(tx.address.create.mock.calls[0]?.[0]).toMatchObject({
       data: { ...ADDRESS_INPUT, isDefault: false, userId: "user_me" },
     });
   });
 
-  it("makes a new default: locks the user row, clears the old default, then creates", async () => {
+  it("makes a new default: locks the user row, counts, clears the old default, then creates", async () => {
     await createAddress(CUSTOMER, { ...ADDRESS_INPUT, isDefault: true });
-    expect(calls).toEqual(["begin", "lock", "clear-default", "create", "commit"]);
+    expect(calls).toEqual(["begin", "lock", "count", "clear-default", "create", "commit"]);
     const lock = rawCall(0);
     expect(lock.text).toBe('SELECT 1 FROM "User" WHERE "id" = ? FOR NO KEY UPDATE');
     expect(lock.values).toEqual(["user_me"]);
@@ -325,6 +345,67 @@ describe("createAddress", () => {
     } as never);
     const data = (tx.address.create.mock.calls[0]?.[0] as { data: Record<string, unknown> }).data;
     expect(data["userId"]).toBe("user_seller");
+  });
+});
+
+describe("createAddress: at most MAX_ADDRESSES_PER_USER addresses (D-044 point 4)", () => {
+  it("is 50, with the reason ADDRESS_LIMIT", () => {
+    expect(MAX_ADDRESSES_PER_USER).toBe(50);
+    expect(ADDRESS_LIMIT_REASON).toBe("ADDRESS_LIMIT");
+  });
+
+  it("counts the actor's own addresses, up to the limit, under the user lock", async () => {
+    holding(MAX_ADDRESSES_PER_USER - 1);
+    await createAddress(SELLER, { ...ADDRESS_INPUT, isDefault: false });
+    expect(tx.address.findMany).toHaveBeenCalledWith({
+      where: { userId: "user_seller" },
+      select: { id: true },
+      take: MAX_ADDRESSES_PER_USER,
+    });
+    const lock = rawCall(0);
+    expect(lock.text).toBe('SELECT 1 FROM "User" WHERE "id" = ? FOR NO KEY UPDATE');
+    expect(lock.values).toEqual(["user_seller"]);
+    expect(calls).toEqual(["begin", "lock", "count", "create", "commit"]);
+  });
+
+  it("refuses the 51st with 409 CONFLICT ADDRESS_LIMIT and rolls back, writing nothing", async () => {
+    holding(MAX_ADDRESSES_PER_USER);
+    let caught: unknown;
+    try {
+      await createAddress(CUSTOMER, { ...ADDRESS_INPUT, isDefault: true });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(AppError);
+    const error = caught as AppError;
+    expect(error.status).toBe(409);
+    expect(error.toPublic()).toEqual({
+      code: "CONFLICT",
+      message: "The request conflicts with existing data.",
+      details: { reason: ADDRESS_LIMIT_REASON },
+    });
+    // The check comes before the default is cleared, so nothing at all is written.
+    expect(calls).toEqual(["begin", "lock", "count", "rollback"]);
+    expect(tx.address.updateMany).not.toHaveBeenCalled();
+    expect(tx.address.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses for every role alike", async () => {
+    holding(MAX_ADDRESSES_PER_USER);
+    for (const actor of [CUSTOMER, SELLER, ADMIN]) {
+      expect(await refusal(createAddress(actor, { ...ADDRESS_INPUT, isDefault: false }))).toBe(
+        "409 CONFLICT",
+      );
+    }
+    expect(tx.address.create).not.toHaveBeenCalled();
+  });
+
+  it("does not count on an update or a delete", async () => {
+    holding(MAX_ADDRESSES_PER_USER);
+    await updateAddress(CUSTOMER, "addr_1", { isDefault: true });
+    db.address.deleteMany.mockResolvedValue({ count: 1 });
+    await deleteAddress(CUSTOMER, "addr_1");
+    expect(tx.address.findMany).not.toHaveBeenCalled();
   });
 });
 

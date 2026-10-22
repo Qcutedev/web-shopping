@@ -321,6 +321,7 @@ A body that is not valid JSON, and a missing or malformed `Idempotency-Key` (dec
 | `STORE_NAME_TAKEN` | A store name whose key (NFKC, case folding, white space; DATA_MODEL.md section 21.7) another store already has: submitting a seller application, approving one (the application stays `PENDING`), or renaming a store (SEC-058, D-041 point 1) |
 | `STORE_NAME_RESERVED` | A store name whose key, punctuation and symbols removed, contains a reserved name (the marketplace's name, "admin", "official", and the others in `RESERVED_STORE_NAMES`) anywhere: the same three writes (SEC-058, D-041 point 3, widened by D-042 point 1) |
 | `CART_LINE_LIMIT` | `POST /cart/items` that would create a new line in a cart already holding 50 lines, and `POST /checkout` of a cart holding more than 50 lines ([section 5.4](#54-cart); SEC-053, owner decision 2026-10-22) |
+| `ADDRESS_LIMIT` | `POST /me/addresses` by a user who already holds 50 addresses ([section 5.3.1](#531-as-built-t-030-backend-2026-10-13); D-044 point 4) |
 
 A code or reason that is not in these tables is a contract change ([section 10](#10-change-process)).
 
@@ -587,7 +588,7 @@ Implemented in `src/modules/catalog` (service, repository, the visibility rule i
 | GET | `/me` | user | Profile, role, own store, own latest application. |
 | PATCH | `/me` | user | Body: `name`, `phone` only. `email`, `role`, `isActive` are unknown keys. |
 | GET | `/me/addresses` | user | Paginated. Own addresses only. |
-| POST | `/me/addresses` | user | |
+| POST | `/me/addresses` | user | At most 50 addresses per user (D-044 point 4); the 51st is `409 CONFLICT` `ADDRESS_LIMIT`. |
 | PATCH | `/me/addresses/{id}` | user | Owner only. Else 404. |
 | DELETE | `/me/addresses/{id}` | user | No body. Owner only. Else 404. An address may be deleted even if orders used it: orders hold their own copy. |
 
@@ -632,6 +633,7 @@ The address shape is exactly `{ "id", "recipientName", "phone", "line1", "subdis
 **Refusals.**
 
 - `401 UNAUTHENTICATED`: no valid session, or a user deactivated between the guard and the query of `GET /me` or `PATCH /me`.
+- `409 CONFLICT`, default message, `details` exactly `{ "reason": "ADDRESS_LIMIT" }`: `POST /me/addresses` by a caller who already holds 50 addresses (`MAX_ADDRESSES_PER_USER` in `src/modules/profile/schema.ts`; D-044 point 4). Nothing is written: the check comes before the previous default is cleared. It follows steps 1 to 7, so an invalid body is `400` and a caller without a session `401` even at the cap. The same for every role.
 - `404 NOT_FOUND`, default message, `details` `{}`: `PATCH` or `DELETE` of an address the caller does not own. Ownership is part of the statement (`WHERE id = :id AND "userId" = :actor`), so an id of another user and an id that does not exist get the same answer and nothing is changed (REQ-C-04). A second `DELETE` of the same address is also `404`.
 - `400 VALIDATION_ERROR`: the rules below; and, on every body, an unknown key (`unrecognized_keys`, path `""`). Unknown keys include `id`, `userId`, `email`, `role`, `isActive`, `storeId`, and the timestamps: `PATCH /me` never changes the email, the role, or the active flag (REQ-C-03), and an address cannot be created for, or moved to, another user.
 
@@ -650,9 +652,9 @@ The address shape is exactly `{ "id", "recipientName", "phone", "line1", "subdis
 
 `POST /me/addresses` requires every field except `isDefault`. `PATCH /me` and `PATCH /me/addresses/{id}` take any of their fields but **at least one**: an empty object is `400` with one field error at path `""`, code `custom`. A field that is not sent is not changed.
 
-**Default address, as built.** Every address write is one transaction. A write that makes an address the default first locks the caller's `User` row (`SELECT ... FOR NO KEY UPDATE`), then sets the caller's other default to `false`, then writes. Two concurrent default switches of one user therefore run one after the other; both answer `200`, and the user ends with exactly one default, the one written last (DATA_MODEL.md section 6.2; code-review finding CR-22 a). `NO KEY UPDATE` does not wait for, or block, a foreign-key check that references the user elsewhere. A write with `isDefault: false`, or without `isDefault`, takes no lock.
+**Default address, as built.** Every address write is one transaction. A write that makes an address the default first locks the caller's `User` row (`SELECT ... FOR NO KEY UPDATE`), then sets the caller's other default to `false`, then writes. Two concurrent default switches of one user therefore run one after the other; both answer `200`, and the user ends with exactly one default, the one written last (DATA_MODEL.md section 6.2; code-review finding CR-22 a). `NO KEY UPDATE` does not wait for, or block, a foreign-key check that references the user elsewhere. A `PATCH` with `isDefault: false`, or without `isDefault`, takes no lock; every `POST` takes it (below).
 
-**Not limited.** No rule bounds how many addresses one user may hold, and no rate limit applies; neither is in a requirement.
+**Address cap, as built** (D-044 point 4). A user holds at most 50 addresses. Every `POST /me/addresses` runs in one transaction that first locks the caller's `User` row (the same `FOR NO KEY UPDATE` as the default switch), then counts the caller's addresses (reading at most 50 ids), and refuses with `409 CONFLICT` `ADDRESS_LIMIT` when the count is 50 or more; only then is the previous default cleared (when `isDefault` is `true`) and the address inserted. Concurrent creates of one user therefore run one after the other and cannot pass the cap together. `PATCH` and `DELETE` are never refused for it, and a user who holds more than 50 (rows written before the cap) keeps them all and can create none until below 50. Checkout lists the first 50 addresses (D-044 point 4), which is every address a user can hold. No rate limit applies to these endpoints.
 
 ### 5.4 Cart
 

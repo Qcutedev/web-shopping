@@ -49,6 +49,16 @@ export const PHONE_INPUT_MAX = 32;
 export const MAX_ID_LENGTH = 200;
 
 /**
+ * Most addresses one user may hold (D-044 point 4). `POST /me/addresses` by a user who already
+ * holds this many is `409 CONFLICT` with `details.reason` ADDRESS_LIMIT_REASON; editing and
+ * deleting are never refused for it. Checkout shows the first 50 addresses, so every address a
+ * user holds is selectable there. docs/API_CONTRACTS.md section 5.3.1.
+ */
+export const MAX_ADDRESSES_PER_USER = 50;
+/** `details.reason` of the `409 CONFLICT` for a user at or above MAX_ADDRESSES_PER_USER (section 2.3). */
+export const ADDRESS_LIMIT_REASON = "ADDRESS_LIMIT";
+
+/**
  * A Thai phone number after spaces and hyphens are removed: domestic `0` and 9 or 10 digits in
  * total (`021234567`, `0812345678`), or `+66` and the same number without its leading `0`
  * (`+6621234567`, `+66812345678`). ASCII digits only.

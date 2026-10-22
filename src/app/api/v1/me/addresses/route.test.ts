@@ -11,11 +11,11 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AddressDto } from "@/modules/profile";
+import { ADDRESS_LIMIT_REASON, type AddressDto } from "@/modules/profile";
 import { createAddress, listAddresses } from "@/modules/profile/service";
 import type { Actor } from "@/server/auth/actor";
 import { requireActor } from "@/server/auth/session";
-import { unauthenticated } from "@/server/errors";
+import { conflict, unauthenticated } from "@/server/errors";
 
 import * as routeModule from "./route";
 
@@ -160,6 +160,18 @@ describe("POST /api/v1/me/addresses", () => {
     expect(response.status).toBe(201);
     expect(await response.json()).toEqual({ data: ADDRESS });
     expect(createMock).toHaveBeenCalledWith(ACTOR, { ...INPUT, isDefault: true });
+  });
+
+  it("maps the address cap to 409 CONFLICT with details.reason ADDRESS_LIMIT (D-044 point 4)", async () => {
+    createMock.mockRejectedValue(conflict(ADDRESS_LIMIT_REASON));
+    const response = await POST(post(INPUT));
+    expect(response.status).toBe(409);
+    const body = (await response.json()) as ErrorEnvelope & {
+      error: { message: string; details: { reason?: string } };
+    };
+    expect(body.error.code).toBe("CONFLICT");
+    expect(body.error.details).toEqual({ reason: "ADDRESS_LIMIT" });
+    expect(typeof body.error.requestId).toBe("string");
   });
 
   it("defaults isDefault to false", async () => {

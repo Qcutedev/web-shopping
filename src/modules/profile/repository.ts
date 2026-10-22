@@ -16,6 +16,10 @@
  * with the `KEY SHARE` lock that a foreign-key check on `"User"` takes, so the lock never waits
  * for, or blocks, an insert elsewhere that references the user.
  *
+ * Address cap (D-044 point 4). Every address create takes the same user lock, whatever
+ * `isDefault` is, and counts the user's addresses under it before inserting. Two concurrent
+ * creates of one user therefore cannot both see 49 and both insert.
+ *
  * Nothing here logs: the rows hold names, phones, and addresses (SECURITY.md SR-04).
  */
 import { db, type DbTransaction, Prisma } from "@/server/db";
@@ -139,7 +143,7 @@ export async function findAddresses(userId: string, page: PaginationQuery): Prom
   return { rows, total };
 }
 
-/** Locks the user's row for the default switch (file comment). Scalar, one statement. */
+/** Locks the user's row for a default switch or an address create (file comment). Scalar, one statement. */
 async function lockUserForDefaultSwitch(tx: DbTransaction, userId: string): Promise<void> {
   await tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${userId} FOR NO KEY UPDATE`;
 }
@@ -156,17 +160,49 @@ async function clearDefault(tx: DbTransaction, userId: string, keepId?: string):
   });
 }
 
-/** Creates an address for the user; when it is the default, the previous default is cleared. */
-export async function insertAddress(userId: string, input: AddressCreate): Promise<AddressRow> {
+/**
+ * Runs `work` in one transaction that first locks the user's `User` row with the same
+ * `FOR NO KEY UPDATE` lock as the default switch (file comment). Every address create of one user
+ * therefore runs one after the other, so a count taken by `work` cannot be passed by a concurrent
+ * create of the same user (D-044 point 4). A throw inside `work` rolls the whole transaction back.
+ */
+export async function withUserLockedForAddressCreate<T>(
+  userId: string,
+  work: (tx: DbTransaction) => Promise<T>,
+): Promise<T> {
   return db.$transaction(async (tx) => {
-    if (input.isDefault) {
-      await lockUserForDefaultSwitch(tx, userId);
-      await clearDefault(tx, userId);
-    }
-    return tx.address.create({
-      data: { ...input, userId },
-      select: ADDRESS_SELECT,
-    });
+    await lockUserForDefaultSwitch(tx, userId);
+    return work(tx);
+  });
+}
+
+/**
+ * How many addresses the user holds, counted up to `limit` (D-044 point 4). Reads at most `limit`
+ * ids, so the work is bounded; a result equal to `limit` means "at least `limit`". Called under
+ * the user lock of withUserLockedForAddressCreate.
+ */
+export async function countAddressesUpTo(
+  tx: DbTransaction,
+  userId: string,
+  limit: number,
+): Promise<number> {
+  const rows = await tx.address.findMany({ where: { userId }, select: { id: true }, take: limit });
+  return Math.min(rows.length, limit);
+}
+
+/**
+ * Creates an address for the user inside the caller's transaction; when it is the default, the
+ * previous default is cleared first. The caller holds the user lock.
+ */
+export async function insertAddress(
+  tx: DbTransaction,
+  userId: string,
+  input: AddressCreate,
+): Promise<AddressRow> {
+  if (input.isDefault) await clearDefault(tx, userId);
+  return tx.address.create({
+    data: { ...input, userId },
+    select: ADDRESS_SELECT,
   });
 }
 

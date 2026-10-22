@@ -10,14 +10,17 @@
  * Writes:
  *   - the profile write changes `name` and `phone` only, never `email`, `role`, or `isActive`;
  *   - every address write runs in one transaction; making an address the default clears the
- *     previous default in that transaction, so a user has at most one (repository.ts).
+ *     previous default in that transaction, so a user has at most one (repository.ts);
+ *   - a user holds at most MAX_ADDRESSES_PER_USER (50) addresses (D-044 point 4), counted under a
+ *     lock of the user's row in the create's own transaction.
  */
 import type { Actor } from "@/server/auth/actor";
 
-import { addressNotFound, profileGone } from "./errors";
+import { addressLimitReached, addressNotFound, profileGone } from "./errors";
 import {
   type AddressRow,
   type AddressWrite,
+  countAddressesUpTo,
   deleteOwnedAddress,
   findAddresses,
   findProfile,
@@ -26,16 +29,18 @@ import {
   type ProfileUpdate,
   updateOwnedAddress,
   updateProfile as writeProfile,
+  withUserLockedForAddressCreate,
 } from "./repository";
-import type {
-  AddressDeletedDto,
-  AddressDto,
-  CreateAddressBody,
-  Page,
-  PaginationQuery,
-  ProfileDto,
-  UpdateAddressBody,
-  UpdateProfileBody,
+import {
+  type AddressDeletedDto,
+  type AddressDto,
+  type CreateAddressBody,
+  MAX_ADDRESSES_PER_USER,
+  type Page,
+  type PaginationQuery,
+  type ProfileDto,
+  type UpdateAddressBody,
+  type UpdateProfileBody,
 } from "./schema";
 
 // ---------------------------------------------------------------------------------------------
@@ -121,17 +126,28 @@ export async function listAddresses(
   return { items: rows.map(toAddressDto), page: query.page, pageSize: query.pageSize, total };
 }
 
-/** POST /me/addresses. */
+/**
+ * POST /me/addresses. At most MAX_ADDRESSES_PER_USER per user (D-044 point 4): the count is
+ * taken under the user lock in the same transaction as the insert, so concurrent creates of one
+ * user cannot pass the cap. At the cap: `409 CONFLICT` `ADDRESS_LIMIT`, nothing written (the
+ * previous default is not cleared either, because the check comes first).
+ */
 export async function createAddress(actor: Actor, input: CreateAddressBody): Promise<AddressDto> {
-  const row = await insertAddress(actor.userId, {
-    recipientName: input.recipientName,
-    phone: input.phone,
-    line1: input.line1,
-    subdistrict: input.subdistrict,
-    district: input.district,
-    province: input.province,
-    postalCode: input.postalCode,
-    isDefault: input.isDefault,
+  const userId = actor.userId;
+  const row = await withUserLockedForAddressCreate(userId, async (tx) => {
+    if ((await countAddressesUpTo(tx, userId, MAX_ADDRESSES_PER_USER)) >= MAX_ADDRESSES_PER_USER) {
+      throw addressLimitReached();
+    }
+    return insertAddress(tx, userId, {
+      recipientName: input.recipientName,
+      phone: input.phone,
+      line1: input.line1,
+      subdistrict: input.subdistrict,
+      district: input.district,
+      province: input.province,
+      postalCode: input.postalCode,
+      isDefault: input.isDefault,
+    });
   });
   return toAddressDto(row);
 }
