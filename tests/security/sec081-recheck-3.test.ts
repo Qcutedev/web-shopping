@@ -148,7 +148,7 @@ describe("SEC-081 third re-check, group 1: listed globals through the cast, a me
       'const mm = globalThis.module; const k = "require"; const r = mm[k]("../../server/db");',
     ],
   ] as const) {
-    it.fails(`${label} is an error`, async () => {
+    it(`${label} is an error`, async () => {
       expect(await guardErrors(file, code)).not.toEqual([]);
     });
   }
@@ -177,7 +177,7 @@ describe("SEC-081 third re-check, group 2: constructor without a member access",
       'const k = "constructor"; const F = (() => {})[k]; const m = F("return process")();',
     ],
   ] as const) {
-    it.fails(`${label} is an error`, async () => {
+    it(`${label} is an error`, async () => {
       expect(await guardErrors(PAGE_TS, code)).not.toEqual([]);
     });
   }
@@ -216,7 +216,7 @@ describe("SEC-084: a specifier that starts with ./.. or is absolute passes the n
       'import { x } from "C:/dev/web shoping/scripts/bootstrap-admin";',
     ],
   ] as const) {
-    it.fails(`${label} is an error`, async () => {
+    it(`${label} is an error`, async () => {
       expect(await guardErrors(file, code)).not.toEqual([]);
     });
   }

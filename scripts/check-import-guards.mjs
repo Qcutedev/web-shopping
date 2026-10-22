@@ -356,6 +356,79 @@ const probes = [
   ["src/app/x/probe.ts", 'import { x } from "../../../e2e/support/db";', true],
   ["src/app/x/probe.ts", 'const m = await import("../../../scripts/bootstrap-admin");', true],
   ["src/app/x/probe.js", 'const m = require("../../../scripts/bootstrap-admin");', true],
+  // SEC-081 recheck 3, group 1: listed globals through the cast, a member, or an alias.
+  [
+    "src/app/x/probe.ts",
+    'const k = "require"; const m = (module as Record<string, (s: string) => unknown>)[k]("../../server/db");',
+    true,
+  ],
+  [
+    "src/app/x/probe.ts",
+    'const k = "call"; const m = (__non_webpack_require__ as Record<string, (a: null, s: string) => unknown>)[k](null, "../../server/db");',
+    true,
+  ],
+  [
+    "src/app/x/probe.ts",
+    'const k = "construct"; const c = (Reflect as Record<string, unknown>)[k];',
+    true,
+  ],
+  ["src/app/x/probe.js", 'const m = __non_webpack_require__.call(null, "../../server/db");', true],
+  ["src/app/x/probe.js", "const cache = __webpack_require__.c;", true],
+  ["src/app/x/probe.js", "const t = __turbopack_require__;", true],
+  ["src/app/x/probe.js", "const t = x.__webpack_modules__;", true],
+  [
+    "src/app/x/probe.ts",
+    'const g = globalThis.globalThis; const k = "eval"; const e = g[k];',
+    true,
+  ],
+  ["src/app/x/probe.js", 'const g = globalThis.global; const k = "eval"; const e = g[k];', true],
+  [
+    "src/app/x/probe.js",
+    'const mm = globalThis.module; const k = "require"; const r = mm[k]("../../server/db");',
+    true,
+  ],
+  ["src/app/x/probe.js", 'const g = globalThis["globalThis"];', true],
+  // SEC-081 recheck 3, group 2: constructor without a member access.
+  [
+    "src/app/x/probe.ts",
+    'const { constructor: F } = () => {}; const m = F("return process")();',
+    true,
+  ],
+  [
+    "src/app/x/probe.ts",
+    'const { "constructor": F } = () => {}; const m = F("return process")();',
+    true,
+  ],
+  [
+    "src/app/x/probe.ts",
+    'const { ["constructor"]: F } = () => {}; const m = F("return process")();',
+    true,
+  ],
+  ["src/app/x/probe.ts", "const { [`constructor`]: F } = () => {};", true],
+  ["src/app/x/probe.ts", 'const k = "constructor"; const { [k]: F } = () => {};', true],
+  ["src/app/x/probe.ts", "const { constructor } = () => {};", true],
+  [
+    "src/app/x/probe.ts",
+    'function f({ constructor: F }: { constructor: (s: string) => () => unknown }) { return F("return process")(); }\nconst m = f(() => {});',
+    true,
+  ],
+  [
+    "src/app/x/probe.ts",
+    'const k = "constructor"; const F = (() => {})[k]; const m = F("return process")();',
+    true,
+  ],
+  ["src/app/x/probe.ts", 'let k; k = "constructor";', true],
+  ["src/app/x/probe.ts", 'const k = "eval";', true],
+  ["src/app/x/probe.ts", "const k = `construct`;", true],
+  // SEC-084: a specifier that starts with ./.. or is absolute passes the normal-form check.
+  ["src/app/x/probe.ts", 'import { x } from "./../../../scripts/bootstrap-admin";', true],
+  ["src/app/x/probe.ts", 'const m = await import("./../../../scripts/bootstrap-admin");', true],
+  ["src/app/x/probe.js", 'const m = require("./../../../scripts/bootstrap-admin");', true],
+  ["src/components/x/probe.tsx", 'import { x } from "./../../../tests/helpers/db";', true],
+  ["src/server/sub/probe.ts", 'import { db } from "./../db";', true],
+  ["src/app/x/probe.ts", 'import { x } from "C:/dev/web shoping/scripts/bootstrap-admin";', true],
+  ["src/app/x/probe.ts", 'import { x } from "/abs/scripts/bootstrap-admin";', true],
+  ["src/app/x/probe.ts", 'import { x } from "file:///C:/dev/scripts/bootstrap-admin";', true],
   // Controls: the db layer reaches prisma/generated, and tests under scripts import src.
   [
     "src/server/db/probe.ts",
@@ -370,6 +443,9 @@ const probes = [
     false,
   ],
   ["src/app/x/probe.ts", "const e = process.env.NODE_ENV;", false],
+  // The real tree passes "constructor" as a call argument; that stays clean.
+  ["src/app/x/probe.ts", 'const v = pick(error, "constructor");', false],
+  ["src/app/x/probe.ts", "const { a, b: c } = obj;", false],
   // Allowed shapes that the SEC-081 selectors must keep accepting (the real tree uses them).
   ["src/app/x/probe.ts", "const n = items[items.length - 1];\nconst o = items[i + 1];", false],
   ["src/app/x/probe.ts", "const v = Reflect.apply(getter, chunk, []);", false],

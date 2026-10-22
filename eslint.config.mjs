@@ -21,7 +21,11 @@ const SIBLING_DB = "^(\\./|(\\.\\./)+)db(/|$)";
 // no backslash, and no ".." after a named segment (as in "@/server/auth/../db").
 // A query or fragment suffix ("?" or "#") is also refused: "@/server/db?x" would not match the
 // patterns, which end at "/" or the end of the string (SEC-081).
-const NOT_NORMAL = "/\\./|//|\\\\|[?#]|(^|/)[^./][^/]*/\\.\\.(/|$)";
+// A specifier that starts with "./.." (SEC-084) or is absolute (a drive letter, a leading "/", or a
+// file: URL) is refused too: the patterns anchor on "../" and on a bare "./db", so "./../db" and
+// "C:/x/scripts/y" would pass them. The real tree has no such specifier.
+const NOT_NORMAL =
+  "/\\./|//|\\\\|[?#]|(^|/)[^./][^/]*/\\.\\.(/|$)|^\\./\\.\\.|^([A-Za-z]:|/|file:)";
 
 const driverPattern = {
   regex: DB_DRIVER,
@@ -105,14 +109,17 @@ const LOADER_NAMES = "require|createRequire|getBuiltinModule|mainModule|_load|ev
 // computed) is allowed, so that an alias (`const g = globalThis`) cannot be built. A type-position
 // use (`typeof globalThis`) and the cast form `(globalThis as T)[key]` are allowed.
 const GLOBAL_NAMES = "module|global|globalThis|Reflect|__non_webpack_require__|__webpack_require__";
+// The cast form is allowed for globalThis only (SEC-081 recheck 3). A non-computed member whose
+// property is itself one of these names (`globalThis.globalThis`, `.global`, `.module`) is
+// rejected below, so a member position does not give a fresh alias; the bundler loader names are
+// rejected in every position.
 const GLOBAL_ALLOWED = [
   "MemberExpression[computed=false] > Identifier.object",
-  "MemberExpression[computed=false] > Identifier.property",
   "Property[computed=false] > Identifier.key",
   "TSPropertySignature > Identifier.key",
   "TSTypeQuery > Identifier",
   "TSQualifiedName > Identifier",
-  "MemberExpression[computed=true] > TSAsExpression.object > Identifier.expression",
+  "MemberExpression[computed=true] > TSAsExpression.object > Identifier.expression[name='globalThis']",
 ]
   .map((part) => `:not(${part})`)
   .join("");
@@ -128,6 +135,22 @@ const loaderRules = [
   // pieces and three or more pieces; code review is the control (D-045).
   "VariableDeclarator > BinaryExpression.init[operator='+'][left.type='Literal'][right.type='Literal'][left.value=/^.{0,16}$/][right.value=/^.{0,16}$/]",
   "MemberExpression[computed=true] > BinaryExpression.property:has(:matches(Literal[value=type(string)], TemplateLiteral))",
+  // SEC-081 recheck 3 (b): the bundler runtime names, in every position (object, property, key).
+  "Identifier[name=/^__(non_)?webpack_|^__turbopack_/]",
+  // (c): a global name as the property of a non-computed member builds an alias, and a computed
+  // literal key does the same. (The Identifier selector above already refuses the property
+  // position; this one names the intent and also covers the computed literal.)
+  `MemberExpression[computed=true][property.value=/^(${GLOBAL_NAMES})$/]`,
+  // (d): destructuring reaches `constructor` or a loader without a member access, with an
+  // identifier, string, computed literal, or template key. A computed key that is not a literal
+  // cannot be read and is rejected too.
+  `ObjectPattern > Property[key.name=/^(${LOADER_NAMES}|constructor|construct)$/]`,
+  `ObjectPattern > Property[key.value=/^(${LOADER_NAMES}|constructor|construct)$/]`,
+  "ObjectPattern > Property[computed=true]:not([key.type='Literal'])",
+  // (e): a plain string kept in a variable (or assigned) that names the constructor or a loader.
+  `VariableDeclarator[init.value=/^(${LOADER_NAMES}|constructor|construct)$/]`,
+  `AssignmentExpression[right.value=/^(${LOADER_NAMES}|constructor|construct)$/]`,
+  `VariableDeclarator[init.type='TemplateLiteral'][init.quasis.0.value.cooked=/^(${LOADER_NAMES}|constructor|construct)$/]`,
   `MemberExpression[property.name=/^(${LOADER_NAMES})$/]`,
   `MemberExpression[computed=true][property.value=/^(${LOADER_NAMES}|constructor|construct)$/]`,
   "MemberExpression[computed=true][property.type='TemplateLiteral']",
