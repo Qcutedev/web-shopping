@@ -12,7 +12,12 @@ Not started: checkout UI (T-034), reviews, seller onboarding and seller products
 
 ## Resume here
 
-Session 103 finished. No agent is running. Local commits, not pushed.
+Session 104 launching 3 agents (parallel, disjoint paths). Local commits, not pushed. If interrupted: inspect `git status`/`git diff` first.
+- frontend: T-034 blocking + Low items. Paths: `src/components/checkout/**`, `src/app/**/checkout/**`, `src/app/**/orders/**`, `src/i18n/th.ts` (no ADDRESS_LIMIT copy yet; needs product-requirements approval), their component tests.
+- devops: SEC-081 remediation (a) to (e). Paths: `eslint.config.mjs`, `scripts/check-import-guards.mjs`, `tests/security/sec081-recheck.test.ts`.
+- qa: accept `tests/integration/profile/address-limit.test.ts`; `pg_stat_clear_snapshot()` fix. Paths: `tests/integration/profile/**`, `tests/integration/cart/**`.
+
+Previous (session 103): no agent running.
 
 Read first in a new session: CLAUDE.md, this file, `git status`, `git diff`.
 
