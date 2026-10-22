@@ -1,4 +1,4 @@
-import {
+﻿import {
   createContext,
   useContext,
   useId,
@@ -31,7 +31,7 @@ const CELL_PADDING: Record<TableDensity, string> = {
   dense: "px-3 py-2",
 };
 
-const BELOW_MD_QUERY = "(max-width: 767.98px)";
+const BELOW_MD_QUERY = "(width < 48rem)";
 
 function subscribeBelowMd(onChange: () => void) {
   if (typeof window.matchMedia !== "function") return () => {};
@@ -40,16 +40,29 @@ function subscribeBelowMd(onChange: () => void) {
   return () => query.removeEventListener("change", onChange);
 }
 
+function subscribeNever() {
+  return () => {};
+}
+
+function getFalse() {
+  return false;
+}
+
 function getBelowMd() {
   return typeof window.matchMedia === "function" && window.matchMedia(BELOW_MD_QUERY).matches;
 }
 
 /**
- * True below `md`. A stacked table cannot scroll there, so its wrapper drops the keyboard stop
+ * True below `md` (only tracked when `enabled`). A stacked table cannot scroll there, so its wrapper drops the keyboard stop
  * (an attribute cannot be responsive in CSS). The server renders the focusable form.
  */
-function useBelowMd() {
-  return useSyncExternalStore(subscribeBelowMd, getBelowMd, () => false);
+function useBelowMd(enabled: boolean) {
+  // Unstacked tables never subscribe, so they add no matchMedia listener.
+  return useSyncExternalStore(
+    enabled ? subscribeBelowMd : subscribeNever,
+    enabled ? getBelowMd : getFalse,
+    getFalse,
+  );
 }
 
 export interface TableProps extends Omit<HTMLAttributes<HTMLTableElement>, "children"> {
@@ -94,7 +107,7 @@ export function Table({
   ...props
 }: TableProps) {
   const captionId = useId();
-  const belowMd = useBelowMd();
+  const belowMd = useBelowMd(stacked);
   return (
     <DensityContext.Provider value={density}>
       <StackedContext.Provider value={stacked}>

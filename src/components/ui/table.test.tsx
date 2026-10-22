@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+﻿import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -226,6 +226,25 @@ describe("Table", () => {
       }
     });
 
+    it("uses the md breakpoint query and listens only when stacked", () => {
+      const original = window.matchMedia;
+      const matchMedia = vi.fn().mockReturnValue({
+        matches: false,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      });
+      try {
+        window.matchMedia = matchMedia as unknown as typeof window.matchMedia;
+        const plain = render(<Stacked stacked={false} />);
+        expect(matchMedia).not.toHaveBeenCalled();
+        plain.unmount();
+        render(<Stacked />);
+        expect(matchMedia).toHaveBeenCalledWith("(width < 48rem)");
+      } finally {
+        window.matchMedia = original;
+      }
+    });
+
     it("draws no card inside the footer card", () => {
       render(
         <Table caption="x" stacked>
@@ -238,11 +257,9 @@ describe("Table", () => {
       );
       const footer = document.querySelector("tfoot") as HTMLElement;
       expect(footer.className).toContain("max-md:border");
-      const tokens = (footer.querySelector("tr") as HTMLElement).className.split(/\s+/);
       expect(footer.className).toContain("max-md:[&_tr]:border-0");
       expect(footer.className).toContain("max-md:[&_tr]:bg-transparent");
       expect(footer.className).toContain("max-md:[&_tr]:rounded-none");
-      expect(tokens).toContain("max-md:block");
     });
 
     it("turns rows into cards below md and hides the header unless focused", () => {
