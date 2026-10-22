@@ -13,14 +13,16 @@ Not started: checkout UI (T-034), reviews, seller onboarding and seller products
 ## Resume here
 
 
-Session 105 finished. No agent is running. Local commits, not pushed.
+Session 105 follow-up: owner approved the changed Thai strings (all) and chose for SEC-081: fix the guard, then accept the residual in writing (code review is the control). devops is starting: SEC-081/SEC-083 guard fixes; paths `eslint.config.mjs`, `scripts/check-import-guards.mjs`, `tests/security/sec081-recheck-2.test.ts`, `docs/SECURITY.md`, `docs/DECISIONS.md`. If no commit follows, inspect `git status` first.
+
+Session 105 finished. Local commits, not pushed.
 
 Read first in a new session: CLAUDE.md, this file, `git status`, `git diff`.
 
 Done in session 105: qa `908f5af`, `7f6111a` (48 new tests in `tests/integration/checkout/cc-remaining.test.ts`: CC-04, CC-05, CC-07, CC-10, CC-11, CC-14, CC-06 seller side; 48 passed, neighbours 264 passed; no mutation run yet). Frontend (no commit): T-034 typecheck, lint, `pnpm test` 4828 passed, `pnpm build` ok, browser check at 360/768/1280 px on /checkout, /orders, /cart (success and failed-payment paths). Security `374ca0b`: SEC-081 stays OPEN, new SEC-083 (Low).
 
 Open:
-- Owner approval of changed Thai strings (`src/i18n/th.ts`): `orders.confirmation.failedBody` and `failedTimeoutBody` lost the "items back in cart" sentence (now in `cartReturnBody`, shown only when items exist); checkout lowered line uses OQ-46 `th.quantity.lowered`; unknown-stock refusal uses `th.errors.insufficientStock`.
+- (APPROVED by owner in session 105) Changed Thai strings (`src/i18n/th.ts`): `orders.confirmation.failedBody` and `failedTimeoutBody` lost the "items back in cart" sentence (now in `cartReturnBody`, shown only when items exist); checkout lowered line uses OQ-46 `th.quantity.lowered`; unknown-stock refusal uses `th.errors.insufficientStock`.
 - T-034 review item "cart-write INSUFFICIENT_STOCK sold-out copy": confirm with reviewer intent. T-034 browser check did not cover empty cart, INSUFFICIENT_STOCK refusal, list failure, skeletons; no e2e.
 - SEC-081 OPEN. Needs fixes (see SECURITY.md): `noInlineConfig` for all code; refuse `module`/`global`/`globalThis`/`Reflect`/`__non_webpack_require__` except as member-access object, refuse `.constructor` and computed binary/template keys (orchestrator, `eslint.config.mjs`); add probes to `scripts/check-import-guards.mjs` (devops). SEC-083 (Low): block `src` imports of `scripts|tests|e2e|prisma`. Then flip `it.fails` in `tests/security/sec081-recheck-2.test.ts`; security re-checks. Owner: accept name-based residual in writing or commission a module-graph check. SEC-082 (Low, qa) open. Flake: `t032-sec055-item1-recheck.test.ts` under load.
 - Frontend: Thai copy for ADDRESS_LIMIT in `src/i18n/th.ts` and address form; product-requirements approves copy first.
@@ -131,3 +133,4 @@ Notes marked "stale?" were written while Docker was down; later sessions ran the
 | Local | runs with `pnpm dev` and Docker databases |
 | Staging | not configured |
 | Production | not configured |
+
