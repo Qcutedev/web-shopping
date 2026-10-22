@@ -8,27 +8,28 @@ Last updated: 2026-10-22 (trimmed after the ninety-seventh session). The per-ses
 
 Done: foundation, database schema, auth, catalog, storefront pages, profile and addresses, cart, uploads, seller UI, seller isolation tests, concurrency tests. Several of these are IMPLEMENTED but not VERIFIED (code review or security re-check or browser check still open).
 
-Not started: checkout and orders (T-032, T-034), reviews, seller onboarding and seller products/orders, the whole admin area, the E2E suite, CI, Dockerfile, security headers, docs audit, final acceptance. Nothing has been deployed.
+Not started: checkout UI (T-034), reviews, seller onboarding and seller products/orders, the whole admin area, the E2E suite, CI, Dockerfile, security headers, docs audit, final acceptance. Nothing has been deployed.
 
 ## Resume here
 
-Session 99 started. Running in parallel: (1) security re-check SEC-078 -> docs/SECURITY.md; (2) code-review of a202868, 914cb39, 894c7c9 -> reviews/; (3) backend-api T-032 -> src/modules/checkout|orders|payments, src/app/api/v1/checkout|orders, docs/API_CONTRACTS.md, tests. If interrupted, inspect uncommitted files before relaunching.
-
-Previous: ninety-eighth session finished. All work is committed on `main` (no remote, nothing pushed).
+Ninety-ninth session finished. No agent is running.
 
 Read first in a new session: CLAUDE.md, this file, `git status`, `git diff`.
 
-Done in session 98: SEC-078 and CR-157 fixed in code (`a202868`); CR-158 to CR-161 (`914cb39`); CR-120 re-seed seller forms on lock, owner decision (`894c7c9`). Orchestrator re-ran format:check, lint, typecheck, `pnpm test` (4597 passed, 5 expected fail): exit 0.
+Done in session 99: SEC-078 re-checked and FIXED (`docs/SECURITY.md`, `tests/security/sec078-recheck.test.ts`). New SEC-079 (Low, open): e2e env scanner reads one line at a time, 24 multi-line dotenv forms missed; fix by parsing with `@next/env`, then flip the `it.fails` in `sec078-recheck.test.ts` (qa). Code review of `a202868`, `914cb39`, `894c7c9`: APPROVE, non-blocking items only (CR-162 to CR-166 below). T-032 found already built and reviewed in earlier sessions; its STATUS row was stale.
+
+CR-162: `tests/helpers/test-database-url.ts:299` "equal to DATABASE_URL" message ignores `prefix`/`where` (CR-158 incomplete; integration message must stay unchanged, pinned by `tests/integration/harness/test-database-url.test.ts:180,185`). CR-163: `dashboard-store.test.tsx:333` test name does not match what it tests. CR-164: lock tests do not assert errors/formMessage are cleared. CR-165: late `ImageSetEditor` upload can write into a locked `ProductForm`. CR-166: create-mode `ProductForm` resets the draft on suspension (confirm intended).
 
 Next, in order:
-1. security re-checks SEC-078 (still marked open in `docs/SECURITY.md`); code-review of `a202868`, `914cb39`, `894c7c9`.
-2. Then the missing features: T-032 checkout, orders, mock payment; T-034 checkout UI; seller and admin work.
+1. qa: SEC-079, CR-162 to CR-164. frontend: CR-165. Owner: CR-166, SEC-056, SEC-053 (line limit number).
+2. T-032 follow-ups: CR-T032-10 import-guard probe (security); T-033 CC-12; T-032 and T-031 code-review/security status still need re-checking.
+3. T-034 checkout UI; seller and admin work.
 
 Do not run two e2e suites at once: they share database `marketplace_e2e` and port 3100.
 
 Agents must not type backslash-u escapes in tool input: the tool turns them into real invisible characters (likely how U+FEFF reached SECURITY.md). Generate them from code points in a script.
 
-Last known test results (session 98): `pnpm test` 4597 passed, 5 expected fail; security project 1193 passed, 5 expected fail (per qa agent); `format:check`, `lint`, `typecheck` exit 0. e2e not run this session.
+Last known test results (session 99): `pnpm test:integration` 1357 passed, 7 expected fail; security project 1195 passed, 6 expected fail; session 98 `pnpm test` 4597 passed, 5 expected fail (not re-run with the new security test); `format:check`, `lint`, `typecheck` exit 0. e2e not run this session.
 
 Standing rules from the owner (D-019): never guess, park questions here and ask in batches; commit locally after each task passes its checks, never push without being told; stop for owner review at the five milestones.
 
@@ -74,7 +75,7 @@ Notes marked "stale?" were written while Docker was down; later sessions ran the
 | T-023 | Integration-test harness | VERIFIED | |
 | T-030 | Profile, addresses | IMPLEMENTED | stale?: code review APPROVED WITH FOLLOW-UPS (CR-91 to CR-96) |
 | T-031 | Cart | IMPLEMENTED | Code review CHANGES REQUIRED (`reviews/T-031-code-review.md`); security review pending |
-| T-032 | Checkout, orders, mock payment | NOT STARTED | |
+| T-032 | Checkout, orders, mock payment | IMPLEMENTED | Reviewed, fixes applied; integration suite 1357 passed (session 99); open: SEC-053, SEC-056, CR-T032-08, CR-T032-10 |
 | T-033 | Concurrency tests | IMPLEMENTED | Orchestrator has not re-run; gap: CC-12 not written |
 | T-034 | Checkout UI | NOT STARTED | |
 | T-035 | Reviews | NOT STARTED | |
