@@ -12,7 +12,7 @@ Not started: checkout UI (T-034), reviews, seller onboarding and seller products
 
 ## Resume here
 
-Ninety-ninth session finished. No agent is running.
+Session 100 started. Running now: qa (SEC-079, CR-162 to CR-164; paths: tests/**, e2e/**, docs/SECURITY.md), frontend (CR-165, CR-166; paths: src/components/** product form and image editor, src/i18n/th.ts), backend-api (SEC-056, SEC-053; paths: src/modules/payments, src/modules/cart, docs/API_CONTRACTS.md). If interrupted, inspect uncommitted files before relaunching.
 
 Read first in a new session: CLAUDE.md, this file, `git status`, `git diff`.
 
