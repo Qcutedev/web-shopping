@@ -12,7 +12,12 @@ Not started: checkout UI (T-034), reviews, seller onboarding and seller products
 
 ## Resume here
 
-Session 104 finished. No agent is running. Local commits, not pushed.
+Session 105 launching 3 agents (if no commit follows this line, they were interrupted; inspect `git status` first). Local commits, not pushed.
+- security: re-check SEC-081 `0a7ea5e`; paths `docs/SECURITY.md`, `tests/security/**`.
+- qa: remaining T-033 CC cases; paths `tests/**`, `e2e/**`.
+- frontend: T-034 verification (full `pnpm test`, `pnpm build`, browser check 360/768/1280); paths `src/components/**`, `src/app/(storefront)/**`, `src/i18n/**` only if a fix is needed.
+
+Session 104 finished.
 
 Read first in a new session: CLAUDE.md, this file, `git status`, `git diff`.
 
