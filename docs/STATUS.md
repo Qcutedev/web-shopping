@@ -12,22 +12,18 @@ Not started: checkout UI (T-034), reviews, seller onboarding and seller products
 
 ## Resume here
 
-Session 104 launching 3 agents (parallel, disjoint paths). Local commits, not pushed. If interrupted: inspect `git status`/`git diff` first.
-- frontend: T-034 blocking + Low items. Paths: `src/components/checkout/**`, `src/app/**/checkout/**`, `src/app/**/orders/**`, `src/i18n/th.ts` (no ADDRESS_LIMIT copy yet; needs product-requirements approval), their component tests.
-- devops: SEC-081 remediation (a) to (e). Paths: `eslint.config.mjs`, `scripts/check-import-guards.mjs`, `tests/security/sec081-recheck.test.ts`.
-- qa: accept `tests/integration/profile/address-limit.test.ts`; `pg_stat_clear_snapshot()` fix. Paths: `tests/integration/profile/**`, `tests/integration/cart/**`.
-
-Previous (session 103): no agent running.
+Session 104 finished. No agent is running. Local commits, not pushed.
 
 Read first in a new session: CLAUDE.md, this file, `git status`, `git diff`.
 
-Done in session 103: security re-check `7cfa321` (SEC-081 stays OPEN; T-034 UI no security finding, `docs/reviews/T-034-security.md`). Code review of T-034: CHANGES REQUIRED (1 blocking, 8 Low; report was returned in chat, not saved to a file). Address cap 50 per user `5afa1fa` (409 CONFLICT, `details.reason` ADDRESS_LIMIT; profile+checkout integration 86 passed; `pnpm test` 4803 passed).
+Done in session 104: qa `61b122e` (address-limit test accepted; `pg_stat_clear_snapshot()` in 2 polling loops; profile+cart integration 117 passed, run once). Frontend `a1fce5e` (T-034 blocking and all Low items fixed; typecheck, lint, 678 component tests passed). Devops `0a7ea5e` (SEC-081 a to e; 19 `it.fails` flipped; 162 probes ok; security project 1328 passed).
 
 Open:
-- T-034 blocking (frontend): `checkout-view.tsx` while outcome is `unknown`, disable submit and inputs so only "ตรวจสอบสถานะ" proceeds; add test. Low items: refresh on 404 address, cart-write INSUFFICIENT_STOCK uses sold-out copy, `checkout.refusedLowered` wording vs D-026, `failedBody` when `cartReturn.items` is empty, unused `th.ts` keys, test strength, double message on unknown, raw `payment.provider`, `orders/[id]/page.tsx` props type.
-- SEC-081 OPEN (orchestrator, `eslint.config.mjs`): remediation (a) to (e) in SECURITY.md (noInlineConfig for all `src`, refuse test-named imports from non-test files, `module`/`vm` selectors, computed member access, `?`/`#` in NOT_NORMAL). Then flip 19 `it.fails` in `tests/security/sec081-recheck.test.ts`, devops adds 19 spellings to `scripts/check-import-guards.mjs`, security re-checks. SEC-082 (Low, qa) still open.
-- Frontend: Thai copy for ADDRESS_LIMIT in `src/i18n/th.ts` and address form; product-requirements approves new Thai copy. qa: accept `tests/integration/profile/address-limit.test.ts`; `pg_stat_clear_snapshot()` fix for `profile/endpoints.test.ts`, `cart/concurrency.test.ts`.
-- T-034 not VERIFIED: no browser check at 360/768/1280 px, no e2e. No add-to-cart UI yet; header cart count not wired.
+- Owner approval of changed Thai strings (`src/i18n/th.ts`): `orders.confirmation.failedBody` and `failedTimeoutBody` lost the "items back in cart" sentence (now in `cartReturnBody`, shown only when items exist); checkout lowered line uses OQ-46 `th.quantity.lowered`; unknown-stock refusal uses `th.errors.insufficientStock`.
+- T-034 review item "cart-write INSUFFICIENT_STOCK sold-out copy": frontend found no such use in cart-view; fixed the checkout refusal line instead. Confirm with reviewer intent.
+- SEC-081: security must re-check `0a7ea5e` and decide close. Residual: Vitest-run `*.test.ts(x)` files are exempt from loader selectors; lint selectors are name-based. SEC-082 (Low, qa) open. One timing flake seen: `t032-sec055-item1-recheck.test.ts` under load.
+- Frontend: Thai copy for ADDRESS_LIMIT in `src/i18n/th.ts` and address form; product-requirements approves copy first.
+- T-034 not VERIFIED: no browser check at 360/768/1280 px, no e2e, full `pnpm test`/`pnpm build` not run after fixes. No add-to-cart UI yet; header cart count not wired.
 - T-033 CC gaps still open: CC-04, CC-06, CC-08, CC-09, CC-10, CC-11, CC-13, CC-14, parts of CC-05 and CC-07.
 - Suggested: move payment transitions out of public `src/modules/orders/index.ts` (backend-api). Residual: `returnItemToCart` has no 50-line cap. Auth startup-hook tests may time out under load.
 
