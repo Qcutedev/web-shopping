@@ -13,7 +13,9 @@ Not started: checkout UI (T-034), reviews, seller onboarding and seller products
 ## Resume here
 
 
-Session 106. Owner order: SEC-084, T-042/T-043, T-050. (1) Guard fix `84b93f6`; security re-check `b8f8171`: SEC-081, SEC-083, SEC-084 stay OPEN, new Low SEC-085, SEC-086, SEC-087 (all contributor-only lint-guard gaps). OWNER QUESTION parked: keep fixing the name-based guard (devops, then re-check again) or widen D-045 in writing to cover these classes. (2) T-042 and T-043 were already IMPLEMENTED, code reviewed and security reviewed in earlier sessions (git log); rows corrected. Docker was not running, so nothing re-verified. (3) Now: backend-api builds T-050 admin module; paths `src/modules/admin/**`, `src/app/api/v1/admin/**`, `docs/API_CONTRACTS.md`. If no commit follows, inspect `git status` first.
+Session 106 finished. Local commits, not pushed. (1) Guard fix `84b93f6`; security re-check `b8f8171`: SEC-081, SEC-083, SEC-084 stay OPEN, new Low SEC-085, SEC-086, SEC-087. OWNER QUESTION: keep fixing the name-based guard (devops, re-check again) or widen D-045 in writing. (2) T-040/T-042/T-043 rows corrected to IMPLEMENTED. (3) T-050 IMPLEMENTED (`e57e3c7`, `961e568`, `c25a89e`): 26 admin endpoints, typecheck, lint, format ok, integration 1471 passed. `pnpm test` fails 1 case by design: security route-list gate `tests/security/t020-t018-catalog-shell.test.ts` needs the 23 `src/app/api/v1/admin/` routes listed after security review. Not yet done: code review, security review of T-050. Commits carry trailer "Claude Opus 5.5" (agent used its own model name); amend only if owner wants.
+
+T-050 parked owner questions: Q44 admin paid-date filter one end only (now 400, both required); Q42(a) show paid time in admin order list; no-op PATCH of category/settings writes no audit row, acceptable?; limits chosen, see API_CONTRACTS 5.9.8 (category name 100, sortOrder 0..1000000, search 100, reason 500). Other owners: auth `deleteSessionsOfUser` duplicated in admin repository (D-022); database DATA_MODEL 7.4/7.5 stale about admin cancel; qa adopt `tests/integration/admin/*`, T-052 open. Docker container `marketplace-db-test-1` left running.
 
 Session 105 follow-up: owner approved the changed Thai strings (all) and chose for SEC-081: fix the guard, then accept the residual in writing (code review is the control). devops finished SEC-081/SEC-083 guard fixes (`23720f2`, IMPLEMENTED, not VERIFIED); security re-check is starting (paths `docs/SECURITY.md`, `tests/security/**`); devops had touched 6 src files (rate-limit, timeout-sweep, uploads cleanup, auth security-events, session-purge, library-error) to satisfy the new rules, for owner review; old line: paths `eslint.config.mjs`, `scripts/check-import-guards.mjs`, `tests/security/sec081-recheck-2.test.ts`, `docs/SECURITY.md`, `docs/DECISIONS.md`. If no commit follows, inspect `git status` first.
 
@@ -34,8 +36,8 @@ Open:
 - Suggested: move payment transitions out of public `src/modules/orders/index.ts` (backend-api). Residual: `returnItemToCart` has no 50-line cap. Auth startup-hook tests may time out under load.
 
 Next, in order:
-1. SEC-081/SEC-083 guard fixes (devops), security re-check.
-2. Seller products/orders, admin area (T-050 to T-053), then the blocked CC cases.
+1. Owner answer on SEC-085 to SEC-087 / D-045.
+2. T-050 code review and security review (add admin routes to the route-list gate), T-051 admin UI, T-052, then the blocked CC cases.
 3. E2E, CI.
 
 Do not run two e2e suites at once: they share database `marketplace_e2e` and port 3100.
@@ -98,7 +100,7 @@ Notes marked "stale?" were written while Docker was down; later sessions ran the
 | T-043 | Seller orders | IMPLEMENTED | Security review, code review CR-T043-01 to 06 fixed `5b03eac`; not VERIFIED |
 | T-044 | Seller UI | IMPLEMENTED | Code reviewed through CR-156 ([reviews/T-044-code-review.md](reviews/T-044-code-review.md)); e2e 19 passed |
 | T-045 | Seller isolation tests | IMPLEMENTED | Security re-check done in session 84 (`e18965e`); no new finding |
-| T-050 | Admin module | NOT STARTED | |
+| T-050 | Admin module | IMPLEMENTED | Commits `e57e3c7` to `c25a89e`; integration 30 admin tests passed; code and security review pending |
 | T-051 | Admin UI | NOT STARTED | |
 | T-052 | Admin permission tests | NOT STARTED | |
 | T-060 | E2E suite | NOT STARTED | A Playwright setup exists (19 tests, from T-044 work); the full suite is not started |
