@@ -168,6 +168,19 @@ describe("collectDevelopmentUrls with resolveTestDatabase (CR-156, CR-158, CR-15
     ).toContain("(read from the .env.development file) names no host or no port");
   });
 
+  it("says e2e and names the file when DATABASE_URL equals DATABASE_URL_TEST (CR-162)", () => {
+    const message = run({
+      processUrl: undefined,
+      envFileUrl: undefined,
+      nextFiles: [[".env.local", { DATABASE_URL: TEST_URL }]],
+    });
+    expect(message).toContain(
+      "End-to-end run refused: DATABASE_URL_TEST is equal to DATABASE_URL (read from the .env.local file).",
+    );
+    expect(message).not.toContain("integration");
+    expect(message).not.toContain("p-secret-9");
+  });
+
   it("keeps the integration messages for the integration run", () => {
     expect(() => resolveTestDatabase({ testUrl: TEST_URL, otherUrls: ["not a url"] })).toThrow(
       "fix it or unset it for the integration run.",

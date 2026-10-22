@@ -296,7 +296,9 @@ export function resolveTestDatabase(input: TestDatabaseInput): TestDatabase {
     const where = run === "e2e" && source !== undefined ? ` (read from ${source})` : "";
     const prefix = run === "e2e" ? "End-to-end run refused: " : "";
     if (other === testUrl) {
-      throw new TestDatabaseRefusedError("DATABASE_URL_TEST is equal to DATABASE_URL.");
+      throw new TestDatabaseRefusedError(
+        `${prefix}DATABASE_URL_TEST is equal to DATABASE_URL${where}.`,
+      );
     }
     // CR-36: a DATABASE_URL the parser rejects, or one that leaves the host or the port empty
     // (the driver would take it from PGHOST or PGPORT, which this function does not see), cannot
