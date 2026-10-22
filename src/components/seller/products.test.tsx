@@ -543,6 +543,20 @@ describe("ProductForm follows the stored product (CR-99)", () => {
     ).toBe("stored-title");
   });
 
+  it("re-seeds typed values when a refresh locks the form (CR-120)", () => {
+    const categories = [{ id: "c1", name: "x", isActive: true }];
+    const { rerender } = render(<ProductForm product={product} categories={categories} />);
+    fireEvent.change(screen.getByLabelText(new RegExp(th.seller.products.form.title)), {
+      target: { value: "typed-title" },
+    });
+    rerender(<ProductForm product={product} categories={categories} disabled />);
+    const title = screen.getByLabelText(
+      new RegExp(th.seller.products.form.title),
+    ) as HTMLInputElement;
+    expect(title.value).toBe(product.title);
+    expect(title.disabled).toBe(true);
+  });
+
   it("keeps a typed title when only the stock changes (CR-109)", () => {
     const categories = [{ id: "c1", name: "x", isActive: true }];
     const { rerender } = render(<ProductForm product={product} categories={categories} />);

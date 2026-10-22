@@ -62,6 +62,9 @@ export function ProductForm({
   // Stock is not edited here after create, so it is left out of the key.
   const productKey = JSON.stringify(product ?? null);
   const editableKey = productEditableKey(product);
+  const [errors, setErrors] = useState<FieldErrors<ProductField>>({});
+  const [formMessage, setFormMessage] = useState<string | null>(null);
+  const [failure, setFailure] = useState<SellerFailure | null>(null);
   const [seenProductKey, setSeenProductKey] = useState(productKey);
   const [seenEditableKey, setSeenEditableKey] = useState(editableKey);
   // Key of the record the typed values were last seeded from: the page's product, or the server's
@@ -74,16 +77,24 @@ export function ProductForm({
     setSeenProductKey(productKey);
     setSaved(product);
   }
-  if (seenEditableKey !== editableKey) {
+  // A refresh that locks the form (archived product or suspended store) drops unsaved typed values
+  // and shows the stored ones (CR-120). The keys are brought level so the check below does not
+  // seed a second time.
+  const [seenDisabled, setSeenDisabled] = useState(disabled);
+  if (seenDisabled !== disabled) setSeenDisabled(disabled);
+  if (!seenDisabled && disabled) {
+    setSeenEditableKey(editableKey);
+    setOwnKey(editableKey);
+    setValues(product ? valuesOfProduct(product) : EMPTY_PRODUCT_VALUES);
+    setErrors({});
+    setFormMessage(null);
+  } else if (seenEditableKey !== editableKey) {
     setSeenEditableKey(editableKey);
     if (editableKey !== ownKey) {
       setOwnKey(editableKey);
       setValues(product ? valuesOfProduct(product) : EMPTY_PRODUCT_VALUES);
     }
   }
-  const [errors, setErrors] = useState<FieldErrors<ProductField>>({});
-  const [failure, setFailure] = useState<SellerFailure | null>(null);
-  const [formMessage, setFormMessage] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   // A picture is attached by saving its key; saving while one is in flight would lose or orphan it.

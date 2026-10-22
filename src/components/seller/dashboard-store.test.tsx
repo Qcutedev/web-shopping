@@ -310,16 +310,34 @@ describe("StoreForm follows the stored store (CR-99)", () => {
     ).toBe(true);
   });
 
-  it("keeps a typed name when only the status changes (CR-109)", () => {
+  it("re-seeds typed values to the stored ones when the refresh suspends the store (CR-120)", () => {
     const { rerender } = render(<StoreForm store={store} />);
     fireEvent.change(screen.getByLabelText(new RegExp(th.seller.store.fields.name)), {
       target: { value: "typed-name" },
     });
+    fireEvent.change(screen.getByLabelText(new RegExp(th.seller.store.fields.contactPhone)), {
+      target: { value: "0000" },
+    });
     rerender(<StoreForm store={{ ...store, status: "SUSPENDED" }} />);
     expect(
       (screen.getByLabelText(new RegExp(th.seller.store.fields.name)) as HTMLInputElement).value,
-    ).toBe("typed-name");
+    ).toBe(store.name);
+    expect(
+      (screen.getByLabelText(new RegExp(th.seller.store.fields.contactPhone)) as HTMLInputElement)
+        .value,
+    ).toBe(store.contactPhone);
     expect(screen.getByText(th.seller.store.suspendedNote)).toBeTruthy();
+  });
+
+  it("keeps a typed name when only a non-locking status change arrives (CR-109)", () => {
+    const { rerender } = render(<StoreForm store={store} />);
+    fireEvent.change(screen.getByLabelText(new RegExp(th.seller.store.fields.name)), {
+      target: { value: "typed-name" },
+    });
+    rerender(<StoreForm store={{ ...store, statusReason: "note" }} />);
+    expect(
+      (screen.getByLabelText(new RegExp(th.seller.store.fields.name)) as HTMLInputElement).value,
+    ).toBe("typed-name");
   });
 });
 

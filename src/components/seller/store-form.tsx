@@ -73,6 +73,9 @@ export function StoreForm({ store }: { store: SellerStoreDto }) {
   // changed, so a refresh for another reason keeps unsaved edits (CR-109).
   const storeKey = JSON.stringify(store);
   const editableKey = storeEditableKey(store);
+  const [errors, setErrors] = useState<FieldErrors<Field>>({});
+  const [formMessage, setFormMessage] = useState<string | null>(null);
+  const suspendedBefore = saved.status === "SUSPENDED";
   const [seenStoreKey, setSeenStoreKey] = useState(storeKey);
   const [seenEditableKey, setSeenEditableKey] = useState(editableKey);
   // Key of the record the typed values were last seeded from: the page's store, or the server's
@@ -85,7 +88,21 @@ export function StoreForm({ store }: { store: SellerStoreDto }) {
     setSeenStoreKey(storeKey);
     setSaved(store);
   }
-  if (seenEditableKey !== editableKey) {
+  // A refresh that locks the form (store suspended) drops unsaved typed values and shows the
+  // stored ones (CR-120). The keys are brought level so the editable-key check below does not
+  // seed a second time.
+  const becameLocked =
+    seenStoreKey !== storeKey && store.status === "SUSPENDED" && !suspendedBefore;
+  if (becameLocked) {
+    setSeenEditableKey(editableKey);
+    setOwnKey(editableKey);
+    setName(store.name);
+    setDescription(store.description ?? "");
+    setContactPhone(store.contactPhone);
+    setLogo(store.logo);
+    setErrors({});
+    setFormMessage(null);
+  } else if (seenEditableKey !== editableKey) {
     setSeenEditableKey(editableKey);
     if (editableKey !== ownKey) {
       setOwnKey(editableKey);
@@ -95,9 +112,7 @@ export function StoreForm({ store }: { store: SellerStoreDto }) {
       setLogo(store.logo);
     }
   }
-  const [errors, setErrors] = useState<FieldErrors<Field>>({});
   const [failure, setFailure] = useState<SellerFailure | null>(null);
-  const [formMessage, setFormMessage] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   // A logo is attached by saving its key; saving while one is in flight would lose or orphan it.
