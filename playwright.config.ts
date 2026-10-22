@@ -35,6 +35,8 @@ export default defineConfig({
       DATABASE_URL: E2E_DATABASE_URL,
       APP_URL: E2E_ORIGIN,
       NEXT_TELEMETRY_DISABLED: "1",
+      // Separate build dir: the e2e server must not share .next/ with pnpm dev (CR-136).
+      NEXT_DIST_DIR: ".next-e2e",
     },
   },
 });
