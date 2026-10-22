@@ -342,6 +342,27 @@ describe("StoreForm after a save (CR-119)", () => {
       (screen.getByLabelText(new RegExp(th.seller.store.fields.name)) as HTMLInputElement).value,
     ).toBe("typed-after-save");
   });
+
+  it("re-seeds when a later refresh brings a different record (K1, type, K2)", async () => {
+    const user = userEvent.setup();
+    const savedStore = { ...store, name: "saved-name" };
+    const laterStore = { ...store, name: "changed-elsewhere" };
+    updateStore.mockResolvedValue({ ok: true, status: 200, data: savedStore });
+    const { rerender } = render(<StoreForm store={store} />);
+    const name = screen.getByLabelText(new RegExp(th.seller.store.fields.name));
+    await user.clear(name);
+    await user.type(name, "saved-name");
+    await user.click(screen.getByRole("button", { name: th.seller.store.save }));
+    expect(await screen.findByText(th.seller.store.saved)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(new RegExp(th.seller.store.fields.name)), {
+      target: { value: "typed-after-save" },
+    });
+    rerender(<StoreForm store={savedStore} />);
+    rerender(<StoreForm store={laterStore} />);
+    expect(
+      (screen.getByLabelText(new RegExp(th.seller.store.fields.name)) as HTMLInputElement).value,
+    ).toBe("changed-elsewhere");
+  });
 });
 
 describe("StoreForm holds save during an upload (CR-103)", () => {

@@ -579,6 +579,28 @@ describe("ProductForm after a save (CR-119)", () => {
       (screen.getByLabelText(new RegExp(th.seller.products.form.title)) as HTMLInputElement).value,
     ).toBe("typed-after-save");
   });
+
+  it("re-seeds when a later refresh brings a different record (K1, type, K2)", async () => {
+    const user = userEvent.setup();
+    const categories = [{ id: "c1", name: "x", isActive: true }];
+    const savedProduct = { ...product, title: "saved-title" };
+    const laterProduct = { ...product, title: "changed-elsewhere" };
+    api.updateProduct.mockResolvedValue({ ok: true, status: 200, data: savedProduct });
+    const { rerender } = render(<ProductForm product={product} categories={categories} />);
+    const title = screen.getByLabelText(new RegExp(th.seller.products.form.title));
+    await user.clear(title);
+    await user.type(title, "saved-title");
+    await user.click(screen.getByRole("button", { name: th.seller.products.form.save }));
+    expect(await screen.findByText(th.seller.products.form.saved)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(new RegExp(th.seller.products.form.title)), {
+      target: { value: "typed-after-save" },
+    });
+    rerender(<ProductForm product={savedProduct} categories={categories} />);
+    rerender(<ProductForm product={laterProduct} categories={categories} />);
+    expect(
+      (screen.getByLabelText(new RegExp(th.seller.products.form.title)) as HTMLInputElement).value,
+    ).toBe("changed-elsewhere");
+  });
 });
 
 describe("ProductForm images and copy (CR-101, CR-103)", () => {
