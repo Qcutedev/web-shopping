@@ -12,18 +12,20 @@ Not started: checkout UI (T-034), reviews, seller onboarding and seller products
 
 ## Resume here
 
-Session 100 round 2 running: security (flip it.fails for SEC-056/SEC-053 in tests/security, re-check both, docs/SECURITY.md) and qa (CR-164 ProductForm lock assertions in src/components/seller/products.test.tsx). Round 1 committed: qa 76e43d8..6a68610, frontend 4c88fbc, backend-api SEC-056/SEC-053. If interrupted, inspect uncommitted files before relaunching.
+Session 100 finished. No agent is running.
 
 Read first in a new session: CLAUDE.md, this file, `git status`, `git diff`.
 
-Done in session 99: SEC-078 re-checked and FIXED (`docs/SECURITY.md`, `tests/security/sec078-recheck.test.ts`). New SEC-079 (Low, open): e2e env scanner reads one line at a time, 24 multi-line dotenv forms missed; fix by parsing with `@next/env`, then flip the `it.fails` in `sec078-recheck.test.ts` (qa). Code review of `a202868`, `914cb39`, `894c7c9`: APPROVE, non-blocking items only (CR-162 to CR-166 below). T-032 found already built and reviewed in earlier sessions; its STATUS row was stale.
+Done in session 100: SEC-079, SEC-053, SEC-056 FIXED and re-checked by security. CR-162 to CR-166 done. SEC-053 uses `409 CONFLICT` reason `CART_LINE_LIMIT` (cap 50 lines). SEC-056 has no override switch. A mojibake in `docs/SECURITY.md` (14 lines, from the security commit) was repaired from `HEAD~1` text.
 
-CR-162: `tests/helpers/test-database-url.ts:299` "equal to DATABASE_URL" message ignores `prefix`/`where` (CR-158 incomplete; integration message must stay unchanged, pinned by `tests/integration/harness/test-database-url.test.ts:180,185`). CR-163: `dashboard-store.test.tsx:333` test name does not match what it tests. CR-164: lock tests do not assert errors/formMessage are cleared. CR-165: late `ImageSetEditor` upload can write into a locked `ProductForm`. CR-166: create-mode `ProductForm` resets the draft on suspension (confirm intended).
-
-Owner decisions (2026-10-22): SEC-056 block the mock provider when NODE_ENV=production (backend-api); SEC-053 cap a cart at 50 distinct lines (backend-api, then update CR-T032-12); CR-166 keep the create-mode draft on suspension, lock without resetting (frontend, with CR-165).
+Open:
+- SEC-080 (Low): `scanEnvText` in `e2e/support/env-file-scan.ts` empties `process.env`, so `PGOPTIONS=${X}` reads empty and is not refused. Fix (qa), flip the `it.fails` in `tests/security/sec079-recheck.test.ts`, correct the SEC-079 "Fix" note.
+- `src/i18n/th.ts`: Thai text for `CART_LINE_LIMIT` (cart add and checkout); product-requirements approves the wording (frontend).
+- devops optional: start-up log or fail-fast when NODE_ENV=production, since checkout is then disabled (only the mock provider exists).
+- Residual: `returnItemToCart` has no 50-line cap; carts stored above 50 before the fix keep their lines.
 
 Next, in order:
-1. qa: SEC-079, CR-162 to CR-164. frontend: CR-165. backend-api: SEC-056, SEC-053.
+1. qa: SEC-080. frontend: `CART_LINE_LIMIT` text.
 2. T-032 follow-ups: CR-T032-10 import-guard probe (security); T-033 CC-12; T-032 and T-031 code-review/security status still need re-checking.
 3. T-034 checkout UI; seller and admin work.
 
@@ -31,7 +33,7 @@ Do not run two e2e suites at once: they share database `marketplace_e2e` and por
 
 Agents must not type backslash-u escapes in tool input: the tool turns them into real invisible characters (likely how U+FEFF reached SECURITY.md). Generate them from code points in a script.
 
-Last known test results (session 99): `pnpm test:integration` 1357 passed, 7 expected fail; security project 1195 passed, 6 expected fail; session 98 `pnpm test` 4597 passed, 5 expected fail (not re-run with the new security test); `format:check`, `lint`, `typecheck` exit 0. e2e not run this session.
+Last known test results (session 100): `pnpm verify` exit 0 (format, lint, typecheck, unit, build); security reported `pnpm test` 4633 passed, 4 expected fail; `pnpm test:integration` 1379 passed, 6 expected fail. e2e not run.
 
 Standing rules from the owner (D-019): never guess, park questions here and ask in batches; commit locally after each task passes its checks, never push without being told; stop for owner review at the five milestones.
 
