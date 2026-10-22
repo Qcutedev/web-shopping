@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PaymentProvider as DbPaymentProvider } from "@/server/db";
 
@@ -6,6 +6,7 @@ import {
   getPaymentProvider,
   isSimulatedProvider,
   MOCK_REFERENCE_PREFIX,
+  MockPaymentProviderInProductionError,
   mockPaymentProvider,
   PAYMENT_PROVIDERS,
 } from "./provider";
@@ -36,6 +37,50 @@ describe("mock payment provider (REQ-C-12, REQ-N-09)", () => {
     await expect(
       mockPaymentProvider.charge({ orderId: "o1", amountSatang: 100, mockOutcome: "FAIL" }),
     ).resolves.toEqual({ outcome: "DECLINED", failureReason: "SIMULATED_DECLINE" });
+  });
+
+  it("is the provider in development and test, and when NODE_ENV is unset", () => {
+    for (const nodeEnv of ["development", "test", undefined]) {
+      expect(getPaymentProvider(nodeEnv)).toBe(mockPaymentProvider);
+    }
+  });
+
+  it("is refused when NODE_ENV is production (SEC-056)", () => {
+    expect(() => getPaymentProvider("production")).toThrow(MockPaymentProviderInProductionError);
+  });
+
+  describe("reads NODE_ENV of the process on every call (SEC-056)", () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it("refuses in production with a fixed message that names no value", () => {
+      vi.stubEnv("NODE_ENV", "production");
+      let thrown: unknown;
+      try {
+        getPaymentProvider();
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(MockPaymentProviderInProductionError);
+      expect((thrown as Error).name).toBe("MockPaymentProviderInProductionError");
+      expect((thrown as Error).message).toBe(
+        "The mock payment provider is refused when NODE_ENV is production (SEC-056).",
+      );
+    });
+
+    it("returns the mock again once NODE_ENV is not production", () => {
+      vi.stubEnv("NODE_ENV", "production");
+      expect(() => getPaymentProvider()).toThrow();
+      vi.stubEnv("NODE_ENV", "development");
+      expect(getPaymentProvider()).toBe(mockPaymentProvider);
+    });
+
+    it("refuses only the exact value production", () => {
+      for (const nodeEnv of ["Production", "PRODUCTION", "production ", "prod", ""]) {
+        expect(getPaymentProvider(nodeEnv)).toBe(mockPaymentProvider);
+      }
+    });
   });
 
   it("refuses an amount that is not a non-negative integer of satang", async () => {

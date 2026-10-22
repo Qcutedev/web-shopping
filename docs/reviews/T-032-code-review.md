@@ -29,6 +29,7 @@ Verdict: **APPROVED WITH FOLLOW-UPS.** Nothing blocking. T-032 stays IMPLEMENTED
 
 ## Follow-up status
 
+- CR-T032-12 resolved 2026-10-22 (backend-api, with SEC-053): the primary pictures were already read in one statement (`findPrimaryUploadIds`); the line cap now bounds the rest. A cart holds at most 50 lines (`MAX_CART_LINES`), and checkout refuses a cart above 50 with `409 CONFLICT` `CART_LINE_LIMIT` before the savepoint, so at most 50 stock statements and 50 `Product` locks per attempt. The stock statements stay one per line, sequential. `docs/API_CONTRACTS.md` 5.4 and 5.5.5.
 - CR-T032-09 resolved 2026-10-14 (documentation): `docs/API_CONTRACTS.md` 5.5.1 now says nothing refuses `mockOutcome` as built (SEC-056 open); 5.5.5 states the integration runs and that the sweep is wired in `src/instrumentation.ts` (`35903a1`).
 
 ## Checks re-run by reviewer

@@ -6,6 +6,8 @@
  * `provider = 'MOCK'` for ever (DATA_MODEL.md section 6.13), the reference it hands out starts with
  * `MOCK-`, and every response derives `payment.isSimulated: true` from the provider (REQ-N-09).
  *
+ * The mock is refused in a production server (`getPaymentProvider`, SEC-056).
+ *
  * A provider only reports an outcome. It never writes a status: the orders module moves the
  * payment through its state table, in its own guarded transaction (SECURITY.md TM-12).
  */
@@ -71,8 +73,32 @@ export const mockPaymentProvider: PaymentProvider = Object.freeze({
   },
 });
 
-/** The provider checkout uses. Only the mock exists in the MVP. */
-export function getPaymentProvider(): PaymentProvider {
+/**
+ * Thrown by `getPaymentProvider` in a production server (SEC-056; owner decision 2026-10-22). The
+ * message is fixed and names no value; the route answers it as `500 INTERNAL_ERROR` and logs the
+ * class name only (docs/API_CONTRACTS.md sections 2.2 and 5.5.5).
+ */
+export class MockPaymentProviderInProductionError extends Error {
+  constructor() {
+    super("The mock payment provider is refused when NODE_ENV is production (SEC-056).");
+    this.name = "MockPaymentProviderInProductionError";
+  }
+}
+
+/**
+ * The provider checkout uses. Only the mock exists in the MVP, and it is refused when
+ * `NODE_ENV` is `production` (SEC-056; owner decision 2026-10-22): a production server has no
+ * payment provider until a real one is added, so no order can be placed there. There is no
+ * setting that switches the mock back on in production.
+ *
+ * `nodeEnv` defaults to `process.env.NODE_ENV`, read on every call (Next.js inlines it in a
+ * production build). Checkout calls this before it opens its transaction, so a refusal takes no
+ * lock, no stock, and creates no order.
+ */
+export function getPaymentProvider(
+  nodeEnv: string | undefined = process.env.NODE_ENV,
+): PaymentProvider {
+  if (nodeEnv === "production") throw new MockPaymentProviderInProductionError();
   return mockPaymentProvider;
 }
 

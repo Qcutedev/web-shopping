@@ -10,16 +10,19 @@
  * - The refusals that name a line use the `details.items` shape of section 5.5.3, one entry.
  * - An add that would take a line above 99 is `400 VALIDATION_ERROR` on the field `quantity`
  *   (REQ-C-10; BR-03), reported like a schema refusal of the same field.
+ * - An add that would create a line in a cart already at MAX_CART_LINES is `409 CONFLICT` with
+ *   `details.reason` `CART_LINE_LIMIT` (SEC-053).
  */
 import {
   type AppError,
+  conflict,
   insufficientStock,
   notFound,
   productUnavailable,
   validationError,
 } from "@/server/errors";
 
-import { MAX_LINE_QUANTITY, type RefusedLineDetail } from "./schema";
+import { CART_LINE_LIMIT_REASON, MAX_LINE_QUANTITY, type RefusedLineDetail } from "./schema";
 
 export function cartLineNotFound(): AppError {
   return notFound();
@@ -78,6 +81,14 @@ export function soldOut(input: {
     availableStock: 0,
   };
   return insufficientStock([item]);
+}
+
+/**
+ * SEC-053: an add that would create a line in a cart that already holds MAX_CART_LINES lines.
+ * Nothing is created or changed. `409 CONFLICT` with `details.reason` `CART_LINE_LIMIT` only.
+ */
+export function cartLineLimitReached(): AppError {
+  return conflict(CART_LINE_LIMIT_REASON);
 }
 
 /** BR-03, BR-31 (3): an add that would take the line above 99. The line is unchanged. */

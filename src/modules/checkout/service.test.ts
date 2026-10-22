@@ -5,11 +5,12 @@
  * behaviour against a real PostgreSQL database (locks, savepoint, concurrency) belongs in
  * tests/integration/checkout (qa, T-033).
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { MAX_CART_LINES } from "@/modules/cart";
 import * as orders from "@/modules/orders";
 import type { OrderDto } from "@/modules/orders";
-import type { PaymentProvider } from "@/modules/payments";
+import { MockPaymentProviderInProductionError, type PaymentProvider } from "@/modules/payments";
 import type { Actor } from "@/server/auth/actor";
 import { AppError } from "@/server/errors";
 
@@ -353,6 +354,87 @@ describe("checkout: refusals before any stock is taken", () => {
     expect(thrownInside).toBe(true);
     expect(repo.insertOrder).not.toHaveBeenCalled();
     expect(provider.charge).not.toHaveBeenCalled();
+  });
+});
+
+describe("checkout: at most MAX_CART_LINES lines (SEC-053)", () => {
+  function linesOf(count: number) {
+    return Array.from({ length: count }, (_, i) => ({
+      id: `line_${i}`,
+      productId: `p_${String(i).padStart(3, "0")}`,
+      quantity: 1,
+    }));
+  }
+
+  it("buys a cart of exactly 50 lines", async () => {
+    repo.findCartLinesForCheckout.mockResolvedValue(linesOf(MAX_CART_LINES));
+    const result = await checkout(BUYER, KEY, BODY, { provider });
+    expect(result.created).toBe(true);
+    expect(repo.takeStock).toHaveBeenCalledTimes(MAX_CART_LINES);
+  });
+
+  it("refuses 51 lines with 409 CONFLICT CART_LINE_LIMIT before the savepoint and any stock", async () => {
+    repo.findCartLinesForCheckout.mockResolvedValue(linesOf(MAX_CART_LINES + 1));
+    const error = await refusal(checkout(BUYER, KEY, BODY, { provider }));
+    expect(error.status).toBe(409);
+    expect(error.toPublic()).toMatchObject({ code: "CONFLICT" });
+    expect(error.toPublic().details).toEqual({ reason: "CART_LINE_LIMIT" });
+    expect(repo.setSavepoint).not.toHaveBeenCalled();
+    expect(repo.takeStock).not.toHaveBeenCalled();
+    expect(repo.lowerCartLinesToStock).not.toHaveBeenCalled();
+    expect(repo.insertOrder).not.toHaveBeenCalled();
+    expect(provider.charge).not.toHaveBeenCalled();
+  });
+
+  it("answers a used key with its order even when the cart is now above the limit", async () => {
+    repo.findOrderIdByKey.mockResolvedValue("order_old");
+    repo.findCartLinesForCheckout.mockResolvedValue(linesOf(MAX_CART_LINES + 1));
+    await expect(checkout(BUYER, KEY, BODY, { provider })).resolves.toMatchObject({
+      created: false,
+    });
+  });
+
+  it("keeps the earlier refusals first: address 404 and CART_EMPTY", async () => {
+    repo.findCartLinesForCheckout.mockResolvedValue(linesOf(MAX_CART_LINES + 1));
+    repo.findOwnedAddress.mockResolvedValueOnce(null);
+    expect((await refusal(checkout(BUYER, KEY, BODY, { provider }))).status).toBe(404);
+    repo.lockCart.mockResolvedValueOnce(null);
+    expect((await refusal(checkout(BUYER, KEY, BODY, { provider }))).code).toBe("CART_EMPTY");
+  });
+});
+
+describe("checkout: the mock provider in production (SEC-056)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("throws before the transaction: no lock, no stock, no order, no charge", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    await expect(checkout(BUYER, KEY, BODY)).rejects.toBeInstanceOf(
+      MockPaymentProviderInProductionError,
+    );
+    expect(repo.inCheckoutTransaction).not.toHaveBeenCalled();
+    expect(repo.lockCart).not.toHaveBeenCalled();
+    expect(repo.takeStock).not.toHaveBeenCalled();
+    expect(repo.insertOrder).not.toHaveBeenCalled();
+    expect(ordersMock.completeOrderPayment).not.toHaveBeenCalled();
+    expect(ordersMock.failOrderPayment).not.toHaveBeenCalled();
+  });
+
+  it("is not an AppError, so the route answers 500 INTERNAL_ERROR", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const thrown = await checkout(BUYER, KEY, BODY).catch((error: unknown) => error);
+    expect(thrown).not.toBeInstanceOf(AppError);
+  });
+
+  it("uses the mock outside production when no provider is passed", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    const result = await checkout(BUYER, KEY, BODY);
+    expect(result.created).toBe(true);
+    expect(ordersMock.completeOrderPayment).toHaveBeenCalledWith(
+      "order_1",
+      expect.stringMatching(/^MOCK-/),
+    );
   });
 });
 

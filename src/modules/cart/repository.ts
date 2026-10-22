@@ -198,6 +198,24 @@ export async function findLineForProduct(
   return tx.cartItem.findFirst({ where: { cartId, productId }, select: LINE_SELECT });
 }
 
+/**
+ * How many lines this cart holds, counted up to `limit` (SEC-053). Reads at most `limit` ids, so
+ * the work is bounded whatever the cart holds; a result equal to `limit` means "at least `limit`".
+ * Called under the cart lock, so no other write of this user can add a line in between.
+ */
+export async function countCartLinesUpTo(
+  tx: DbTransaction,
+  cartId: string,
+  limit: number,
+): Promise<number> {
+  const rows = await tx.cartItem.findMany({
+    where: { cartId },
+    select: { id: true },
+    take: limit,
+  });
+  return Math.min(rows.length, limit);
+}
+
 /** A foreign key of the inserted row points at no row (P2003). */
 function isForeignKeyViolation(error: unknown): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003";

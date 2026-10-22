@@ -12,7 +12,8 @@
  *   1. lock the actor's cart row;
  *   2. an order with this idempotency key exists: answer it (200), create nothing, charge nothing;
  *   3. the address is not the actor's: 404 (`resource: "address"`);
- *   4. no cart or no line: 409 CART_EMPTY;
+ *   4. no cart or no line: 409 CART_EMPTY; more than MAX_CART_LINES (50) lines: 409 CONFLICT
+ *      `CART_LINE_LIMIT`, before any stock statement (SEC-053);
  *   5. inside the savepoint `checkout_attempt`, take the stock of every line in product id order
  *      with the guarded statement (visible, not own store, `stock >= quantity`), which returns the
  *      price charged;
@@ -31,6 +32,9 @@
  * locked view of the cart, and it needs no "try again" answer (item 8.2-3): a request that cannot
  * settle after CHECKOUT_ATTEMPTS tries is a server error, with nothing stored.
  *
+ * The provider is resolved before step 1: in a production server the mock is refused (SEC-056),
+ * so nothing is locked or written and the request is a server error.
+ *
  * Then, for an order this request created, the mock provider is asked for the outcome and the
  * order is moved by the orders module in a second guarded transaction: `PAID`, or `FAILED` with
  * the seller orders cancelled, the stock restored once, and the items back in the cart (BR-20).
@@ -42,6 +46,7 @@ import type { DbTransaction } from "@/server/db";
 import { describeErrorForLog } from "@/server/errors";
 import type { Logger } from "@/server/logger";
 
+import { MAX_CART_LINES } from "@/modules/cart";
 import {
   completeOrderPayment,
   failOrderPayment,
@@ -50,7 +55,13 @@ import {
 } from "@/modules/orders";
 import { getPaymentProvider, type MockOutcome, type PaymentProvider } from "@/modules/payments";
 
-import { addressNotFound, checkoutRefused, emptyCart, totalAboveLimit } from "./errors";
+import {
+  addressNotFound,
+  cartAboveLineLimit,
+  checkoutRefused,
+  emptyCart,
+  totalAboveLimit,
+} from "./errors";
 import {
   type PurchasedLine,
   priceOrder,
@@ -108,6 +119,9 @@ export async function checkout(
   input: CheckoutBody,
   options: CheckoutOptions = {},
 ): Promise<CheckoutResult> {
+  // Resolved before the transaction (SEC-056): in a production server `getPaymentProvider` throws,
+  // and the request is answered 500 with no lock taken, no stock taken, and no order created.
+  const provider = options.provider ?? getPaymentProvider();
   const placement = await inCheckoutTransaction((tx) =>
     placeOrder(tx, actor, idempotencyKey, input),
   );
@@ -117,7 +131,7 @@ export async function checkout(
     case "refused":
       throw checkoutRefused(placement.items, placement.totals);
     case "placed":
-      await pay(placement.orderId, placement.amountSatang, input.mockOutcome, options);
+      await pay(placement.orderId, placement.amountSatang, input.mockOutcome, provider, options);
       return { order: await readOrderOfUser(actor.userId, placement.orderId), created: true };
   }
 }
@@ -139,6 +153,9 @@ async function placeOrder(
     // Read again on every attempt: a product hard delete removes its line without the cart lock.
     const lines = await findCartLinesForCheckout(tx, cartId);
     if (lines.length === 0) throw emptyCart();
+    // SEC-053: refused before the savepoint and the first stock statement, so no product row is
+    // locked. A cart can pass the limit only through items returned by a failed payment.
+    if (lines.length > MAX_CART_LINES) throw cartAboveLineLimit();
 
     await setSavepoint(tx);
     const purchased: PurchasedLine[] = [];
@@ -222,9 +239,9 @@ async function pay(
   orderId: string,
   amountSatang: number,
   mockOutcome: MockOutcome,
+  provider: PaymentProvider,
   options: CheckoutOptions,
 ): Promise<void> {
-  const provider = options.provider ?? getPaymentProvider();
   let result;
   try {
     result = await provider.charge({ orderId, amountSatang, mockOutcome });

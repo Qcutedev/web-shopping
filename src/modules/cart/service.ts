@@ -20,7 +20,11 @@
  *   2. not own store, else 409        2. product visible, else 409 NOT_AVAILABLE (BR-38)
  *   3. earlier + sent <= 99, else 400 3. not own store, else 409
  *   4. stock >= 1, else 409           4. stock >= 1, else 409 (BR-38)
- *   5. store min(requested, stock)    5. store min(sent, stock)
+ *   5. new line only: cart holds      5. store min(sent, stock)
+ *      < MAX_CART_LINES (50) lines,
+ *      else 409 CONFLICT
+ *      CART_LINE_LIMIT (SEC-053)
+ *   6. store min(requested, stock)
  *
  * The 1 to 99 limit comes before the stock (BR-31 (3)). A request for more than a stock of 1 or
  * more succeeds with the stock stored and `quantityLowered: true` (BR-31 (2)).
@@ -29,6 +33,7 @@ import type { Actor } from "@/server/auth/actor";
 import type { DbTransaction } from "@/server/db";
 
 import {
+  cartLineLimitReached,
   cartLineNotFound,
   hiddenLineQuantityChange,
   lineQuantityTooBig,
@@ -39,6 +44,7 @@ import {
 import { buildCart, type CartLineInput, priceLine, resolveWriteQuantity } from "./pricing";
 import {
   type CartLineRow,
+  countCartLinesUpTo,
   deleteLineInCart,
   findCartLines,
   findFirstImageKey,
@@ -57,6 +63,7 @@ import {
   type CartDto,
   type CartItemDeletedDto,
   type CartWriteLineDto,
+  MAX_CART_LINES,
   MAX_LINE_QUANTITY,
   type UpdateCartItemBody,
 } from "./schema";
@@ -173,6 +180,14 @@ export async function addCartItem(
           productId: product.id,
           requestedQuantity,
         });
+      }
+      // SEC-053: only a new line counts against the limit; adding to an existing line never does.
+      // Counted under the cart lock, so two concurrent adds of one user cannot both pass it.
+      if (
+        existing === null &&
+        (await countCartLinesUpTo(tx, cartId, MAX_CART_LINES)) >= MAX_CART_LINES
+      ) {
+        throw cartLineLimitReached();
       }
       const { quantity } = resolveWriteQuantity(requestedQuantity, product.stock);
       const line =

@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { type DbTransaction, Prisma } from "@/server/db";
 
-import { findFirstImageKey, insertLine, setLineQuantity } from "./repository";
+import { countCartLinesUpTo, findFirstImageKey, insertLine, setLineQuantity } from "./repository";
 
 vi.mock("@/server/db", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/server/db")>();
@@ -15,7 +15,7 @@ vi.mock("@/server/db", async (importOriginal) => {
 });
 
 const tx = {
-  cartItem: { create: vi.fn(), updateManyAndReturn: vi.fn() },
+  cartItem: { create: vi.fn(), findMany: vi.fn(), updateManyAndReturn: vi.fn() },
   productImage: { findFirst: vi.fn() },
   upload: { findUnique: vi.fn() },
 };
@@ -53,6 +53,23 @@ describe("setLineQuantity (CR-T031-02)", () => {
   it("returns null, not a P2025 error, when a product delete removed the line", async () => {
     tx.cartItem.updateManyAndReturn.mockResolvedValue([]);
     await expect(setLineQuantity(TX, "cart_me", "line_1", 4)).resolves.toBeNull();
+  });
+});
+
+describe("countCartLinesUpTo (SEC-053)", () => {
+  it("reads at most `limit` ids of this cart only, through the transaction", async () => {
+    tx.cartItem.findMany.mockResolvedValue([{ id: "a" }, { id: "b" }]);
+    await expect(countCartLinesUpTo(TX, "cart_me", 50)).resolves.toBe(2);
+    expect(tx.cartItem.findMany).toHaveBeenCalledWith({
+      where: { cartId: "cart_me" },
+      select: { id: true },
+      take: 50,
+    });
+  });
+
+  it("never reports more than the limit", async () => {
+    tx.cartItem.findMany.mockResolvedValue([{ id: "a" }, { id: "b" }, { id: "c" }]);
+    await expect(countCartLinesUpTo(TX, "cart_me", 2)).resolves.toBe(2);
   });
 });
 

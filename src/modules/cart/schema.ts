@@ -24,6 +24,15 @@ export const MIN_LINE_QUANTITY = 1;
 /** Largest quantity of a cart line (BR-03; `CartItem_quantity_check`). */
 export const MAX_LINE_QUANTITY = 99;
 /**
+ * Most distinct lines one cart may hold (SEC-053; owner decision 2026-10-22). `POST /cart/items`
+ * refuses to create a line once the cart holds this many; a quantity change of an existing line is
+ * never refused for it. `POST /checkout` refuses a cart above it before it takes any stock.
+ * docs/API_CONTRACTS.md sections 5.4 and 5.5.5.
+ */
+export const MAX_CART_LINES = 50;
+/** `details.reason` of the `409 CONFLICT` for a cart at or above MAX_CART_LINES (section 2.3). */
+export const CART_LINE_LIMIT_REASON = "CART_LINE_LIMIT";
+/**
  * Longest id accepted in a path or a body. Ids are opaque (section 1.4); the bound only stops
  * absurd input and never refuses a real id (a `cuid(2)` is 24 characters).
  */

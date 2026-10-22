@@ -10,9 +10,11 @@ import type { Actor } from "@/server/auth/actor";
 import { AppError } from "@/server/errors";
 
 import * as repository from "./repository";
+import { CART_LINE_LIMIT_REASON, MAX_CART_LINES } from "./schema";
 import { addCartItem, deleteCartItem, getCart, isOwnStore, updateCartItem } from "./service";
 
 vi.mock("./repository", () => ({
+  countCartLinesUpTo: vi.fn(),
   findCartLines: vi.fn(),
   findVisibleProductIds: vi.fn(),
   readFlatShippingFee: vi.fn(),
@@ -76,6 +78,7 @@ beforeEach(() => {
   repo.findFirstImageKey.mockResolvedValue(null);
   repo.findVisibleProduct.mockResolvedValue(PRODUCT);
   repo.findLineForProduct.mockResolvedValue(null);
+  repo.countCartLinesUpTo.mockResolvedValue(0);
   repo.insertLine.mockImplementation(async (_tx, _cart, productId, quantity) => ({
     id: "line_new",
     productId,
@@ -375,6 +378,79 @@ describe("addCartItem", () => {
     const error = await refusal(addCartItem(CUSTOMER, { productId: "product_1", quantity: 1 }));
     expect(error.status).toBe(404);
     expect(error.toPublic().details).toEqual({ resource: "product" });
+  });
+});
+
+describe("addCartItem: at most MAX_CART_LINES distinct lines (SEC-053)", () => {
+  it("is 50", () => {
+    expect(MAX_CART_LINES).toBe(50);
+  });
+
+  it("counts the lines of the actor's locked cart, up to the limit, before creating a line", async () => {
+    repo.countCartLinesUpTo.mockResolvedValue(MAX_CART_LINES - 1);
+    const result = await addCartItem(CUSTOMER, { productId: "product_1", quantity: 1 });
+    expect(repo.countCartLinesUpTo).toHaveBeenCalledWith(TX, CART_ID, MAX_CART_LINES);
+    expect(repo.insertLine).toHaveBeenCalledWith(TX, CART_ID, "product_1", 1);
+    expect(result.created).toBe(true);
+    expect(repo.countCartLinesUpTo.mock.invocationCallOrder[0]).toBeLessThan(
+      repo.insertLine.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
+  it("refuses a new line in a full cart with 409 CONFLICT CART_LINE_LIMIT, storing nothing", async () => {
+    repo.countCartLinesUpTo.mockResolvedValue(MAX_CART_LINES);
+    const error = await refusal(addCartItem(CUSTOMER, { productId: "product_1", quantity: 1 }));
+    expect(error.status).toBe(409);
+    expect(error.toPublic()).toMatchObject({
+      code: "CONFLICT",
+      details: { reason: "CART_LINE_LIMIT" },
+    });
+    expect(error.toPublic().details).toEqual({ reason: CART_LINE_LIMIT_REASON });
+    expect(repo.insertLine).not.toHaveBeenCalled();
+    expect(repo.setLineQuantity).not.toHaveBeenCalled();
+    expect(repo.findFirstImageKey).not.toHaveBeenCalled();
+  });
+
+  it("still adds to an existing line of a full cart, without counting", async () => {
+    repo.countCartLinesUpTo.mockResolvedValue(MAX_CART_LINES);
+    repo.findLineForProduct.mockResolvedValue({
+      id: "line_1",
+      productId: "product_1",
+      quantity: 4,
+    });
+    const result = await addCartItem(CUSTOMER, { productId: "product_1", quantity: 3 });
+    expect(repo.countCartLinesUpTo).not.toHaveBeenCalled();
+    expect(repo.setLineQuantity).toHaveBeenCalledWith(TX, CART_ID, "line_1", 7);
+    expect(result.created).toBe(false);
+  });
+
+  it("keeps the earlier refusals first: 404, OWN_STORE, and sold out come before the limit", async () => {
+    repo.countCartLinesUpTo.mockResolvedValue(MAX_CART_LINES);
+
+    repo.findVisibleProduct.mockResolvedValueOnce(null);
+    expect((await refusal(addCartItem(CUSTOMER, { productId: "x", quantity: 1 }))).status).toBe(
+      404,
+    );
+
+    repo.findVisibleProduct.mockResolvedValueOnce({ ...PRODUCT, storeId: "store_own" });
+    expect((await refusal(addCartItem(SELLER, { productId: "product_1", quantity: 1 }))).code).toBe(
+      "PRODUCT_UNAVAILABLE",
+    );
+
+    repo.findVisibleProduct.mockResolvedValueOnce({ ...PRODUCT, stock: 0 });
+    expect(
+      (await refusal(addCartItem(CUSTOMER, { productId: "product_1", quantity: 1 }))).code,
+    ).toBe("INSUFFICIENT_STOCK");
+
+    expect(repo.countCartLinesUpTo).not.toHaveBeenCalled();
+  });
+
+  it("does not count on a quantity change (PATCH)", async () => {
+    repo.countCartLinesUpTo.mockResolvedValue(MAX_CART_LINES);
+    repo.findLineInCart.mockResolvedValue({ id: "line_1", productId: "product_1", quantity: 1 });
+    await updateCartItem(CUSTOMER, "line_1", { quantity: 2 });
+    expect(repo.countCartLinesUpTo).not.toHaveBeenCalled();
+    expect(repo.setLineQuantity).toHaveBeenCalledWith(TX, CART_ID, "line_1", 2);
   });
 });
 
