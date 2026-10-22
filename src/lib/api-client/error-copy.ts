@@ -6,7 +6,14 @@ import type { ApiFailure } from "./http";
  * the English `message` is never shown). Keyed by error code, then by status for the codes the
  * envelope does not carry.
  */
-export function apiErrorMessage(error: Pick<ApiFailure, "status" | "code">): string {
+export function apiErrorMessage(
+  error: Pick<ApiFailure, "status" | "code"> & { reason?: string },
+): string {
+  if (error.code === "CONFLICT" && error.reason !== undefined) {
+    const reasons: Readonly<Record<string, string>> = th.errors.reasons;
+    const text = reasons[error.reason];
+    if (Object.hasOwn(reasons, error.reason) && typeof text === "string") return text;
+  }
   switch (error.code) {
     case "NETWORK_ERROR":
       return th.errors.network;

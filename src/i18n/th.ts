@@ -78,6 +78,12 @@ export const th = {
     rateLimited: "ทำรายการถี่เกินไป กรุณารอสักครู่แล้วลองอีกครั้ง",
     network: "เชื่อมต่อไม่ได้ กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองอีกครั้ง",
     unknown: "เกิดข้อผิดพลาด กรุณาลองอีกครั้ง",
+    // 409 CONFLICT by `details.reason` (API_CONTRACTS 2.3). Wording is a proposal: product-requirements
+    // has not approved it yet.
+    reasons: {
+      CART_LINE_LIMIT:
+        "ตะกร้ามีสินค้าได้สูงสุด 50 รายการที่ไม่ซ้ำกัน กรุณานำสินค้าบางรายการออก หรือชำระเงินสำหรับสินค้าในตะกร้าก่อน",
+    },
     loadFailed: "โหลดข้อมูลไม่สำเร็จ",
     loadFailedTitle: "ไม่สามารถแสดงข้อมูลได้",
     retry: "ลองอีกครั้ง",
