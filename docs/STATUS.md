@@ -1,4 +1,4 @@
-﻿# Status
+# Status
 
 The only place task status is recorded. Owner: orchestrator. Task definitions are in [PROJECT_PLAN.md](PROJECT_PLAN.md).
 
@@ -13,7 +13,7 @@ Not started: checkout UI (T-034), reviews, seller onboarding and seller products
 ## Resume here
 
 
-Session 105 follow-up: owner approved the changed Thai strings (all) and chose for SEC-081: fix the guard, then accept the residual in writing (code review is the control). devops is starting: SEC-081/SEC-083 guard fixes; paths `eslint.config.mjs`, `scripts/check-import-guards.mjs`, `tests/security/sec081-recheck-2.test.ts`, `docs/SECURITY.md`, `docs/DECISIONS.md`. If no commit follows, inspect `git status` first.
+Session 105 follow-up: owner approved the changed Thai strings (all) and chose for SEC-081: fix the guard, then accept the residual in writing (code review is the control). devops finished SEC-081/SEC-083 guard fixes (`23720f2`, IMPLEMENTED, not VERIFIED); security re-check is starting (paths `docs/SECURITY.md`, `tests/security/**`); devops had touched 6 src files (rate-limit, timeout-sweep, uploads cleanup, auth security-events, session-purge, library-error) to satisfy the new rules, for owner review; old line: paths `eslint.config.mjs`, `scripts/check-import-guards.mjs`, `tests/security/sec081-recheck-2.test.ts`, `docs/SECURITY.md`, `docs/DECISIONS.md`. If no commit follows, inspect `git status` first.
 
 Session 105 finished. Local commits, not pushed.
 
