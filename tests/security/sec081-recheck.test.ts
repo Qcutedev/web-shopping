@@ -19,7 +19,12 @@
  *   3. A query or fragment suffix on the specifier (`@/server/db?x`) is not matched by the path
  *      patterns, which end at `/` or the end of the string.
  *
- * Each case asserts the secure behaviour (an ESLint error). All 19 were `it.fails` until the guard\n * was extended (noInlineConfig for all of src, test-named imports refused from application code,\n * node:module and node:vm refused in every import form, computed member access, and ? and # in\n * a specifier); they are plain `it` now.
+ * Each case asserts the secure behaviour (an ESLint error). All 19 were `it.fails` until the guard
+ * was extended in 0a7ea5e (noInlineConfig for all of src, test-named imports refused from
+ * application code, node:module and node:vm refused in every import form, computed member access,
+ * and ? and # in a specifier); they are plain `it` now. Re-checked by security on 2026-10-22: the
+ * 19 spellings pass the config of 0a7ea5e^ and are rejected at 0a7ea5e. What still gets past the
+ * guard is pinned in tests/security/sec081-recheck-2.test.ts.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
