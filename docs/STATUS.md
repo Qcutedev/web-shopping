@@ -12,7 +12,7 @@ Not started: checkout and orders (T-032, T-034), reviews, seller onboarding and 
 
 ## Resume here
 
-Ninety-seventh session finished. No agent is running. All work is committed on `main` (no remote, nothing pushed).
+Ninety-eighth session started. Running: qa agent on next-steps 1 and 2 (SEC-078, CR-157, CR-158 to CR-160). Paths: `e2e/support/**`, `e2e/stacked-table.spec.ts`, `tests/helpers/test-database-url.ts`, `tests/security/sec074-077-recheck.test.ts`, `tests/e2e-support/**`, `docs/DEPLOYMENT.md`, `docs/TEST_STRATEGY.md`. If interrupted, inspect uncommitted files first. (Ninety-seventh finished cleanly.) All work is committed on `main` (no remote, nothing pushed).
 
 Read first in a new session: CLAUDE.md, this file, `git status`, `git diff`.
 
