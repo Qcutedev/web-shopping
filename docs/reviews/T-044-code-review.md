@@ -88,3 +88,15 @@ Verdict: CHANGES REQUIRED. Reviewer re-ran lint, typecheck, format:check, `playw
 - **CR-137 (Info, qa)** TEST_STRATEGY.md says "only the database name replaced"; the query is stripped too.
 
 Security: note CR-128 for the next harness pass. `pnpm verify` and CI are not affected (they do not run e2e).
+
+## Review of 125558b and d398e4e (ninety-second session)
+
+Verdict: APPROVED, no blocking finding. CR-121 to CR-125 fixed; CR-126 not merged, justified (`seenEditableKey` and `ownKey` are different state; one key re-seeds to the old record after a save).
+
+- **CR-138 (Low, ui-ux-design)** `src/components/ui/table.tsx:1` and `table.test.tsx:1` have a UTF-8 BOM added by 125558b. Save without BOM; optionally add `.editorconfig` `charset = utf-8`.
+- **CR-139 (Low, frontend)** `src/components/seller/editable-key.test.ts:52` fixture has `alt` (not in `ImageRef`) and `as never` casts at 52 and 74. Type literals as `ImageRef`.
+- **CR-140 (Info, ui-ux-design)** `table.tsx:56` docstring line about 125 characters; re-wrap to 100.
+- **CR-141 (Info, ui-ux-design)** `table.test.tsx:229-246` lacks cases: `stacked={false}` to `stacked` subscribes; unmount calls `removeEventListener`.
+- **CR-142 (Info, frontend)** put the CR-126 reason in a comment at `product-form.tsx:66-69` and `store-form.tsx:77-80`.
+
+Not verified by the reviewer: tests against the old code (traced by reading), real browser, `pnpm verify`, `pnpm build`.
