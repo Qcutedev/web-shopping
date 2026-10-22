@@ -239,7 +239,87 @@ const probes = [
   // Code built from a string.
   ["src/app/x/probe.js", 'const m = eval("require")("../../server/db");', true],
   ["src/app/x/probe.js", 'const m = new Function("return require")()("../../server/db");', true],
-  // SEC-081 controls: the db layer, tests, and e2e support may use createRequire, and must stay
+  // SEC-081 re-check: the inline disable in a test-named file under src, loader spellings reached
+  // by name tricks, and query or fragment suffixes. Test files run by Vitest keep the loader
+  // exemption (they use createRequire); application code may not import them.
+  [
+    "src/lib/x/leak.itest.ts",
+    '/* eslint-disable */\nimport { db } from "@/server/db";\nexport { db };',
+    true,
+  ],
+  [
+    "src/lib/x/leak.test.mts",
+    '/* eslint-disable */\nimport { db } from "@/server/db";\nexport { db };',
+    true,
+  ],
+  [
+    "src/components/x/leak.test.tsx",
+    '// eslint-disable-next-line no-restricted-imports\nimport { db } from "@/server/db";\nexport { db };',
+    true,
+  ],
+  [
+    "src/app/x/leak.itest.ts",
+    'import { createRequire } from "node:module";\nexport const m = createRequire(import.meta.url)("../../server/db");',
+    true,
+  ],
+  ["src/app/x/probe.ts", 'import { x } from "@/lib/x/leak.test";', true],
+  ["src/app/x/probe.ts", 'import { x } from "@/lib/x/leak.itest";', true],
+  ["src/app/x/probe.ts", 'const m = await import("../../lib/x/leak.test.ts");', true],
+  ["src/lib/x/probe.test.ts", 'import { x } from "./helper";', false],
+  ["src/app/x/probe.js", 'const m = module.constructor._load("../../server/db");', true],
+  ["src/app/x/probe.js", 'const m = process.mainModule["require"]("../../server/db");', true],
+  [
+    "src/app/x/probe.ts",
+    'const m = process["getBuiltinModule"]("node:module")["createRequire"](import.meta.url)("../../server/db");',
+    true,
+  ],
+  [
+    "src/app/x/probe.ts",
+    'const p = process; const m = p.getBuiltinModule("node:module")["createRequire"](import.meta.url)("../../server/db");',
+    true,
+  ],
+  [
+    "src/app/x/probe.ts",
+    'const { getBuiltinModule: g } = process; const m = g("node:module")["createRequire"](import.meta.url)("../../server/db");',
+    true,
+  ],
+  [
+    "src/app/x/probe.ts",
+    'const mod = await import("node:module"); const m = mod["createRequire"](import.meta.url)("../../server/db");',
+    true,
+  ],
+  [
+    "src/app/x/probe.js",
+    'const m = require("node:module")["createRequire"](__filename)("../../server/db");',
+    true,
+  ],
+  ["src/app/x/probe.ts", 'const m = (0, eval)("require")("../../server/db");', true],
+  ["src/app/x/probe.ts", 'const m = globalThis.eval("require")("../../server/db");', true],
+  [
+    "src/app/x/probe.ts",
+    'const m = (() => {}).constructor("return require")()("../../server/db");',
+    true,
+  ],
+  [
+    "src/app/x/probe.ts",
+    'const m = Reflect.construct(Function, ["return require"])()("../../server/db");',
+    true,
+  ],
+  [
+    "src/app/x/probe.ts",
+    'import vm from "node:vm"; const m = vm.runInThisContext("process.mainModule.require")("../../server/db");',
+    true,
+  ],
+  ["src/app/x/probe.ts", 'import { db } from "@/server/db?x";', true],
+  ["src/app/x/probe.ts", 'import { db } from "@/server/db#x";', true],
+  ["src/app/x/probe.ts", 'const m = await import("@/server/db?x");', true],
+  // Controls: a Vitest-run test under src may still use createRequire; process.env stays allowed.
+  [
+    "src/lib/x/probe.test.ts",
+    'import { createRequire } from "node:module";\nconst r = createRequire(import.meta.url);',
+    false,
+  ],
+  ["src/app/x/probe.ts", "const e = process.env.NODE_ENV;", false], // SEC-081 controls: the db layer, tests, and e2e support may use createRequire, and must stay
   // clean after the guard is extended.
   [
     "src/server/db/probe.ts",

@@ -19,7 +19,9 @@ const DB_LAYER = "(^|/)server/db(/|$)";
 const SIBLING_DB = "^(\\./|(\\.\\./)+)db(/|$)";
 // The patterns above match text, so a path must be written in its normal form: no "/./", no "//",
 // no backslash, and no ".." after a named segment (as in "@/server/auth/../db").
-const NOT_NORMAL = "/\\./|//|\\\\|(^|/)[^./][^/]*/\\.\\.(/|$)";
+// A query or fragment suffix ("?" or "#") is also refused: "@/server/db?x" would not match the
+// patterns, which end at "/" or the end of the string (SEC-081).
+const NOT_NORMAL = "/\\./|//|\\\\|[?#]|(^|/)[^./][^/]*/\\.\\.(/|$)";
 
 const driverPattern = {
   regex: DB_DRIVER,
@@ -87,45 +89,68 @@ function dynamicImportRules(regexSource, message) {
 
 // SEC-081: other routes to a module that the rules above cannot read. Applied to src only.
 const moduleLoaderPattern = {
-  regex: "^(node:)?module$",
-  message: "Only src/server/db may use node:module (createRequire).",
+  regex: "^(node:)?(module|vm)$",
+  message: "Only src/server/db may use node:module (createRequire) or node:vm.",
+};
+// A non-test file never imports a test-named module: such a file keeps a plain guard elsewhere
+// and may be run by no test configuration (SEC-081).
+const testImportPattern = {
+  regex: "\\.(test|itest)(\\.[cm]?[jt]sx?)?$",
+  message: "Do not import a test file (*.test.*, *.itest.*) from application code.",
 };
 const LOADER_MESSAGE =
   "Load modules with import or a direct require(...) call so the import rules can check them (SEC-081).";
+const LOADER_NAMES = "require|createRequire|getBuiltinModule|mainModule|_load|eval|Function";
 const loaderRules = [
-  "MemberExpression[object.name='process'][property.name='getBuiltinModule']",
-  "Identifier[name='require']:not(CallExpression > Identifier.callee)",
-  "Identifier[name='createRequire']",
+  `MemberExpression[property.name=/^(${LOADER_NAMES})$/]`,
+  `MemberExpression[computed=true][property.value=/^(${LOADER_NAMES}|constructor|construct)$/]`,
+  "MemberExpression[computed=true][property.type='TemplateLiteral']",
+  "MemberExpression[computed=true]:matches([object.name='process'], [object.name='module'], [object.name='globalThis'], [object.name='Reflect'], [object.name='require'])[property.type!='Literal']",
+  "CallExpression > MemberExpression.callee[property.name='constructor']",
+  "MemberExpression[object.name='Reflect'][property.name='construct']",
+  "Identifier[name=/^(require|createRequire|eval|Function)$/]:not(CallExpression > Identifier.callee[name='require']):not(MemberExpression > Identifier.property)",
+  "Identifier[name='process']:not(MemberExpression > Identifier.object)",
   "CallExpression[callee.name='eval']",
   "CallExpression[callee.name='Function']",
   "NewExpression[callee.name='Function']",
 ].map((selector) => ({ selector, message: LOADER_MESSAGE }));
 
 function importGuard(patterns, message, hardened = false) {
+  const all = hardened ? [...patterns, moduleLoaderPattern, testImportPattern] : patterns;
   return {
-    "no-restricted-imports": [
-      "error",
-      { patterns: [...patterns, normalPattern, ...(hardened ? [moduleLoaderPattern] : [])] },
-    ],
+    "no-restricted-imports": ["error", { patterns: [...all, normalPattern] }],
     "no-restricted-syntax": [
       "error",
-      ...dynamicImportRules(patterns.map((pattern) => pattern.regex).join("|"), message),
+      ...dynamicImportRules(all.map((pattern) => pattern.regex).join("|"), message),
       ...(hardened ? loaderRules : []),
     ],
   };
 }
 
 // SEC-081: the same guard again for src, where it is also hardened and inline config comments are
-// ignored. Tests and the db layer keep the plain guard (they use createRequire and test fixtures).
-const HARDENED_EXEMPT = ["src/server/db/**", "**/*.test.*", "**/*.itest.*"];
+// ignored for every file under src, tests included. Only the db layer keeps the plain guard (it uses
+// createRequire). Test-named files under src get the hardened guard too: a page can import one,
+// and some of them are run by no test configuration.
 const SRC_CODE = ["src/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"];
-function hardenedGuard(files, ignores, patterns, message) {
-  return {
-    files,
-    ignores: [...ignores, ...HARDENED_EXEMPT],
-    linterOptions: { noInlineConfig: true },
-    rules: importGuard(patterns, message, true),
-  };
+const HARDENED_EXEMPT = ["src/server/db/**"];
+const CODE_EXT = "{ts,tsx,mts,cts,js,jsx,mjs,cjs}";
+// Vitest runs these under src. Their loader use (createRequire, module mocks, `.constructor`) is
+// legitimate and not reachable from a page, because application code may not import a test-named
+// file (testImportPattern). They keep the path rules and noInlineConfig, but not the loader rules.
+const VITEST_TESTS = ["**/*.test.ts", "**/*.test.tsx"];
+function hardenedGuard(scope, ignores, patterns, message) {
+  return [
+    {
+      files: [`${scope}/**/*.${CODE_EXT}`],
+      ignores: [...ignores, ...HARDENED_EXEMPT, ...VITEST_TESTS],
+      rules: importGuard(patterns, message, true),
+    },
+    {
+      files: VITEST_TESTS.map((test) => [`${scope}/**`, test]),
+      ignores: [...ignores, ...HARDENED_EXEMPT],
+      rules: importGuard(patterns, message),
+    },
+  ];
 }
 
 const eslintConfig = defineConfig([
@@ -167,22 +192,24 @@ const eslintConfig = defineConfig([
     ignores: ["src/server/db/**", "src/server/auth/**", "src/server/health.ts"],
     rules: importGuard([driverPattern, layerPattern, siblingPattern], layerPattern.message),
   },
+  // SEC-081: inline config comments (eslint-disable and the like) are ignored in all of src.
+  { files: SRC_CODE, linterOptions: { noInlineConfig: true } },
   // SEC-081: hardened copies of the blocks above for src. They come last so they win.
-  hardenedGuard([...SRC_CODE], [GENERATED_CLIENT], [driverPattern], driverPattern.message),
-  hardenedGuard(
-    [...SRC_CODE],
+  ...hardenedGuard("src", [GENERATED_CLIENT], [driverPattern], driverPattern.message),
+  ...hardenedGuard(
+    "src",
     [...DB_LAYER_IMPORTERS, GENERATED_CLIENT],
     [driverPattern, layerPattern],
     layerPattern.message,
   ),
-  hardenedGuard(
-    ["src/modules/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"],
+  ...hardenedGuard(
+    "src/modules",
     MODULE_TESTS,
     [driverPattern, authPattern],
     "Only src/server/db may import the database client or driver, and modules import src/server/auth only through actor.ts (D-022).",
   ),
-  hardenedGuard(
-    ["src/server/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"],
+  ...hardenedGuard(
+    "src/server",
     ["src/server/db/**", "src/server/auth/**", "src/server/health.ts"],
     [driverPattern, layerPattern, siblingPattern],
     layerPattern.message,

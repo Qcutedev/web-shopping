@@ -19,7 +19,7 @@
  *   3. A query or fragment suffix on the specifier (`@/server/db?x`) is not matched by the path
  *      patterns, which end at `/` or the end of the string.
  *
- * Each case asserts the secure behaviour (an ESLint error) and is `it.fails` until fixed.
+ * Each case asserts the secure behaviour (an ESLint error). All 19 were `it.fails` until the guard\n * was extended (noInlineConfig for all of src, test-named imports refused from application code,\n * node:module and node:vm refused in every import form, computed member access, and ? and # in\n * a specifier); they are plain `it` now.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -91,7 +91,7 @@ describe("SEC-081 re-check: an inline disable in a test-named file under src", (
       'import { createRequire } from "node:module";\nexport const m = createRequire(import.meta.url)("../../server/db");',
     ],
   ] as const) {
-    it.fails(`${file} is an error`, async () => {
+    it(`${file} is an error`, async () => {
       expect(await guardErrors(file, code)).not.toEqual([]);
     });
   }
@@ -159,7 +159,7 @@ describe("SEC-081 re-check: loader spellings the name-based selectors miss", () 
     ["fragment suffix, static", "src/app/x/probe.ts", 'import { db } from "@/server/db#x";'],
     ["query suffix, dynamic", "src/app/x/probe.ts", 'const m = await import("@/server/db?x");'],
   ] as const) {
-    it.fails(`${label} is an error`, async () => {
+    it(`${label} is an error`, async () => {
       expect(await guardErrors(file, code)).not.toEqual([]);
     });
   }
