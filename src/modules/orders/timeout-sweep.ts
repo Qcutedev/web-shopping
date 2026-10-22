@@ -76,13 +76,12 @@ export interface SweepScheduleOptions {
  * Runs the sweep at once and then every `intervalMs`.
  */
 export function startPaymentTimeoutSweepSchedule(options: SweepScheduleOptions): boolean {
-  const holder = globalThis as GlobalWithSchedule;
-  if (holder[SCHEDULE_KEY] !== undefined) return false;
+  if ((globalThis as GlobalWithSchedule)[SCHEDULE_KEY] !== undefined) return false;
   const intervalMs = options.intervalMs ?? PAYMENT_SWEEP_INTERVAL_MS;
   const log = options.logger ?? defaultLogger;
 
   const tick = (): void => {
-    const state = holder[SCHEDULE_KEY];
+    const state = (globalThis as GlobalWithSchedule)[SCHEDULE_KEY];
     if (state === undefined || state.running) return;
     state.running = true;
     void runPaymentTimeoutSweep(options.timeoutMinutes, log, options.sweep).finally(() => {
@@ -92,16 +91,15 @@ export function startPaymentTimeoutSweepSchedule(options: SweepScheduleOptions):
 
   const timer = setInterval(tick, intervalMs);
   timer.unref();
-  holder[SCHEDULE_KEY] = { timer, running: false };
+  (globalThis as GlobalWithSchedule)[SCHEDULE_KEY] = { timer, running: false };
   tick();
   return true;
 }
 
 /** Stops the schedule of this process (for tests and an orderly shutdown). */
 export function stopPaymentTimeoutSweepSchedule(): void {
-  const holder = globalThis as GlobalWithSchedule;
-  const state = holder[SCHEDULE_KEY];
+  const state = (globalThis as GlobalWithSchedule)[SCHEDULE_KEY];
   if (state === undefined) return;
   clearInterval(state.timer);
-  delete holder[SCHEDULE_KEY];
+  delete (globalThis as GlobalWithSchedule)[SCHEDULE_KEY];
 }

@@ -101,7 +101,33 @@ const testImportPattern = {
 const LOADER_MESSAGE =
   "Load modules with import or a direct require(...) call so the import rules can check them (SEC-081).";
 const LOADER_NAMES = "require|createRequire|getBuiltinModule|mainModule|_load|eval|Function";
+// Globals that give access to the loader or to the global object. Only `name.property` (not
+// computed) is allowed, so that an alias (`const g = globalThis`) cannot be built. A type-position
+// use (`typeof globalThis`) and the cast form `(globalThis as T)[key]` are allowed.
+const GLOBAL_NAMES = "module|global|globalThis|Reflect|__non_webpack_require__|__webpack_require__";
+const GLOBAL_ALLOWED = [
+  "MemberExpression[computed=false] > Identifier.object",
+  "MemberExpression[computed=false] > Identifier.property",
+  "Property[computed=false] > Identifier.key",
+  "TSPropertySignature > Identifier.key",
+  "TSTypeQuery > Identifier",
+  "TSQualifiedName > Identifier",
+  "MemberExpression[computed=true] > TSAsExpression.object > Identifier.expression",
+]
+  .map((part) => `:not(${part})`)
+  .join("");
 const loaderRules = [
+  `Identifier[name=/^(${GLOBAL_NAMES})$/]${GLOBAL_ALLOWED}`,
+  "MemberExpression[computed=false][property.name='constructor']",
+  // A computed key built from a string expression ("req" + "uire"). A numeric key (`items[i + 1]`)
+  // is ordinary indexing and stays allowed: only a key that holds a string or template literal.
+  // Two string literals joined by `+` and kept in a variable ("constr" + "uctor"): a name built to
+  // avoid the name-based selectors, used later as a computed key. Only short pieces (16 characters
+  // or fewer each) count: a long string split over two lines (class names) is ordinary. Any other
+  // use of a built string as a key is caught by the computed-key selector below. Residual: longer
+  // pieces and three or more pieces; code review is the control (D-045).
+  "VariableDeclarator > BinaryExpression.init[operator='+'][left.type='Literal'][right.type='Literal'][left.value=/^.{0,16}$/][right.value=/^.{0,16}$/]",
+  "MemberExpression[computed=true] > BinaryExpression.property:has(:matches(Literal[value=type(string)], TemplateLiteral))",
   `MemberExpression[property.name=/^(${LOADER_NAMES})$/]`,
   `MemberExpression[computed=true][property.value=/^(${LOADER_NAMES}|constructor|construct)$/]`,
   "MemberExpression[computed=true][property.type='TemplateLiteral']",
@@ -115,8 +141,18 @@ const loaderRules = [
   "NewExpression[callee.name='Function']",
 ].map((selector) => ({ selector, message: LOADER_MESSAGE }));
 
+// SEC-083: application code under src does not import the folders whose files may import the db
+// layer (scripts, tests, prisma/seed.ts) or e2e. Relative depth is the only way out of src: the
+// `@/` alias stays inside it. The db layer is exempt (it reaches prisma/generated).
+const outsideSrcPattern = {
+  regex: "^(\\.\\./)+(scripts|tests|e2e|prisma)(/|$)",
+  message: "Code under src may not import scripts, tests, e2e, or prisma (SEC-083).",
+};
+
 function importGuard(patterns, message, hardened = false) {
-  const all = hardened ? [...patterns, moduleLoaderPattern, testImportPattern] : patterns;
+  const all = hardened
+    ? [...patterns, moduleLoaderPattern, testImportPattern, outsideSrcPattern]
+    : patterns;
   return {
     "no-restricted-imports": ["error", { patterns: [...all, normalPattern] }],
     "no-restricted-syntax": [
@@ -194,6 +230,11 @@ const eslintConfig = defineConfig([
   },
   // SEC-081: inline config comments (eslint-disable and the like) are ignored in all of src.
   { files: SRC_CODE, linterOptions: { noInlineConfig: true } },
+  // SEC-081 (owner decision, session 105): inline config comments are ignored everywhere, not only
+  // in src, so a new top-level folder or a root file cannot switch the guards off. Generated
+  // client code (git-ignored, written by `prisma generate`) is the one exception: it carries its
+  // own disable header.
+  { files: ALL_CODE, ignores: [GENERATED_CLIENT], linterOptions: { noInlineConfig: true } },
   // SEC-081: hardened copies of the blocks above for src. They come last so they win.
   ...hardenedGuard("src", [GENERATED_CLIENT], [driverPattern], driverPattern.message),
   ...hardenedGuard(

@@ -370,3 +370,11 @@ The owner told the orchestrator to take the orchestrator's recommendation for al
 3. `/orders/{id}` is the order confirmation page. No separate route.
 4. Checkout shows the first 50 addresses. A cap on addresses per user (50) is added later by backend-api; no "more" control.
 5. After an unknown outcome, "Check status" may resend with the same idempotency key, only when a cart read shows the cart is unchanged (API_CONTRACTS 5.5.3 forbids automatic resend after a 409 only).
+
+### D-045 Owner accepted the name-based residual of the rule 7 lint guard (SEC-081, SEC-083; 2026-10-22, session 105)
+
+After the second re-check of SEC-081 (commit 0a7ea5e) the owner decided: fix the guard for the gaps found, then accept in writing the residual that name-based lint selectors cannot close. Code review is the control for that residual. No module-graph check is commissioned now.
+
+1. The fix: `noInlineConfig` for all code, refusal of the loader and global identifiers outside a plain member access, refusal of `.constructor` and of string-built computed keys, and refusal of imports of `scripts`, `tests`, `e2e`, and `prisma` from `src` (SEC-083). It is listed in docs/SECURITY.md under SEC-081 and SEC-083.
+2. The accepted residual is listed in docs/SECURITY.md under SEC-081, "Accepted residual". In short: string keys built from three or more pieces, long pieces, or variables; `Reflect` helpers called by name; a re-export through an allowed folder; any loader reachable through a name the selectors do not list.
+3. SEC-081 and SEC-083 close only after security re-checks the fix. A module-graph check over resolved imports may replace the residual later; it needs a new decision.

@@ -1,10 +1,11 @@
 // Regression check for architecture rule 7 (CLAUDE.md): checks that the ESLint import guards in
 // eslint.config.mjs reject the forbidden import spellings listed below and accept the allowed ones.
-// Inline eslint-disable and config comments, createRequire, and other indirect require calls get
-// past the guard today (SEC-081, docs/SECURITY.md). They are listed below with the expectation
-// "SEC-081": the guard should reject them, and the script reports them as known gaps without
-// failing. Once the guard rejects one, the script fails until its expectation is changed to
-// `true`, the same way `it.fails` works in tests/security/cr-t032-10-import-guards.test.ts.
+// Inline eslint-disable and config comments, createRequire, other indirect require calls, and
+// imports of scripts/tests/e2e/prisma from src are rejected (SEC-081, SEC-083, docs/SECURITY.md).
+// A probe may carry the expectation "SEC-081" (should be rejected, known gap): the script then
+// reports it without failing, and fails once the guard rejects it until the expectation is changed
+// to `true`, the same way `it.fails` works. No probe uses it now. Lint selectors over names stay
+// incomplete; the owner accepted that residual (docs/DECISIONS.md D-045).
 // Not covered, and left to review: re-exports through an allowed folder and type-only
 // `typeof import()` queries.
 // Nothing is written to disk; each probe is linted from memory under a virtual file name.
@@ -313,13 +314,72 @@ const probes = [
   ["src/app/x/probe.ts", 'import { db } from "@/server/db?x";', true],
   ["src/app/x/probe.ts", 'import { db } from "@/server/db#x";', true],
   ["src/app/x/probe.ts", 'const m = await import("@/server/db?x");', true],
+  // SEC-081 second re-check, group 2: inline config outside src.
+  [
+    "shared/leak.ts",
+    '/* eslint-disable */\nimport { db } from "../src/server/db";\nexport { db };',
+    true,
+  ],
+  [
+    "leak.ts",
+    '// eslint-disable-next-line no-restricted-imports\nimport { db } from "./src/server/db";\nexport { db };',
+    true,
+  ],
+  // Group 3: loader spellings reached through aliases and computed keys.
+  [
+    "src/app/x/probe.js",
+    'const mm = module; const k = "req" + "uire"; const m = mm[k]("../../server/db");',
+    true,
+  ],
+  ["src/app/x/probe.ts", 'const g = globalThis; const e = g["ev" + "al"]; const m = e("1");', true],
+  ["src/app/x/probe.js", 'const e = global["ev" + "al"]; const m = e("1");', true],
+  [
+    "src/app/x/probe.ts",
+    'const F = (() => {}).constructor; const m = F("return process")();',
+    true,
+  ],
+  [
+    "src/app/x/probe.ts",
+    'const k = "constr" + "uctor"; const F = (() => {})[k]; const m = F("return process")();',
+    true,
+  ],
+  [
+    "src/app/x/probe.ts",
+    'const R = Reflect; const F = (() => {}).constructor; const m = R.construct(F, ["return process"]);',
+    true,
+  ],
+  ["src/app/x/probe.js", 'const m = __non_webpack_require__("../../server/db");', true],
+  // SEC-083: application code imports a folder whose files may import the db layer.
+  ["src/app/x/probe.ts", 'import { x } from "../../../scripts/bootstrap-admin";', true],
+  ["src/components/x/probe.tsx", 'import { x } from "../../../tests/helpers/db";', true],
+  ["src/app/x/probe.ts", 'import { x } from "../../../prisma/seed";', true],
+  ["src/app/x/probe.ts", 'import { x } from "../../../e2e/support/db";', true],
+  ["src/app/x/probe.ts", 'const m = await import("../../../scripts/bootstrap-admin");', true],
+  ["src/app/x/probe.js", 'const m = require("../../../scripts/bootstrap-admin");', true],
+  // Controls: the db layer reaches prisma/generated, and tests under scripts import src.
+  [
+    "src/server/db/probe.ts",
+    'import { PrismaClient } from "../../../prisma/generated/prisma/client";',
+    false,
+  ],
+  ["scripts/probe.ts", 'import { db } from "../src/server/db";', false],
   // Controls: a Vitest-run test under src may still use createRequire; process.env stays allowed.
   [
     "src/lib/x/probe.test.ts",
     'import { createRequire } from "node:module";\nconst r = createRequire(import.meta.url);',
     false,
   ],
-  ["src/app/x/probe.ts", "const e = process.env.NODE_ENV;", false], // SEC-081 controls: the db layer, tests, and e2e support may use createRequire, and must stay
+  ["src/app/x/probe.ts", "const e = process.env.NODE_ENV;", false],
+  // Allowed shapes that the SEC-081 selectors must keep accepting (the real tree uses them).
+  ["src/app/x/probe.ts", "const n = items[items.length - 1];\nconst o = items[i + 1];", false],
+  ["src/app/x/probe.ts", "const v = Reflect.apply(getter, chunk, []);", false],
+  ["src/app/x/probe.ts", "const u = globalThis.crypto.randomUUID();", false],
+  [
+    "src/app/x/probe.ts",
+    "type G = typeof globalThis & { k?: unknown };\nconst s = (globalThis as G)[KEY];",
+    false,
+  ],
+  // SEC-081 controls: the db layer, tests, and e2e support may use createRequire, and must stay
   // clean after the guard is extended.
   [
     "src/server/db/probe.ts",

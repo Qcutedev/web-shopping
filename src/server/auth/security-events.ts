@@ -67,11 +67,10 @@ type GlobalWithThrottle = typeof globalThis & { [THROTTLE_STATE_KEY]?: unknown }
 
 /** The throttle table of the process. A slot that holds anything else is replaced. */
 function throttleTable(): Map<string, ThrottleSlot> {
-  const holder = globalThis as GlobalWithThrottle;
-  const existing = holder[THROTTLE_STATE_KEY];
+  const existing = (globalThis as GlobalWithThrottle)[THROTTLE_STATE_KEY];
   if (existing instanceof Map) return existing as Map<string, ThrottleSlot>;
   const created = new Map<string, ThrottleSlot>();
-  holder[THROTTLE_STATE_KEY] = created;
+  (globalThis as GlobalWithThrottle)[THROTTLE_STATE_KEY] = created;
   return created;
 }
 

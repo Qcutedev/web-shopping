@@ -514,15 +514,15 @@ function isProcessLimiterState(value: unknown): value is ProcessLimiterState {
 
 /** The table of the process, created on first use. */
 function processState(): ProcessLimiterState {
-  const holder = globalThis as GlobalWithLimiterState;
-  const existing = holder[PROCESS_STATE_KEY];
+  // No alias of `globalThis`: the lint guard refuses one (SEC-081).
+  const existing = (globalThis as GlobalWithLimiterState)[PROCESS_STATE_KEY];
   if (isProcessLimiterState(existing)) return existing;
   const created: ProcessLimiterState = {
     version: PROCESS_STATE_VERSION,
     ...createWindowTable(),
     lastSaturationLogAt: new Map(),
   };
-  holder[PROCESS_STATE_KEY] = created;
+  (globalThis as GlobalWithLimiterState)[PROCESS_STATE_KEY] = created;
   return created;
 }
 

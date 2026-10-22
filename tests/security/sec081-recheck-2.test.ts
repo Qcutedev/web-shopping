@@ -20,9 +20,10 @@
  *      from a string expression on an object the selectors do not name, and the bundler loader
  *      `__non_webpack_require__`.
  *
- * Each `it.fails` asserts the secure behaviour (an ESLint error from no-restricted-imports or
- * no-restricted-syntax) and turns red when the guard rejects that spelling: flip it to `it` then.
- * The plain `it` cases are controls and real-tree checks; they pass today.
+ * Each case asserts the secure behaviour (an ESLint error from no-restricted-imports or
+ * no-restricted-syntax). They were `it.fails` until the guard was fixed (SEC-081, SEC-083, owner
+ * decision D-045) and are plain `it` now. The name-based residual that remains is accepted in
+ * writing (docs/SECURITY.md, SEC-081).
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
@@ -139,7 +140,7 @@ describe("SEC-081 second re-check, group 1: application code imports an allowed 
       'const m = await import("../../../scripts/bootstrap-admin");',
     ],
   ] as const) {
-    it.fails(`${label} is an error`, async () => {
+    it(`${label} is an error`, async () => {
       expect(await guardErrors(file, code)).not.toEqual([]);
     });
   }
@@ -158,7 +159,7 @@ describe("SEC-081 second re-check, group 2: inline config outside src", () => {
       '// eslint-disable-next-line no-restricted-imports\nimport { db } from "./src/server/db";\nexport { db };',
     ],
   ] as const) {
-    it.fails(`${label} is an error`, async () => {
+    it(`${label} is an error`, async () => {
       expect(await guardErrors(file, code)).not.toEqual([]);
     });
   }
@@ -202,7 +203,7 @@ describe("SEC-081 second re-check, group 3: loader spellings the selectors still
       'const m = __non_webpack_require__("../../server/db");',
     ],
   ] as const) {
-    it.fails(`${label} is an error`, async () => {
+    it(`${label} is an error`, async () => {
       expect(await guardErrors(file, code)).not.toEqual([]);
     });
   }

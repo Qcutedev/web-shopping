@@ -87,13 +87,12 @@ export interface ScheduleOptions {
  * Runs the purge at once and then every `intervalMs`.
  */
 export function startSessionPurgeSchedule(options: ScheduleOptions = {}): boolean {
-  const holder = globalThis as GlobalWithSchedule;
-  if (holder[SCHEDULE_KEY] !== undefined) return false;
+  if ((globalThis as GlobalWithSchedule)[SCHEDULE_KEY] !== undefined) return false;
   const intervalMs = options.intervalMs ?? SESSION_PURGE_INTERVAL_MS;
   const log = options.logger ?? defaultLogger;
 
   const tick = (): void => {
-    const state = holder[SCHEDULE_KEY];
+    const state = (globalThis as GlobalWithSchedule)[SCHEDULE_KEY];
     if (state === undefined || state.running) return;
     state.running = true;
     void runSessionPurge(log, options.purge).finally(() => {
@@ -103,16 +102,15 @@ export function startSessionPurgeSchedule(options: ScheduleOptions = {}): boolea
 
   const timer = setInterval(tick, intervalMs);
   timer.unref();
-  holder[SCHEDULE_KEY] = { timer, running: false };
+  (globalThis as GlobalWithSchedule)[SCHEDULE_KEY] = { timer, running: false };
   tick();
   return true;
 }
 
 /** Stops the schedule of this process (for tests and an orderly shutdown). */
 export function stopSessionPurgeSchedule(): void {
-  const holder = globalThis as GlobalWithSchedule;
-  const state = holder[SCHEDULE_KEY];
+  const state = (globalThis as GlobalWithSchedule)[SCHEDULE_KEY];
   if (state === undefined) return;
   clearInterval(state.timer);
-  delete holder[SCHEDULE_KEY];
+  delete (globalThis as GlobalWithSchedule)[SCHEDULE_KEY];
 }

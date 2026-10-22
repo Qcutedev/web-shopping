@@ -47,9 +47,15 @@ function classNameOf(error: unknown): string {
   if (typeof error !== "object" && typeof error !== "function") return typeof error;
   try {
     const prototype: unknown = Object.getPrototypeOf(error);
-    const constructorName: unknown =
+    // Reflect.get, not `.constructor`: the lint guard refuses `.constructor` access (SEC-081).
+    // The lookup is the same (inherited, getters run), and it stays inside the try.
+    const constructorValue: unknown =
       typeof prototype === "object" && prototype !== null
-        ? (prototype as { constructor?: { name?: unknown } }).constructor?.name
+        ? Reflect.get(prototype, "constructor")
+        : undefined;
+    const constructorName: unknown =
+      typeof constructorValue === "function" || typeof constructorValue === "object"
+        ? (constructorValue as { name?: unknown } | null)?.name
         : undefined;
     const fromConstructor = asLabel(constructorName, CLASS_NAME_PATTERN);
     if (fromConstructor !== undefined && fromConstructor !== "Object") return fromConstructor;
