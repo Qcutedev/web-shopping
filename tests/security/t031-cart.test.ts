@@ -10,8 +10,10 @@
  * are only shown by tests/integration/cart (code-review finding CR-T031-01), which did not exist
  * when this file was written.
  *
+ * SEC-053 (a cart holds any number of distinct lines) is FIXED (re-checked 2026-10-22 at 3e2f4d1):
+ * its cases are plain `it` and assert the cap of 50 lines.
+ *
  * Open findings, written as `it.fails` (passes while the flaw is present):
- *   SEC-053 a cart holds any number of distinct lines.
  *   SEC-054 a hidden line shows the product's current picture, slug, and title, including content
  *           a seller wrote after approval or an admin took down.
  */
@@ -486,41 +488,62 @@ describe("T-031 amounts come from the database at read time", () => {
 describe("SEC-053 a cart holds any number of distinct lines", () => {
   const DISTINCT = 1_000;
 
-  it.fails(
-    "a cart refuses new distinct lines past a fixed maximum",
-    async () => {
-      for (let i = 0; i < DISTINCT; i += 1) addProduct({ id: `bulk_${i}`, stock: 99 });
-      const refused: AppError[] = [];
-      for (let i = 0; i < DISTINCT; i += 1) {
-        try {
-          await addCartItem(ALICE, { productId: `bulk_${i}`, quantity: 99 });
-        } catch (error) {
-          if (!(error instanceof AppError)) throw error;
-          refused.push(error);
-        }
-      }
-      // The fix introduces a cap (for example MAX_CART_LINES) below DISTINCT.
-      expect(refused.length).toBeGreaterThan(0);
-      const max = (cartSchema as Record<string, unknown>).MAX_CART_LINES;
-      expect(typeof max).toBe("number");
-      expect(state.lines.length).toBe(max);
-    },
-    60_000,
-  );
-
-  it("documents the present behaviour: 1,000 distinct lines are stored and GET returns all", async () => {
+  // Flipped from `it.fails` on 2026-10-22 after the re-check of 3e2f4d1 (SEC-053 FIXED).
+  it("a cart refuses new distinct lines past a fixed maximum", async () => {
     for (let i = 0; i < DISTINCT; i += 1) addProduct({ id: `bulk_${i}`, stock: 99 });
+    const refused: AppError[] = [];
     for (let i = 0; i < DISTINCT; i += 1) {
-      await addCartItem(ALICE, { productId: `bulk_${i}`, quantity: 99 });
+      try {
+        await addCartItem(ALICE, { productId: `bulk_${i}`, quantity: 99 });
+      } catch (error) {
+        if (!(error instanceof AppError)) throw error;
+        refused.push(error);
+      }
     }
-    expect(state.lines.length).toBe(DISTINCT);
+    // The fix introduces a cap (for example MAX_CART_LINES) below DISTINCT.
+    expect(refused.length).toBeGreaterThan(0);
+    const max = (cartSchema as Record<string, unknown>).MAX_CART_LINES;
+    expect(typeof max).toBe("number");
+    expect(state.lines.length).toBe(max);
+  }, 60_000);
+
+  // Replaces "documents the present behaviour: 1,000 distinct lines are stored" (2026-10-22).
+  it("the cap is 50 lines: the 51st new line is 409 CONFLICT CART_LINE_LIMIT, nothing stored", async () => {
+    expect(cartSchema.MAX_CART_LINES).toBe(50);
+    for (let i = 0; i < 51; i += 1) addProduct({ id: `bulk_${i}`, stock: 99 });
+    for (let i = 0; i < 50; i += 1) {
+      await addCartItem(ALICE, { productId: `bulk_${i}`, quantity: 1 });
+    }
+    expect(state.lines.length).toBe(50);
+
+    const error = await refusal(addCartItem(ALICE, { productId: "bulk_50", quantity: 1 }));
+    expect(error.status).toBe(409);
+    expect(error.toPublic()).toEqual({
+      code: "CONFLICT",
+      message: error.message,
+      details: { reason: "CART_LINE_LIMIT" },
+    });
+    expect(state.lines.length).toBe(50);
+    expect(state.lines.some((l) => l.productId === "bulk_50")).toBe(false);
+
+    // A quantity change of an existing line is never refused for the cap.
+    await addCartItem(ALICE, { productId: "bulk_0", quantity: 1 });
+    expect(state.lines.find((l) => l.productId === "bulk_0")?.quantity).toBe(2);
+    expect(state.lines.length).toBe(50);
+
+    // The cap is per cart: another account is not affected.
+    await addCartItem(BOB, { productId: "bulk_50", quantity: 1 });
+
+    // Removing a line frees a place.
+    const first = state.lines.find((l) => l.productId === "bulk_1");
+    if (first === undefined) throw new Error("fixture");
+    await deleteCartItem(ALICE, first.id);
+    await addCartItem(ALICE, { productId: "bulk_50", quantity: 1 });
+
     const cart = await getCart(ALICE);
     const lines = cart.stores.reduce((n, s) => n + s.items.length, 0);
-    expect(lines).toBe(DISTINCT);
-    // One request reads every line and sends every product id in one IN list.
-    const inList = state.calls.find((c) => c.model === "product" && c.method === "findMany");
-    expect(visibleWhereIds((inList?.args as { where: Where }).where)).toHaveLength(DISTINCT);
-  }, 60_000);
+    expect(lines).toBe(50);
+  });
 });
 
 // ---------------------------------------------------------------------------------------------

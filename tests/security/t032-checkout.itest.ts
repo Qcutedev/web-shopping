@@ -8,8 +8,9 @@
  * The route handlers are called in process with a real `Request` and a real session cookie, as in
  * tests/integration/checkout. Each case makes its own users and products. Cases that document an
  * open finding say so; `it.fails` cases assert the secure behaviour and pass while it is missing.
+ * SEC-053 and SEC-056 are FIXED (re-checked 2026-10-22 at 3e2f4d1); their cases are plain `it`.
  */
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { checkout } from "@/modules/checkout";
 import type { PaymentProvider } from "@/modules/payments";
@@ -25,6 +26,7 @@ import {
 } from "../helpers/factories";
 import { diffSnapshots, snapshotDatabase } from "../helpers/snapshot";
 import { resetProcessRateLimiter, stubAuthEnvironment } from "../integration/auth/support";
+import { addItem, storedLines } from "../integration/cart/support";
 import {
   getOrder,
   listOrders,
@@ -333,36 +335,161 @@ describe("T-032 review: the checkout rate limit (section 6)", () => {
   });
 });
 
+/** A signed-in buyer with an address and a cart of `count` lines of distinct products, stock 5. */
+async function cartOfLines(count: number) {
+  const user = await signedIn();
+  const store = await createStore();
+  const category = await createCategory();
+  const { addressId, cartId } = await readyToBuy(user, []);
+  const ids: string[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const product = await createProduct({ storeId: store.id, categoryId: category.id, stock: 5 });
+    await createCartItem({ cartId, productId: product.id, quantity: 1 });
+    ids.push(product.id);
+  }
+  return { user, addressId, cartId, ids, store, category };
+}
+
 describe("SEC-053 in checkout: no bound on the number of lines one checkout takes stock for", () => {
-  // 120 lines: above the 100 that SEC-053 proposes. A fixed maximum must refuse the checkout
-  // before any product row is locked; today the whole cart is bought in one transaction.
-  it.fails(
-    "a cart above the proposed line maximum is refused and takes no stock",
-    async () => {
-      const user = await signedIn();
-      const store = await createStore();
-      const category = await createCategory();
-      const { addressId, cartId } = await readyToBuy(user, []);
-      const cart = { id: cartId };
-      const ids: string[] = [];
-      for (let i = 0; i < 120; i += 1) {
-        const product = await createProduct({
-          storeId: store.id,
-          categoryId: category.id,
-          stock: 5,
-        });
-        await createCartItem({ cartId: cart.id, productId: product.id, quantity: 1 });
-        ids.push(product.id);
-      }
-      const answer = await postCheckout(user, { addressId, paymentMethod: "MOCK" });
-      expect(answer.status).toBeGreaterThanOrEqual(400);
-      expect(await db.product.count({ where: { id: { in: ids }, stock: { lt: 5 } } })).toBe(0);
-    },
-    60_000,
-  );
+  // 120 lines: a cart stored before the cap (a legacy cart). Flipped from `it.fails` on 2026-10-22
+  // after the re-check of 3e2f4d1 (SEC-053 FIXED): the cap of 50 refuses it before any stock.
+  it("a cart above the line maximum is refused and takes no stock", async () => {
+    const { user, addressId, ids } = await cartOfLines(120);
+    const before = await snapshot();
+    const answer = await postCheckout(user, { addressId, paymentMethod: "MOCK" });
+    expect(answer.status).toBe(409);
+    expect(answer.body.error.code).toBe("CONFLICT");
+    expect(answer.body.error.details).toEqual({ reason: "CART_LINE_LIMIT" });
+    expect(await db.product.count({ where: { id: { in: ids }, stock: { lt: 5 } } })).toBe(0);
+    expect(diffSnapshots(before, await snapshot())).toEqual([]);
+  }, 60_000);
+
+  it("the boundary: 51 lines are refused with nothing written", async () => {
+    const { user, addressId, ids } = await cartOfLines(51);
+    const before = await snapshot();
+    const answer = await postCheckout(user, { addressId, paymentMethod: "MOCK" });
+    expect(answer.status).toBe(409);
+    expect(answer.body.error.details).toEqual({ reason: "CART_LINE_LIMIT" });
+    expect(await db.product.count({ where: { id: { in: ids }, stock: { lt: 5 } } })).toBe(0);
+    expect(diffSnapshots(before, await snapshot())).toEqual([]);
+  }, 60_000);
+
+  it("a legacy cart above the cap cannot grow: a new product is refused, nothing stored", async () => {
+    const { user, store, category } = await cartOfLines(60);
+    const extra = await createProduct({ storeId: store.id, categoryId: category.id, stock: 5 });
+    const answer = await addItem(user, { productId: extra.id, quantity: 1 });
+    expect(answer.status).toBe(409);
+    expect(answer.body.error.code).toBe("CONFLICT");
+    expect(answer.body.error.details).toEqual({ reason: "CART_LINE_LIMIT" });
+    const lines = await storedLines(user.userId);
+    expect(lines).toHaveLength(60);
+    expect(lines.some((l) => l.productId === extra.id)).toBe(false);
+  }, 60_000);
+
+  it("concurrent new-line adds into a cart of 49 store exactly one line", async () => {
+    const { user, store, category } = await cartOfLines(49);
+    const extras = await Promise.all(
+      Array.from({ length: 6 }, () =>
+        createProduct({ storeId: store.id, categoryId: category.id, stock: 5 }),
+      ),
+    );
+    const answers = await Promise.all(
+      extras.map((p) => addItem(user, { productId: p.id, quantity: 1 })),
+    );
+    expect(answers.filter((a) => a.status === 201 || a.status === 200)).toHaveLength(1);
+    for (const a of answers.filter((x) => x.status >= 400)) {
+      expect(a.status).toBe(409);
+      expect(a.body.error.details).toEqual({ reason: "CART_LINE_LIMIT" });
+    }
+    expect(await storedLines(user.userId)).toHaveLength(50);
+  }, 60_000);
+
+  // Residual risk, documented (not a bypass of the add or checkout cap): items a failed payment
+  // returns are merged into the cart without the cap (BR-20, BR-32), so lines the buyer added while
+  // the payment was open come on top. The result is bounded per open order, and the cart then
+  // refuses both a new line and a checkout until the buyer removes lines.
+  it("documented: a failed payment can return lines above the cap; add and checkout then refuse", async () => {
+    const { user, addressId, store, category } = await cartOfLines(50);
+    const others = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        createProduct({ storeId: store.id, categoryId: category.id, stock: 5 }),
+      ),
+    );
+    // The buyer's adds commit while the first order's payment is open (the cart lock is free then).
+    const decliningAfterAdds: PaymentProvider = {
+      name: "MOCK",
+      isSimulated: true,
+      charge: async () => {
+        for (const p of others) {
+          const added = await addItem(user, { productId: p.id, quantity: 1 });
+          expect(added.status).toBe(201);
+        }
+        return { outcome: "DECLINED", failureReason: "SIMULATED_DECLINE" };
+      },
+    };
+    const result = await checkout(
+      { userId: user.userId, role: "CUSTOMER", storeId: null, storeStatus: null },
+      newKey(),
+      { addressId, paymentMethod: "MOCK", mockOutcome: "FAIL" },
+      { provider: decliningAfterAdds },
+    );
+    expect(result.order.paymentStatus).toBe("FAILED");
+    expect(await storedLines(user.userId)).toHaveLength(55);
+
+    const extra = await createProduct({ storeId: store.id, categoryId: category.id, stock: 5 });
+    const add = await addItem(user, { productId: extra.id, quantity: 1 });
+    expect(add.status).toBe(409);
+    expect(add.body.error.details).toEqual({ reason: "CART_LINE_LIMIT" });
+    const again = await postCheckout(user, { addressId, paymentMethod: "MOCK" });
+    expect(again.status).toBe(409);
+    expect(again.body.error.details).toEqual({ reason: "CART_LINE_LIMIT" });
+  }, 60_000);
 });
 
-describe("SEC-056 (documented behaviour): with the mock any account takes any stock as PAID", () => {
+describe("SEC-056 in production: the mock provider is refused and checkout writes nothing", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("NODE_ENV=production: 500 INTERNAL_ERROR with the fixed body, no lock, no stock, no order", async () => {
+    const user = await signedIn();
+    const product = await createProduct({ priceSatang: 1_999_900, stock: 99 });
+    const { addressId } = await readyToBuy(user, [{ productId: product.id, quantity: 99 }]);
+    const before = await snapshot();
+    vi.stubEnv("NODE_ENV", "production");
+    const answer = await postCheckout(user, {
+      addressId,
+      paymentMethod: "MOCK",
+      mockOutcome: "SUCCESS",
+    });
+    vi.unstubAllEnvs();
+    expect(answer.status).toBe(500);
+    expect(answer.body.error.code).toBe("INTERNAL_ERROR");
+    expect(answer.body.error.details).toEqual({});
+    const text = JSON.stringify(answer.body);
+    expect(text).not.toMatch(/mock|SEC-056|NODE_ENV|production/i);
+    expect(await stockOf(product.id)).toBe(99);
+    expect(await db.order.count({ where: { userId: user.userId } })).toBe(0);
+    expect(diffSnapshots(before, await snapshot())).toEqual([]);
+  });
+
+  it("a repeat of a paid order's key in production is refused too and changes nothing", async () => {
+    const user = await signedIn();
+    const product = await createProduct({ stock: 5 });
+    const { addressId } = await readyToBuy(user, [{ productId: product.id, quantity: 1 }]);
+    const key = newKey();
+    const paid = await postCheckout(user, { addressId, paymentMethod: "MOCK" }, { key });
+    expect(paid.status).toBe(201);
+    const before = await snapshot();
+    vi.stubEnv("NODE_ENV", "production");
+    const repeat = await postCheckout(user, { addressId, paymentMethod: "MOCK" }, { key });
+    vi.unstubAllEnvs();
+    expect(repeat.status).toBe(500);
+    expect(diffSnapshots(before, await snapshot())).toEqual([]);
+  });
+});
+
+describe("SEC-056 (accepted by design outside production, D-011): with the mock any account takes any stock as PAID", () => {
   it("one account buys a seller's whole stock for nothing and the order is PAID", async () => {
     const user = await signedIn();
     const product = await createProduct({ priceSatang: 1_999_900, stock: 99 });

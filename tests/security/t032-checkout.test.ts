@@ -12,7 +12,8 @@
  *      stock statement carries its three guards, no route can reach a payment transition.
  *   3. The request schemas: the body is strict (no amount, quantity, owner, or store), and the
  *      Idempotency-Key header has exactly one accepted form.
- * Open findings are `it.fails` cases whose body asserts the secure behaviour (SEC-055, SEC-056).
+ * Findings were written as `it.fails` cases whose body asserts the secure behaviour. SEC-055 and
+ * SEC-056 are FIXED and their cases are plain `it` (SEC-056 re-checked 2026-10-22 at 3e2f4d1).
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
@@ -345,10 +346,31 @@ describe("SEC-056: the mock provider pays any order in a production server", () 
     expect(getPaymentProvider().isSimulated).toBe(true);
   });
 
-  // Pins remediation (a) of SEC-056. If the owner accepts the risk or chooses another control,
-  // this case is replaced by one that asserts the chosen control, not deleted.
-  it.fails("in production the mock provider is refused unless the owner switched it on", () => {
+  // Pins remediation (a) of SEC-056 as the owner decided it on 2026-10-22: no switch. Flipped from
+  // `it.fails` after the re-check of 3e2f4d1 (SEC-056 FIXED).
+  it("in production the mock provider is always refused", () => {
     vi.stubEnv("NODE_ENV", "production");
     expect(() => getPaymentProvider()).toThrow();
+  });
+
+  it("no environment variable switches the mock back on in production", () => {
+    const source = read("src/modules/payments/provider.ts");
+    // The only environment value the provider reads is NODE_ENV.
+    const envReads = source.match(/process\.env(?:\.[A-Za-z_]+|\[[^\]]*\])/g) ?? [];
+    expect([...new Set(envReads)]).toEqual(["process.env.NODE_ENV"]);
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("MOCK_PAYMENT_ENABLED", "true");
+    vi.stubEnv("ALLOW_MOCK_PAYMENT", "1");
+    vi.stubEnv("PAYMENT_PROVIDER", "MOCK");
+    expect(() => getPaymentProvider()).toThrow();
+  });
+
+  it("checkout resolves the provider before it opens its transaction", () => {
+    const source = read("src/modules/checkout/service.ts");
+    const body = source.slice(source.indexOf("export async function checkout("));
+    const resolve = body.indexOf("getPaymentProvider()");
+    const transaction = body.indexOf("inCheckoutTransaction(");
+    expect(resolve).toBeGreaterThan(-1);
+    expect(transaction).toBeGreaterThan(resolve);
   });
 });
