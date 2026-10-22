@@ -12,7 +12,7 @@ Not started: checkout UI (T-034), reviews, seller onboarding and seller products
 
 ## Resume here
 
-Session 100 finished. No agent is running.
+Session 101 started. Running: qa (SEC-080: `e2e/support/env-file-scan.ts`, `tests/security/sec079-recheck.test.ts`, `docs/SECURITY.md`); frontend (`CART_LINE_LIMIT` text: `src/i18n/th.ts` and its consumers); security (CR-T032-10 import-guard probe: `tests/**`, `docs/SECURITY.md`).
 
 Read first in a new session: CLAUDE.md, this file, `git status`, `git diff`.
 
