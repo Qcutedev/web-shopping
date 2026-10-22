@@ -53,7 +53,8 @@ async function isPainted(el: Locator): Promise<boolean> {
  * One call per fresh `goto` (CR-150): the walk starts from wherever the browser's sequential
  * focus start point is, and `blur()` does not reset that point. A second call on the same page
  * would start after the last stop of the first, so its answer would not cover the whole page.
- */ async function tabbingReaches(page: Page, selector: string): Promise<boolean> {
+ */
+async function tabbingReaches(page: Page, selector: string): Promise<boolean> {
   await page.evaluate(() => {
     (document.activeElement as HTMLElement | null)?.blur();
     document.querySelectorAll("[data-e2e-tab-seen]").forEach((el) => {
