@@ -12,21 +12,23 @@ Not started: checkout UI (T-034), reviews, seller onboarding and seller products
 
 ## Resume here
 
-Session 101 started. Running: qa (SEC-080: `e2e/support/env-file-scan.ts`, `tests/security/sec079-recheck.test.ts`, `docs/SECURITY.md`); frontend (`CART_LINE_LIMIT` text: `src/i18n/th.ts` and its consumers); security (CR-T032-10 import-guard probe: `tests/**`, `docs/SECURITY.md`).
+Session 101 finished. No agent is running.
 
 Read first in a new session: CLAUDE.md, this file, `git status`, `git diff`.
 
-Done in session 100: SEC-079, SEC-053, SEC-056 FIXED and re-checked by security. CR-162 to CR-166 done. SEC-053 uses `409 CONFLICT` reason `CART_LINE_LIMIT` (cap 50 lines). SEC-056 has no override switch. A mojibake in `docs/SECURITY.md` (14 lines, from the security commit) was repaired from `HEAD~1` text.
+Done in session 101 (local commits, not pushed): SEC-080 fixed by qa (`c2bf1f9`), status OPEN until security re-checks. `CART_LINE_LIMIT` Thai text in `src/i18n/th.ts` and `apiErrorMessage` accepts `reason` (`6f0b26f`). CR-T032-10 import-guard probe (`97cb467`), test-enforced; it found SEC-081.
 
 Open:
-- SEC-080 (Low): `scanEnvText` in `e2e/support/env-file-scan.ts` empties `process.env`, so `PGOPTIONS=${X}` reads empty and is not refused. Fix (qa), flip the `it.fails` in `tests/security/sec079-recheck.test.ts`, correct the SEC-079 "Fix" note.
-- `src/i18n/th.ts`: Thai text for `CART_LINE_LIMIT` (cart add and checkout); product-requirements approves the wording (frontend).
-- devops optional: start-up log or fail-fast when NODE_ENV=production, since checkout is then disabled (only the mock provider exists).
-- Residual: `returnItemToCart` has no 50-line cap; carts stored above 50 before the fix keep their lines.
+- SEC-080: security re-check. One `--project security` run had 1 unnamed failure, 4 reruns green; watch for flake.
+- `CART_LINE_LIMIT` Thai wording: product-requirements must approve. Cart and checkout views must pass `result.reason` to `apiErrorMessage`.
+- SEC-081 (Low, OPEN): inline eslint-disable, `createRequire`, `require` aliasing bypass the db import guard. Fix: orchestrator `eslint.config.mjs` (`noInlineConfig` for non-test `src/**`, `no-restricted-syntax` selectors), flip 6 `it.fails` in `tests/security/cr-t032-10-import-guards.test.ts`; devops adds probes to `scripts/check-import-guards.mjs`.
+- Suggested: move payment transitions out of public `src/modules/orders/index.ts` (backend-api).
+- devops optional: start-up log or fail-fast when NODE_ENV=production (checkout disabled, only mock provider).
+- Residual: `returnItemToCart` has no 50-line cap; carts stored above 50 keep their lines.
 
 Next, in order:
-1. qa: SEC-080. frontend: `CART_LINE_LIMIT` text.
-2. T-032 follow-ups: CR-T032-10 import-guard probe (security); T-033 CC-12; T-032 and T-031 code-review/security status still need re-checking.
+1. SEC-081 fix and SEC-080 re-check (security).
+2. T-033 CC-12; T-032 and T-031 code-review/security status still need re-checking.
 3. T-034 checkout UI; seller and admin work.
 
 Do not run two e2e suites at once: they share database `marketplace_e2e` and port 3100.
