@@ -19,6 +19,20 @@ describe("apiErrorMessage", () => {
     expect(apiErrorMessage({ status: 409, code: "CONFLICT" })).toBe(th.errors.unknown);
   });
 
+  it("maps the checkout codes to their own Thai copy", () => {
+    const status = 409;
+    expect(apiErrorMessage({ status, code: "CART_EMPTY" })).toBe(th.errors.cartEmpty);
+    expect(apiErrorMessage({ status: 422, code: "ORDER_LIMIT_EXCEEDED" })).toBe(
+      th.errors.orderLimit,
+    );
+    expect(apiErrorMessage({ status, code: "PRODUCT_UNAVAILABLE" })).toBe(
+      th.errors.productUnavailable,
+    );
+    expect(apiErrorMessage({ status, code: "INSUFFICIENT_STOCK" })).toBe(
+      th.errors.insufficientStock,
+    );
+  });
+
   it("ignores the reason on other codes", () => {
     expect(
       apiErrorMessage({ status: 400, code: "VALIDATION_ERROR", reason: "CART_LINE_LIMIT" }),

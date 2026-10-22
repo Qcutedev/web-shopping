@@ -63,6 +63,179 @@ export const th = {
     // Items returned after a failed payment were cut by the limit of 99 or by stock
     // (D-028, Q35 (c); BR-32).
     returnedQuantityCut: "ปรับจำนวนในตะกร้าเป็น {quantity} ชิ้น",
+    // Proposals (T-034 cart page): wording written by the frontend agent, not yet approved by the
+    // owner. A name in braces is a placeholder filled with `fill`.
+    title: "ตะกร้าสินค้า",
+    description: "ตรวจสอบสินค้าและจำนวนก่อนชำระเงิน ราคาและยอดรวมคำนวณโดยระบบ",
+    loading: "กำลังโหลดตะกร้าสินค้า",
+    listLabel: "สินค้าในตะกร้า",
+    emptyTitle: "ยังไม่มีสินค้าในตะกร้า",
+    emptyDescription: "เลือกสินค้าที่ถูกใจแล้วเพิ่มลงตะกร้าได้เลย",
+    emptyAction: "เลือกซื้อสินค้า",
+    // {name} is the store name.
+    storeGroupLabel: "สินค้าจากร้าน {name}",
+    storeSubtotal: "ราคาสินค้าของร้านนี้",
+    storeShipping: "ค่าจัดส่งของร้านนี้",
+    unitPrice: "ราคาต่อชิ้น",
+    lineTotal: "รวม",
+    quantity: "จำนวน",
+    decrease: "ลดจำนวน",
+    increase: "เพิ่มจำนวน",
+    remove: "นำออก",
+    removed: "นำสินค้าออกจากตะกร้าแล้ว",
+    quantityUpdated: "ปรับจำนวนสินค้าแล้ว",
+    // Marks on a line that cannot be bought (BR-22, BR-38). The wording of the hidden-line mark is
+    // an open question (REQUIREMENTS Q38).
+    soldOut: "สินค้าหมด",
+    soldOutNote: "สินค้านี้หมดแล้ว ไม่นับรวมในยอดและสั่งซื้อไม่ได้ นำออกจากตะกร้าเพื่อชำระเงินต่อ",
+    notAvailable: "สินค้าไม่พร้อมจำหน่าย",
+    notAvailableNote:
+      "สินค้านี้ไม่พร้อมจำหน่ายในขณะนี้ ไม่นับรวมในยอดและสั่งซื้อไม่ได้ นำออกจากตะกร้าเพื่อชำระเงินต่อ",
+    blockedNote: "มีสินค้าที่สั่งซื้อไม่ได้ในตะกร้า นำออกก่อนจึงจะชำระเงินได้",
+    summaryTitle: "สรุปคำสั่งซื้อ",
+    itemsSubtotal: "ราคาสินค้า",
+    shippingTotal: "ค่าจัดส่ง",
+    shippingSimulatedNote: "ค่าจัดส่งเป็นอัตราคงที่จำลอง ไม่ได้คิดจากบริษัทขนส่งจริง",
+    grandTotal: "ยอดรวมทั้งหมด",
+    totalsNote: "ยอดทั้งหมดคำนวณโดยระบบจากราคาปัจจุบัน",
+    checkout: "ไปชำระเงิน",
+  },
+  // Proposals (T-034 checkout): wording written by the frontend agent, not yet approved.
+  checkout: {
+    title: "ชำระเงิน",
+    description: "เลือกที่อยู่จัดส่งและตรวจสอบยอดรวมก่อนยืนยันคำสั่งซื้อ",
+    loading: "กำลังโหลดข้อมูลการชำระเงิน",
+    backToCart: "กลับไปตะกร้าสินค้า",
+    emptyTitle: "ไม่มีสินค้าให้ชำระเงิน",
+    emptyDescription: "ตะกร้าสินค้าว่างเปล่า เลือกสินค้าก่อนชำระเงิน",
+    emptyAction: "เลือกซื้อสินค้า",
+    blockedTitle: "ยังชำระเงินไม่ได้",
+    blockedDescription: "มีสินค้าที่สั่งซื้อไม่ได้ในตะกร้า กรุณานำออกก่อนชำระเงิน",
+    addressTitle: "ที่อยู่จัดส่ง",
+    addressLegend: "เลือกที่อยู่จัดส่ง",
+    manageAddresses: "จัดการที่อยู่จัดส่ง",
+    noAddressTitle: "ยังไม่มีที่อยู่จัดส่ง",
+    noAddressDescription: "เพิ่มที่อยู่จัดส่งก่อน แล้วกลับมาชำระเงิน",
+    noAddressAction: "เพิ่มที่อยู่จัดส่ง",
+    addressRequired: "กรุณาเลือกที่อยู่จัดส่ง",
+    shippingTitle: "การจัดส่ง",
+    shippingNote:
+      "ค่าจัดส่งเป็นอัตราคงที่ต่อร้านค้า และเป็นการจัดส่งจำลอง ไม่ได้ติดต่อบริษัทขนส่งจริง",
+    paymentTitle: "วิธีชำระเงิน",
+    paymentMock: "ชำระเงินจำลอง (ไม่ใช้เงินจริง)",
+    paymentMockNote: "นี่คือการชำระเงินจำลอง ไม่มีการตัดเงินหรือเรียกเก็บเงินจริงใดๆ",
+    failOption: "ทดสอบกรณีชำระเงินไม่สำเร็จ (จำลอง)",
+    failOptionNote:
+      "ตัวเลือกสำหรับทดสอบเท่านั้น: ระบบจำลองจะปฏิเสธการชำระเงิน คำสั่งซื้อจะถูกบันทึกเป็นชำระเงินไม่สำเร็จ และสินค้าจะกลับเข้าตะกร้า",
+    summaryTitle: "สรุปคำสั่งซื้อ",
+    itemsLabel: "สินค้าที่จะสั่งซื้อ",
+    submit: "ยืนยันคำสั่งซื้อ (ชำระเงินจำลอง)",
+    submitting: "กำลังดำเนินการ",
+    confirmAgain: "ยืนยันคำสั่งซื้ออีกครั้ง (ชำระเงินจำลอง)",
+    // The customer must confirm again after a refusal (BR-22, BR-30; D-026 OQ-30).
+    refusedTitle: "ยังไม่มีการสร้างคำสั่งซื้อ",
+    refusedBody:
+      "สินค้าบางรายการเปลี่ยนแปลงไป ไม่มีการเรียกเก็บเงินและยังไม่มีคำสั่งซื้อ กรุณาตรวจสอบรายการและยอดรวมใหม่ แล้วกดยืนยันอีกครั้งหากต้องการสั่งซื้อต่อ",
+    refusedListLabel: "สินค้าที่มีการเปลี่ยนแปลง",
+    // Each text follows the product title, which is shown apart from it, isolated for bidirectional
+    // text (SEC-033).
+    refusedNotAvailable: "ไม่พร้อมจำหน่ายแล้ว ไม่นับรวมในยอด นำออกจากตะกร้าก่อนจึงจะชำระเงินได้",
+    refusedSoldOut: "สินค้าหมด ไม่นับรวมในยอด นำออกจากตะกร้าก่อนจึงจะชำระเงินได้",
+    // {requested} is what the line held; {available} the new quantity.
+    refusedLowered:
+      "สินค้าเหลือ {available} ชิ้น (เดิม {requested} ชิ้น) ระบบปรับจำนวนเป็น {available} ชิ้นให้แล้ว",
+    refusedOwnStore: "เป็นสินค้าของร้านคุณเอง สั่งซื้อไม่ได้ นำออกจากตะกร้าก่อน",
+    refusedUnknownItem: "สินค้าบางรายการ",
+    refusedNewTotal: "ยอดรวมใหม่",
+    // Outcome of a request whose answer was lost (API_CONTRACTS 5.5.3).
+    unknownTitle: "ยังไม่ทราบผลการสั่งซื้อ",
+    unknownBody:
+      "ไม่ได้รับคำตอบจากระบบ คำสั่งซื้ออาจถูกสร้างแล้วหรือยังไม่ถูกสร้าง กดตรวจสอบสถานะเพื่อให้ระบบดูตะกร้าก่อนดำเนินการต่อ",
+    unknownCheck: "ตรวจสอบสถานะ",
+    unknownChanged:
+      "ตะกร้าสินค้ามีการเปลี่ยนแปลงตั้งแต่ครั้งก่อน กรุณาตรวจสอบรายการและยอดรวมใหม่ก่อนยืนยัน",
+    viewOrders: "ดูรายการสั่งซื้อ",
+  },
+  // Proposals (T-034 orders): wording written by the frontend agent, not yet approved.
+  orders: {
+    title: "รายการสั่งซื้อของฉัน",
+    description: "ดูประวัติและสถานะคำสั่งซื้อ รวมถึงคำสั่งซื้อที่ชำระเงินไม่สำเร็จ",
+    listLabel: "รายการสั่งซื้อ",
+    // {total} is the number of orders.
+    count: "ทั้งหมด {total} คำสั่งซื้อ",
+    emptyTitle: "ยังไม่มีคำสั่งซื้อ",
+    emptyDescription: "เมื่อสั่งซื้อสินค้า คำสั่งซื้อจะแสดงที่นี่",
+    emptyAction: "เลือกซื้อสินค้า",
+    pageEmptyTitle: "ไม่มีคำสั่งซื้อในหน้านี้",
+    pageEmptyAction: "กลับไปหน้าแรกของรายการ",
+    loading: "กำลังโหลดคำสั่งซื้อ",
+    orderNumber: "หมายเลขคำสั่งซื้อ",
+    placedAt: "สั่งเมื่อ",
+    total: "ยอดรวม",
+    // {count} is the number of item lines.
+    itemCount: "{count} รายการสินค้า",
+    view: "ดูรายละเอียด",
+    detailTitle: "รายละเอียดคำสั่งซื้อ",
+    backToList: "กลับไปรายการสั่งซื้อ",
+    status: {
+      payment: {
+        PENDING: "รอผลการชำระเงิน",
+        PAID: "ชำระเงินแล้ว (จำลอง)",
+        // FAILED uses th.order.paymentFailed (approved text).
+      },
+      fulfilment: {
+        PENDING: "รอร้านค้ายืนยัน",
+        PROCESSING: "กำลังเตรียมสินค้า",
+        SHIPPED: "จัดส่งแล้ว",
+        DELIVERED: "จัดส่งสำเร็จ",
+        CANCELLED: "ยกเลิกแล้ว",
+      },
+    },
+    confirmation: {
+      paidTitle: "สั่งซื้อสำเร็จ",
+      paidBody: "ระบบบันทึกการชำระเงินจำลองแล้ว ไม่มีการตัดเงินจริง ร้านค้าจะเตรียมสินค้าให้คุณ",
+      pendingTitle: "รอผลการชำระเงิน",
+      pendingBody:
+        "สร้างคำสั่งซื้อแล้ว แต่ระบบยังไม่ได้รับผลการชำระเงินจำลอง หากไม่มีผลภายใน 15 นาที คำสั่งซื้อจะถูกยกเลิกและสินค้าจะกลับเข้าตะกร้า",
+      failedBody:
+        "การชำระเงินจำลองไม่สำเร็จ คำสั่งซื้อนี้ถูกยกเลิก ไม่มีการตัดเงิน และสินค้ากลับเข้าตะกร้าของคุณแล้ว สั่งซื้ออีกครั้งได้จากตะกร้า",
+      failedTimeoutBody:
+        "ระบบไม่ได้รับผลการชำระเงินจำลองภายในเวลาที่กำหนด คำสั่งซื้อนี้ถูกยกเลิก ไม่มีการตัดเงิน และสินค้ากลับเข้าตะกร้าของคุณแล้ว",
+      goToCart: "ไปที่ตะกร้าสินค้า",
+    },
+    detail: {
+      summaryTitle: "ข้อมูลคำสั่งซื้อ",
+      payment: "การชำระเงิน",
+      paidAt: "ชำระเงินเมื่อ",
+      paymentMethod: "วิธีชำระเงิน",
+      paymentMock: "ชำระเงินจำลอง (ไม่ใช้เงินจริง)",
+      addressTitle: "ที่อยู่จัดส่ง",
+      addressNote: "สำเนาที่อยู่ ณ วันที่สั่งซื้อ",
+      fulfilment: "สถานะการจัดส่ง",
+      itemsLabel: "สินค้าในคำสั่งซื้อ",
+      // {count} is the number of pieces.
+      pieces: "{count} ชิ้น",
+      unitPrice: "ราคาต่อชิ้น",
+      lineTotal: "รวม",
+      storeSubtotal: "ราคาสินค้าของร้านนี้",
+      storeShipping: "ค่าจัดส่งของร้านนี้",
+      shipmentTitle: "การจัดส่ง",
+      shipmentSimulated: "การจัดส่งจำลอง ไม่ได้ติดต่อบริษัทขนส่งจริง",
+      carrier: "บริษัทขนส่ง",
+      tracking: "เลขพัสดุ",
+      shippedAt: "จัดส่งเมื่อ",
+      deliveredAt: "จัดส่งสำเร็จเมื่อ",
+      notProvided: "ไม่ได้ระบุ",
+      noShipment: "ยังไม่มีการจัดส่ง",
+      itemsSubtotal: "ราคาสินค้า",
+      shippingTotal: "ค่าจัดส่ง",
+      grandTotal: "ยอดรวมทั้งหมด",
+      cancelledPaymentFailed: "ยกเลิกโดยระบบเพราะชำระเงินไม่สำเร็จ",
+      cancelledNote: "ยกเลิกแล้ว",
+      // {title} is the product title.
+      cartReturnTitle: "สินค้ากลับเข้าตะกร้า",
+      cartReturnBody: "สินค้าในคำสั่งซื้อนี้ถูกคืนเข้าตะกร้าของคุณแล้ว",
+    },
   },
   order: {
     // Mark on an order whose payment failed (D-028, Q35 (a); BR-20).
@@ -76,6 +249,12 @@ export const th = {
     notFound: "ไม่พบข้อมูลที่ต้องการ อาจถูกลบไปแล้ว",
     validation: "ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบแล้วลองอีกครั้ง",
     rateLimited: "ทำรายการถี่เกินไป กรุณารอสักครู่แล้วลองอีกครั้ง",
+    // Checkout and cart codes (proposals, T-034).
+    cartEmpty: "ตะกร้าสินค้าว่างเปล่า ไม่มีสินค้าให้ชำระเงิน",
+    orderLimit:
+      "ยอดรวมของคำสั่งซื้อสูงเกินกำหนด (ไม่เกิน 20,000,000 บาท) กรุณาลดจำนวนสินค้าในตะกร้า",
+    productUnavailable: "มีสินค้าบางรายการที่ไม่สามารถสั่งซื้อได้แล้ว กรุณาตรวจสอบตะกร้า",
+    insufficientStock: "สินค้าบางรายการมีไม่เพียงพอ กรุณาลดจำนวนหรือลบสินค้าออกจากตะกร้า",
     network: "เชื่อมต่อไม่ได้ กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองอีกครั้ง",
     unknown: "เกิดข้อผิดพลาด กรุณาลองอีกครั้ง",
     // 409 CONFLICT by `details.reason` (API_CONTRACTS 2.3). Wording is a proposal: product-requirements

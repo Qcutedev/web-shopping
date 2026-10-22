@@ -27,6 +27,14 @@ export function apiErrorMessage(
       return th.errors.validation;
     case "RATE_LIMITED":
       return th.errors.rateLimited;
+    case "CART_EMPTY":
+      return th.errors.cartEmpty;
+    case "ORDER_LIMIT_EXCEEDED":
+      return th.errors.orderLimit;
+    case "PRODUCT_UNAVAILABLE":
+      return th.errors.productUnavailable;
+    case "INSUFFICIENT_STOCK":
+      return th.errors.insufficientStock;
     default:
       break;
   }

@@ -21,6 +21,11 @@ export interface ApiFailure {
   code: string;
   /** `details.reason` of a `409 CONFLICT` (API_CONTRACTS 2.3), when the envelope carries one. */
   reason?: string;
+  /**
+   * `details` of the envelope when it carries a list `items` (the refusal of API_CONTRACTS 5.5.3),
+   * as sent. Unchecked: read it with a parser that validates the shape.
+   */
+  details?: Record<string, unknown>;
   fields: ApiFieldError[];
   requestId: string | null;
 }
@@ -37,6 +42,8 @@ export interface ApiRequestOptions {
   method: "GET" | "POST" | "PATCH" | "DELETE";
   /** JSON body. Omit for a mutation without a body. */
   body?: unknown;
+  /** Extra request headers, for example `Idempotency-Key`. */
+  headers?: Readonly<Record<string, string>>;
   /** For tests. Defaults to the global `fetch`. */
   fetchImpl?: typeof fetch;
 }
@@ -62,7 +69,7 @@ function readFields(details: unknown): ApiFieldError[] {
 
 export async function apiRequest<T>(
   path: string,
-  { method, body, fetchImpl }: ApiRequestOptions,
+  { method, body, headers, fetchImpl }: ApiRequestOptions,
 ): Promise<ApiResult<T>> {
   const doFetch = fetchImpl ?? fetch;
   let response: Response;
@@ -72,10 +79,11 @@ export async function apiRequest<T>(
       // Every mutation sends a JSON content type, with or without a body (API_CONTRACTS 1.2).
       headers:
         method === "GET"
-          ? { Accept: "application/json" }
+          ? { Accept: "application/json", ...headers }
           : {
               Accept: "application/json",
               "Content-Type": "application/json",
+              ...headers,
             },
       body: body === undefined ? undefined : JSON.stringify(body),
       credentials: "same-origin",
@@ -140,6 +148,9 @@ async function readEnvelope<T>(response: Response): Promise<ApiResult<T>> {
     status: response.status,
     code: typeof error.code === "string" ? error.code : "UNKNOWN",
     ...(reason === undefined ? {} : { reason }),
+    ...(isRecord(error.details) && Array.isArray(error.details.items)
+      ? { details: error.details }
+      : {}),
     fields: readFields(error.details),
     requestId: typeof error.requestId === "string" ? error.requestId : null,
   };

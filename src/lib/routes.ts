@@ -9,6 +9,8 @@ export const ROUTES = {
   home: "/",
   search: "/search",
   cart: "/cart",
+  checkout: "/checkout",
+  orders: "/orders",
   signIn: "/sign-in",
   openStore: "/seller/apply",
   // Account area (T-030). `src/proxy.ts` already gates `/account/*`.
@@ -43,3 +45,8 @@ export function signInHref(next: string): string {
 
 /** Name of the query parameter that the search page reads (`q` of GET /api/v1/products). */
 export const SEARCH_QUERY_PARAM = "q";
+
+/** Order detail page path. The id is percent-encoded into the path (V11). */
+export function orderHref(id: string): string {
+  return `${ROUTES.orders}/${encodeURIComponent(id)}`;
+}
