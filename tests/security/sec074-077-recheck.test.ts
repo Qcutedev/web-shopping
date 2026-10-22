@@ -9,8 +9,8 @@
  * - SEC-076: `--hostname 127.0.0.1` and an IPv4 loopback origin.
  * - SEC-077: the canary check refuses a server that does not read the e2e database, and runs
  *   before the first request that writes.
- * - SEC-078 (open, `it.fails`): the scanner misses an assignment that `@next/env` reads after a
- *   quoted value followed by U+2028 or U+2029.
+ * - SEC-078: the scanner refuses an assignment that `@next/env` reads after a quoted value
+ *   followed by U+2028 or U+2029 (fixed, plain `it`).
  *
  * Invisible characters are written as escapes only (SEC-043).
  */
@@ -101,9 +101,10 @@ describe("SEC-074 re-check: the scanner against @next/env", () => {
     ["U+2028", "\u2028"],
     ["U+2029", "\u2029"],
   ] as const) {
-    it.fails(`SEC-078: refuses PGOPTIONS after a quoted value and ${label}`, () => {
+    // `.env`, not `.env.local`: under vitest NODE_ENV is test, and @next/env skips `.env.local` then.
+    it(`SEC-078: refuses PGOPTIONS after a quoted value and ${label}`, () => {
       const text = `A='1'${separator}PGOPTIONS=-c role=x\n`;
-      expect(nextEnvDriverNames(".env.local", text)).toEqual(["PGOPTIONS"]);
+      expect(nextEnvDriverNames(".env", text)).toEqual(["PGOPTIONS"]);
       expect(scannerRefuses(text)).toBe(true);
     });
   }
@@ -112,7 +113,7 @@ describe("SEC-074 re-check: the scanner against @next/env", () => {
 describe("SEC-074 re-check: the empty driver values survive the launch chain", () => {
   // Same shape as Playwright 1.64 (lib/runner/index.js: spawn with `shell: true`, process.env
   // under webServer.env), then `pnpm exec node`, then a fork like `next dev` does, then
-  // @next/env over a file that SEC-078's scanner gap lets through.
+  // @next/env over a file with a quoted value and U+2028 (the SEC-078 shape).
   it("PGOPTIONS and NODE_PG_FORCE_NATIVE stay empty after @next/env, NODE_ENV is development", async () => {
     const dir = mkdtempSync(join(tmpdir(), "sec074-chain-"));
     try {

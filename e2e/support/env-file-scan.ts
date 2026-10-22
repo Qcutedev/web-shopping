@@ -4,8 +4,10 @@
  * The server loads its files with `@next/env` (dotenv syntax). Node's `parseEnv` disagrees with
  * that parser on a byte order mark, on lone CR line ends, and on the colon form `NAME: value`, so
  * a file could set `PGOPTIONS` for the server while the check saw nothing. This scanner is
- * deliberately lenient and over-reports: it accepts every form dotenv accepts. A line that dotenv
- * would not read as an assignment may also be flagged; refusing a run for it is the safe side.
+ * deliberately lenient and over-reports: it is built to read every form known to differ (the list
+ * above, plus the JavaScript line terminators U+2028 and U+2029, SEC-078), not proven to read every
+ * form dotenv reads. A line that dotenv would not read as an assignment may also be flagged;
+ * refusing a run for it is the safe side.
  *
  * Pure: no file access, no environment, no database. Safe to import from a unit test.
  */
@@ -22,6 +24,11 @@ export const NEXT_ENV_FILE_NAMES = [
   ".env.test.local",
 ] as const;
 
+// JavaScript `^`/`$` in multiline mode, which dotenv uses, also break at U+2028 and U+2029.
+const LINE_END = new RegExp(
+  `\r\n|[\r\n${String.fromCodePoint(0x2028)}${String.fromCodePoint(0x2029)}]`,
+);
+
 const ASSIGNMENT = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*[=:]\s*(.*)$/;
 
 function cleanValue(rest: string): string {
@@ -37,11 +44,12 @@ function cleanValue(rest: string): string {
 
 /**
  * Every `NAME=value` and `NAME: value` assignment of an env file text, last one wins. Names keep
- * their letter case. A leading byte order mark is dropped; CRLF, CR, and LF all end a line.
+ * their letter case. A leading byte order mark is dropped; CRLF, CR, LF, U+2028, and U+2029 all
+ * end a line.
  */
 export function scanEnvText(text: string): Record<string, string> {
   const result: Record<string, string> = {};
-  const lines = text.replace(/^\uFEFF/, "").split(/\r\n|\r|\n/);
+  const lines = text.replace(/^\uFEFF/, "").split(LINE_END);
   for (const line of lines) {
     const match = ASSIGNMENT.exec(line);
     if (match === null) continue;
@@ -69,4 +77,32 @@ export function assertNoDriverOverrideForE2e(
       );
     }
   }
+}
+
+/**
+ * Every development `DATABASE_URL` in play for the e2e run, with where it was read from, in the
+ * form `resolveTestDatabase` takes (`otherUrls`, `otherSources`; CR-156, CR-158, CR-159). Empty
+ * values are dropped. Pure, so a test can show that a URL held only in `.env.local` is compared.
+ */
+export function collectDevelopmentUrls(input: {
+  processUrl: string | undefined;
+  envFileUrl: string | undefined;
+  nextFiles: ReadonlyArray<readonly [string, Readonly<Record<string, string>>]>;
+}): { otherUrls: string[]; otherSources: string[] } {
+  const entries: Array<[string | undefined, string]> = [
+    [input.processUrl, "the environment"],
+    [input.envFileUrl, "the .env file"],
+    ...input.nextFiles.map(([name, content]): [string | undefined, string] => [
+      content["DATABASE_URL"],
+      `the ${name} file`,
+    ]),
+  ];
+  const otherUrls: string[] = [];
+  const otherSources: string[] = [];
+  for (const [value, source] of entries) {
+    if (value === undefined || value === "") continue;
+    otherUrls.push(value);
+    otherSources.push(source);
+  }
+  return { otherUrls, otherSources };
 }
