@@ -30,6 +30,11 @@ import {
 } from "@/server/rate-limit";
 import { signInEmailChecks } from "@/server/sign-in-rate-limit";
 
+// Cases in this file re-import the auth module after `vi.resetModules()`. A cold import of the
+// library takes several seconds when the whole security project runs in parallel, and the 5 s
+// default timed out in session 102 (flake noted in SEC-080). The assertions are unchanged.
+vi.setConfig({ testTimeout: 30_000 });
+
 const APP_ORIGIN = "https://shop.example.test";
 const OWNER_EMAIL = "owner@example.test";
 const OWNER_ADDRESS = "198.51.100.7";

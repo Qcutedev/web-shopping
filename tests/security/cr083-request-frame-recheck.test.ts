@@ -10,6 +10,11 @@ import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// Cases in this file re-import the auth module after `vi.resetModules()`. A cold import of the
+// library takes several seconds when the whole security project runs in parallel, and the 5 s
+// default timed out in session 102 (flake noted in SEC-080). The assertions are unchanged.
+vi.setConfig({ testTimeout: 30_000 });
+
 // Outside a Next.js request `connection()` has no work to do (the session route and the frame
 // await it first).
 vi.mock("next/server", () => ({ connection: () => Promise.resolve() }));
