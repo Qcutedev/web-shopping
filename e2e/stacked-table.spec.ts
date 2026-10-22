@@ -40,25 +40,45 @@ async function isPainted(el: Locator): Promise<boolean> {
   return box !== null && box.width > 1 && box.height > 1;
 }
 
-/** Tab through the whole page once and report whether the wrapper ever had focus. */
-async function tabbingReachesRegion(page: Page, region: Locator): Promise<boolean> {
-  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-  for (let i = 0; i < 80; i += 1) {
+/**
+ * Tab from the top of the page and report whether an element matching `selector` ever has focus
+ * (CR-131, CR-132). Stops at the first element visited twice or when focus leaves the document
+ * (the end of the Tab order). Throws when neither happens within the cap, so a page whose Tab
+ * order was never fully walked cannot pass as "not reachable".
+ */
+async function tabbingReaches(page: Page, selector: string): Promise<boolean> {
+  await page.evaluate(() => {
+    (document.activeElement as HTMLElement | null)?.blur();
+    document.querySelectorAll("[data-e2e-tab-seen]").forEach((el) => {
+      el.removeAttribute("data-e2e-tab-seen");
+    });
+  });
+  const MAX_TABS = 200;
+  for (let i = 0; i < MAX_TABS; i += 1) {
     await page.keyboard.press("Tab");
-    const onRegion = await region.evaluate((el) => el === document.activeElement);
-    if (onRegion) return true;
-    const onBody = await page.evaluate(() => document.activeElement === document.body);
-    if (onBody && i > 0) return false;
+    const state = await page.evaluate((sel) => {
+      const active = document.activeElement;
+      if (active === null || active === document.body) return "left" as const;
+      if (active.matches(sel)) return "found" as const;
+      if (active.hasAttribute("data-e2e-tab-seen")) return "wrapped" as const;
+      active.setAttribute("data-e2e-tab-seen", "");
+      return "continue" as const;
+    }, selector);
+    if (state === "found") return true;
+    // Focus on the body at the first press means the page has nothing focusable at all.
+    if (state === "left" || state === "wrapped") {
+      if (i === 0) throw new Error("Tab never moved focus into the page");
+      return false;
+    }
   }
-  return false;
+  throw new Error(`Tab order not exhausted in ${MAX_TABS} presses`);
 }
-
 for (const width of [360, 767]) {
   test.describe(`stacked Table at ${width} px (below md)`, () => {
     test("wrapper is not a keyboard stop and is not focusable", async ({ page }) => {
       const { region } = await openProducts(page, width);
       await expect(region).not.toHaveAttribute("tabindex", /.*/);
-      expect(await tabbingReachesRegion(page, region)).toBe(false);
+      expect(await tabbingReaches(page, "[data-stacked]")).toBe(false);
     });
 
     test("the page does not scroll sideways and the wrapper does not scroll", async ({ page }) => {
@@ -79,7 +99,7 @@ for (const width of [360, 767]) {
       page,
     }) => {
       const { region, thead } = await openProducts(page, width);
-      expect(await isPainted(thead)).toBe(false);
+      await expect.poll(() => isPainted(thead)).toBe(false);
       await expect(region.getByRole("columnheader")).toHaveCount(4);
       await expect(region.getByRole("columnheader", { name: STATUS_LABEL })).toHaveCount(1);
     });
@@ -88,8 +108,8 @@ for (const width of [360, 767]) {
       page,
     }) => {
       const { thead } = await openProducts(page, width);
-      expect(await isPainted(thead)).toBe(false);
-      const button = await thead.evaluateHandle((el) => {
+      await expect.poll(() => isPainted(thead)).toBe(false);
+      await thead.evaluate((el) => {
         const cell = el.querySelector("th");
         if (!cell) throw new Error("no header cell");
         const injected = document.createElement("button");
@@ -97,23 +117,39 @@ for (const width of [360, 767]) {
         injected.id = "e2e-injected-sort-button";
         injected.textContent = "sort";
         cell.append(injected);
-        return injected;
       });
-      await button.asElement()?.focus();
+      // Reached with the keyboard, not with focus(): a Tab stop in a hidden header is the case.
+      expect(await tabbingReaches(page, "#e2e-injected-sort-button")).toBe(true);
       await expect(page.locator("#e2e-injected-sort-button")).toBeFocused();
-      expect(await isPainted(thead)).toBe(true);
+      await expect.poll(() => isPainted(thead)).toBe(true);
       await expect(page.locator("#e2e-injected-sort-button")).toBeInViewport();
       await page.evaluate(() => (document.activeElement as HTMLElement).blur());
-      expect(await isPainted(thead)).toBe(false);
+      await expect.poll(() => isPainted(thead)).toBe(false);
     });
 
     test("every cell shows its column name beside its value", async ({ page }) => {
       const { region } = await openProducts(page, width);
-      const row = region.locator("tbody tr").first();
-      const label = row.locator("td").first().getByText(STATUS_LABEL, { exact: true });
-      await expect(label).toBeVisible();
-      // The per-cell label is hidden from assistive technology (the column header names it).
-      await expect(label).toHaveAttribute("aria-hidden", "true");
+      const status = region
+        .locator("tbody tr")
+        .first()
+        .locator("td")
+        .first()
+        .getByText(STATUS_LABEL, { exact: true });
+      await expect(status).toBeVisible();
+      await expect(status).toHaveAttribute("aria-hidden", "true");
+      // Every data cell of every row has exactly one label, visible, naming one of the columns.
+      const columns = await region.getByRole("columnheader").allInnerTexts();
+      const cells = region.locator("tbody td");
+      const cellCount = await cells.count();
+      expect(cellCount).toBeGreaterThan(0);
+      for (let i = 0; i < cellCount; i += 1) {
+        const cell = cells.nth(i);
+        const label = cell.locator(":scope > span[aria-hidden='true']");
+        await expect(label).toHaveCount(1);
+        await expect(label).toBeVisible();
+        const text = (await label.innerText()).trim();
+        expect(columns.map((column) => column.trim())).toContain(text);
+      }
     });
 
     test("rows are cards: each row is its own block, one under another", async ({ page }) => {
@@ -135,21 +171,22 @@ for (const width of [768, 1280]) {
       const { region } = await openProducts(page, width);
       await expect(region).toHaveAttribute("tabindex", "0");
       await expect(region).toHaveAttribute("aria-labelledby", /.+/);
-      expect(await tabbingReachesRegion(page, region)).toBe(true);
+      expect(await tabbingReaches(page, "[data-stacked]")).toBe(true);
     });
 
     test("header row is visible and per-cell labels are not shown", async ({ page }) => {
       const { region, thead } = await openProducts(page, width);
-      expect(await isPainted(thead)).toBe(true);
+      await expect.poll(() => isPainted(thead)).toBe(true);
       await expect(region.getByRole("columnheader", { name: STATUS_LABEL })).toBeVisible();
-      const label = region
-        .locator("tbody tr")
-        .first()
-        .locator("td")
-        .first()
-        .locator("span[aria-hidden='true']")
-        .first();
-      await expect(label).toBeHidden();
+      // Every data cell has its label in the DOM (count first: toBeHidden() also passes for no
+      // match) and none is shown from md.
+      const labels = region.locator("tbody td > span[aria-hidden='true']");
+      const cellCount = await region.locator("tbody td").count();
+      expect(cellCount).toBeGreaterThan(0);
+      await expect(labels).toHaveCount(cellCount);
+      for (const label of await labels.all()) {
+        await expect(label).toBeHidden();
+      }
     });
 
     test("table lays out as columns: cells of a row share one line", async ({ page }) => {

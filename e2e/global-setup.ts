@@ -1,34 +1,97 @@
 /**
  * Prepares the end-to-end database and the signed-in seller state, once per run.
  *
- * 1. Runs the committed migrations on `marketplace_e2e` (Prisma creates the database when it is
- *    missing; the URL is built in support/environment.ts and names no other database).
- * 2. Empties every application table, so a run never depends on the one before.
- * 3. Registers the seller through the real sign-up endpoint.
- * 4. Promotes that user and gives it an approved store and products through the test factories.
- * 5. Signs in through the real sign-in endpoint and saves the session cookie for the specs.
+ * 0. Loading ./support/environment validates DATABASE_URL_TEST with the integration suite's rules
+ *    (tests/helpers/test-database-url.ts) before anything below runs (CR-128).
+ * 1. `check`: a child process connects to the validated test database, asks the database driver
+ *    what it reads from the URL, and asks the server which database and user it reached. Nothing
+ *    is created or migrated before this passes.
+ * 2. Runs the committed migrations on `marketplace_e2e` (Prisma creates the database when it is
+ *    missing; the URL differs from DATABASE_URL_TEST only in the database name).
+ * 3. Empties every application table, so a run never depends on the one before.
+ * 4. Registers the seller through the real sign-up endpoint.
+ * 5. Promotes that user and gives it an approved store and products through the test factories.
+ * 6. Signs in through the real sign-in endpoint and saves the session cookie for the specs.
  *
- * Step 4 uses the factories because the application's own seller onboarding is an end-to-end
- * journey of its own (journey 6), not a precondition of this check. Steps 1, 2, and 4 run as
- * child processes with the end-to-end DATABASE_URL (see tests/e2e-support/database.ts for why).
+ * Step 5 uses the factories because the application's own seller onboarding is an end-to-end
+ * journey of its own (journey 6), not a precondition of this check. Steps 1, 2, 3, and 5 run as
+ * child processes (see tests/e2e-support/database.ts for why). Their environment has no PG*
+ * variable and no DATABASE_URL_TEST, from the process or from `.env` (CR-41).
  */
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { request } from "@playwright/test";
-import { E2E_DATABASE_URL, E2E_ORIGIN, SELLER, SELLER_STORAGE_STATE } from "./support/environment";
 
-function run(args: string[]): void {
-  execFileSync("pnpm", ["exec", ...args], {
-    env: { ...process.env, DATABASE_URL: E2E_DATABASE_URL },
-    stdio: "pipe",
-    shell: true,
-  });
+import { redactConnectionSecrets } from "../tests/helpers/migrate-output";
+import { inheritedDatabaseVariableNames } from "../tests/helpers/test-database-url";
+import {
+  E2E_BASE_DATABASE,
+  E2E_DATABASE_URL,
+  E2E_ORIGIN,
+  SELLER,
+  SELLER_STORAGE_STATE,
+  readEnvFile,
+} from "./support/environment";
+
+/** Longest time one child step may take. `prisma migrate deploy` on an empty database takes seconds. */
+const STEP_TIMEOUT_MS = 120_000;
+
+const SECRET_URLS = [E2E_BASE_DATABASE.baseUrl, E2E_DATABASE_URL];
+
+function childEnvironment(databaseUrl: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const name of inheritedDatabaseVariableNames(env)) {
+    delete env[name];
+  }
+  // prisma7.config.ts loads `.env` without overriding a variable that is already set, so the
+  // names the file holds (PG* and DATABASE_URL_TEST) are set to empty for the child, as the
+  // integration setup does.
+  for (const name of inheritedDatabaseVariableNames(readEnvFile())) {
+    env[name] = "";
+  }
+  env["DATABASE_URL"] = databaseUrl;
+  return env;
 }
 
+/** Runs `node <script> <args>` without a shell; failure text has the URLs' secrets removed (CR-29). */
+function run(label: string, script: string, args: string[], env: NodeJS.ProcessEnv) {
+  const result = spawnSync(process.execPath, [resolve(script), ...args], {
+    env,
+    encoding: "utf8",
+    timeout: STEP_TIMEOUT_MS,
+    killSignal: "SIGKILL",
+    windowsHide: true,
+  });
+  if (result.status === 0 && result.error === undefined && result.signal === null) return;
+  const facts = [
+    result.status === null ? "no exit status" : `exit ${result.status}`,
+    ...(result.signal !== null ? [`signal ${result.signal}`] : []),
+    ...(result.error !== undefined ? [`error: ${result.error.message}`] : []),
+  ].join("; ");
+  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
+  throw new Error(
+    redactConnectionSecrets(
+      `e2e setup: ${label} failed (${facts}).${output === "" ? "" : `\n${output}`}`,
+      SECRET_URLS,
+    ),
+  );
+}
+
+const PRISMA_CLI = "node_modules/prisma/build/index.js";
+const TSX_CLI = "node_modules/tsx/dist/cli.mjs";
+const DATABASE_STEPS = "tests/e2e-support/database.ts";
+
 export default async function globalSetup(): Promise<void> {
-  run(["prisma", "migrate", "deploy"]);
-  run(["tsx", "tests/e2e-support/database.ts", "empty"]);
+  const e2eEnv = childEnvironment(E2E_DATABASE_URL);
+  run(
+    "server check",
+    TSX_CLI,
+    [DATABASE_STEPS, "check"],
+    childEnvironment(E2E_BASE_DATABASE.baseUrl),
+  );
+  run("prisma migrate deploy", PRISMA_CLI, ["migrate", "deploy"], e2eEnv);
+  run("empty", TSX_CLI, [DATABASE_STEPS, "empty"], e2eEnv);
 
   const api = await request.newContext({
     baseURL: E2E_ORIGIN,
@@ -39,7 +102,7 @@ export default async function globalSetup(): Promise<void> {
     if (!signUp.ok()) {
       throw new Error(`e2e setup: sign-up answered ${signUp.status()}`);
     }
-    run(["tsx", "tests/e2e-support/database.ts", "seed"]);
+    run("seed", TSX_CLI, [DATABASE_STEPS, "seed"], e2eEnv);
 
     const signIn = await api.post("/api/v1/auth/sign-in", {
       data: { email: SELLER.email, password: SELLER.password },

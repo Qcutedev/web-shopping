@@ -1,13 +1,23 @@
 /**
  * Database steps of the end-to-end setup, run in their own process by global-setup.ts
- * (`tsx tests/e2e-support/database.ts empty|seed`). They run under tsx because the generated Prisma
+ * (`tsx tests/e2e-support/database.ts check|empty|seed`; `check` runs against the validated
+ * DATABASE_URL_TEST before the e2e database exists, `empty` and `seed` against `marketplace_e2e`). They run under tsx because the generated Prisma
  * client is an ES module, which Playwright's own TypeScript loader cannot import.
  *
  * Refuses to do anything unless the connection is to `marketplace_e2e`.
  */
+import { describeConnectionTarget } from "@/server/db/connection-target";
 import { db } from "@/server/db";
 import { createCategory, createProduct, createStore } from "../helpers/factories";
-import { E2E_DATABASE_NAME, SELLER } from "../../e2e/support/environment";
+import { INITIAL_SETTINGS, listApplicationTables, listSequences } from "../helpers/reset";
+import { quoteIdentifier } from "../helpers/sql";
+import {
+  assertConnectedToTestDatabase,
+  assertDriverReadsTestDatabase,
+  resolveTestDatabase,
+  type ConnectedTarget,
+} from "../helpers/test-database-url";
+import { E2E_DATABASE_NAME, SELLER } from "../../e2e/support/constants";
 
 async function assertE2eDatabase(): Promise<void> {
   const rows = await db.$queryRawUnsafe<{ name: string }[]>("SELECT current_database() AS name");
@@ -16,16 +26,43 @@ async function assertE2eDatabase(): Promise<void> {
   }
 }
 
-/** TRUNCATE every application table, then put the settings row back as the first migration has it. */
+/**
+ * CR-128, run before `prisma migrate deploy` can create anything: DATABASE_URL of this process is
+ * the DATABASE_URL_TEST that e2e/support/environment.ts validated. It is validated again here
+ * (strict form, local host, explicit port, user, and password), then the driver is asked what it
+ * reads from it and the server which database and user it reached, as the integration global
+ * setup does (CR-42).
+ */
+async function checkServer(): Promise<void> {
+  const expected = resolveTestDatabase({ testUrl: process.env["DATABASE_URL"], otherUrls: [] });
+  assertDriverReadsTestDatabase(expected, describeConnectionTarget(expected.baseUrl));
+  const rows = await db.$queryRawUnsafe<ConnectedTarget[]>(
+    `SELECT current_database()::text AS "database", session_user::text AS "sessionUser", current_user::text AS "currentUser"`,
+  );
+  assertConnectedToTestDatabase(
+    expected,
+    rows[0] ?? { database: undefined, sessionUser: undefined, currentUser: undefined },
+  );
+}
+
+/**
+ * Empties every application table and restarts every sequence in one transaction, then puts the
+ * settings row back as the first migration has it. Table and sequence lists, quoting, and the
+ * initial settings are the integration reset helper's (CR-129).
+ */
 async function empty(): Promise<void> {
-  const tables = await db.$queryRawUnsafe<{ tablename: string }[]>(
-    "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> '_prisma_migrations'",
-  );
-  const list = tables.map((t) => `"${t.tablename.replaceAll('"', '""')}"`).join(", ");
-  await db.$executeRawUnsafe(`TRUNCATE ${list} RESTART IDENTITY CASCADE`);
-  await db.$executeRawUnsafe(
-    `INSERT INTO "MarketplaceSettings" ("id", "flatShippingFeeSatang", "commissionRateBps") VALUES (1, 4000, 500) ON CONFLICT DO NOTHING`,
-  );
+  const tables = await listApplicationTables();
+  const sequences = await listSequences();
+  await db.$transaction([
+    db.$executeRawUnsafe(`TRUNCATE TABLE ${tables.map(quoteIdentifier).join(", ")} CASCADE`),
+    ...sequences.map((name) =>
+      db.$executeRawUnsafe(`ALTER SEQUENCE ${quoteIdentifier(name)} RESTART`),
+    ),
+    db.$executeRawUnsafe(
+      `INSERT INTO "MarketplaceSettings" ("id", "flatShippingFeeSatang", "commissionRateBps", "updatedById", "updatedAt")
+       VALUES (${INITIAL_SETTINGS.id}, ${INITIAL_SETTINGS.flatShippingFeeSatang}, ${INITIAL_SETTINGS.commissionRateBps}, NULL, CURRENT_TIMESTAMP)`,
+    ),
+  ]);
 }
 
 /** Makes the signed-up user a seller with an approved store and three published products. */
@@ -47,11 +84,15 @@ async function seed(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  await assertE2eDatabase();
   const step = process.argv[2];
+  if (step === "check") {
+    await checkServer();
+    return;
+  }
+  await assertE2eDatabase();
   if (step === "empty") await empty();
   else if (step === "seed") await seed();
-  else throw new Error("usage: database.ts empty|seed");
+  else throw new Error("usage: database.ts check|empty|seed");
 }
 
 main()

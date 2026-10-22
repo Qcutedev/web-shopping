@@ -14,3 +14,5 @@ AGENTS.md
 # Markdown is hand-formatted (tables, mermaid)
 *.md
 .claude/
+# Written by e2e/global-setup.ts (session cookie)
+e2e/.auth/

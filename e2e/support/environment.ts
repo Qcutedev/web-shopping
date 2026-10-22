@@ -1,51 +1,59 @@
 /**
- * Where the end-to-end suite runs. Pure values, read by playwright.config.ts and global-setup.ts.
+ * Where the end-to-end suite runs. Pure values, read by playwright.config.ts, global-setup.ts,
+ * the specs, and tests/e2e-support/database.ts.
  *
  * The database is NOT the development database and NOT an integration database: it is a separate
- * database on the local db-test container, named below, derived from DATABASE_URL_TEST by
- * replacing only the database name. If DATABASE_URL_TEST is missing or not a local URL, loading
- * this file throws, so nothing is created anywhere else. No message here contains the URL.
+ * database on the local db-test container, named below. Its URL is DATABASE_URL_TEST after the
+ * same checks the integration suite applies (tests/helpers/test-database-url.ts: CR-25, CR-34,
+ * CR-40, strict form, server different from DATABASE_URL, no driver override in the environment
+ * or in `.env`), with only the database name replaced. If any check fails, loading this file
+ * throws, so nothing is created anywhere else. No message here contains a URL.
+ *
+ * `.env` is parsed, not loaded into `process.env`: it also holds the development DATABASE_URL and
+ * PG* variables, which must not reach a Playwright worker or a child process (CR-41, CR-134).
  */
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { parseEnv } from "node:util";
 
-if (existsSync(".env")) {
-  process.loadEnvFile(".env");
+import {
+  assertNoDriverEnvironmentOverride,
+  resolveTestDatabase,
+  type TestDatabase,
+} from "../../tests/helpers/test-database-url";
+
+import { E2E_DATABASE_NAME } from "./constants";
+
+export { E2E_DATABASE_NAME, E2E_ORIGIN, E2E_PORT, SELLER, SELLER_STORAGE_STATE } from "./constants";
+
+/** The `.env` file as data. Nothing is put into `process.env`. */
+export function readEnvFile(): Record<string, string | undefined> {
+  const path = resolve(process.cwd(), ".env");
+  return existsSync(path) ? parseEnv(readFileSync(path, "utf8")) : {};
 }
 
-export const E2E_PORT = 3100;
-export const E2E_ORIGIN = `http://localhost:${E2E_PORT}`;
-export const E2E_DATABASE_NAME = "marketplace_e2e";
+function nonEmpty(value: string | undefined): string | undefined {
+  return value === undefined || value === "" ? undefined : value;
+}
+
+/** DATABASE_URL_TEST, validated. The e2e database is on this server, under another name. */
+function resolveBase(): TestDatabase {
+  const fileEnv = readEnvFile();
+  assertNoDriverEnvironmentOverride(process.env, "the environment");
+  assertNoDriverEnvironmentOverride(fileEnv, "the .env file");
+  return resolveTestDatabase({
+    testUrl: nonEmpty(process.env["DATABASE_URL_TEST"]) ?? nonEmpty(fileEnv["DATABASE_URL_TEST"]),
+    otherUrls: [process.env["DATABASE_URL"], fileEnv["DATABASE_URL"]],
+  });
+}
+
+/** The validated test database whose server hosts the e2e database. */
+export const E2E_BASE_DATABASE: TestDatabase = resolveBase();
 
 function e2eDatabaseUrl(): string {
-  const raw = process.env["DATABASE_URL_TEST"];
-  if (!raw) {
-    throw new Error(
-      "End-to-end tests need DATABASE_URL_TEST (the local db-test container; see .env.example).",
-    );
-  }
-  const url = new URL(raw);
-  if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost") {
-    throw new Error("DATABASE_URL_TEST must point at this machine; end-to-end tests refuse it.");
-  }
+  const url = new URL(E2E_BASE_DATABASE.baseUrl);
   url.pathname = `/${E2E_DATABASE_NAME}`;
-  url.search = "";
   return url.toString();
 }
 
 export const E2E_DATABASE_URL = e2eDatabaseUrl();
-
-/** URL of the maintenance database of the same server, used only to create the e2e database. */
-export function adminDatabaseUrl(): string {
-  const url = new URL(E2E_DATABASE_URL);
-  url.pathname = "/postgres";
-  return url.toString();
-}
-
-/** The seller account the suite signs in as. Local, throwaway, created by global-setup. */
-export const SELLER = {
-  name: "E2E Seller",
-  email: "e2e-seller@example.test",
-  password: "e2e-Seller-pass-1234",
-} as const;
-
-export const SELLER_STORAGE_STATE = "e2e/.auth/seller.json";
