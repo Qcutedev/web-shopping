@@ -12,30 +12,30 @@ Not started: checkout UI (T-034), reviews, seller onboarding and seller products
 
 ## Resume here
 
-Session 102 started. Three agents running in parallel: (1) security: SEC-080 re-check, SEC-081 probes in tests/security/cr-t032-10-import-guards.test.ts and scripts/check-import-guards.mjs; orchestrator edits eslint.config.mjs. (2) qa: T-033 CC-12 in tests/** concurrency files. (3) frontend: T-034 checkout UI in src/app/(storefront)/checkout/**, src/components/checkout/**, src/i18n/th.ts. If a session ends mid-run, inspect git status before relaunching.
+Session 102 finished. No agent is running.
 
 Read first in a new session: CLAUDE.md, this file, `git status`, `git diff`.
 
-Done in session 101 (local commits, not pushed): SEC-080 fixed by qa (`c2bf1f9`), status OPEN until security re-checks. `CART_LINE_LIMIT` Thai text in `src/i18n/th.ts` and `apiErrorMessage` accepts `reason` (`6f0b26f`). CR-T032-10 import-guard probe (`97cb467`), test-enforced; it found SEC-081.
+Done in session 102 (local commits, not pushed): T-033 CC-12 test `tests/integration/cart/return-race.test.ts` (4 passed; cart+checkout integration set 129 passed). SEC-080 re-checked FIXED (security). T-034 cart, checkout, order confirmation/history UI `cb07d84` (IMPLEMENTED; `pnpm test` 4779 passed, typecheck, lint, build ok). SEC-081 fix landed by orchestrator in `eslint.config.mjs` (hardened guard for `src`, 23 probes flipped, `pnpm lint` and `pnpm verify` ok); security must re-check and set the status in SECURITY.md.
 
 Open:
-- SEC-080: security re-check. One `--project security` run had 1 unnamed failure, 4 reruns green; watch for flake.
-- `CART_LINE_LIMIT` Thai wording: product-requirements must approve. Cart and checkout views must pass `result.reason` to `apiErrorMessage`.
-- SEC-081 (Low, OPEN): inline eslint-disable, `createRequire`, `require` aliasing bypass the db import guard. Fix: orchestrator `eslint.config.mjs` (`noInlineConfig` for non-test `src/**`, `no-restricted-syntax` selectors), flip 6 `it.fails` in `tests/security/cr-t032-10-import-guards.test.ts`; devops adds probes to `scripts/check-import-guards.mjs`.
-- Suggested: move payment transitions out of public `src/modules/orders/index.ts` (backend-api).
-- devops optional: start-up log or fail-fast when NODE_ENV=production (checkout disabled, only mock provider).
-- Residual: `returnItemToCart` has no 50-line cap; carts stored above 50 keep their lines.
+- SEC-081: security re-check, then mark FIXED. SEC-082 (Low, qa): scanner pass 2 must cover `DATABASE_URL`, then flip its `it.fails`.
+- T-034 owner questions: new Thai copy needs product-requirements approval (including `CART_LINE_LIMIT`, hidden-line mark, "check status"); show the simulated-failure checkbox to all customers or hide by env flag; separate confirmation route or `/orders/{id}`; address cap over 50; automatic same-key resend after unknown outcome allowed?
+- T-034 not VERIFIED: no browser check at 360/768/1280 px, no e2e, no code review, security re-check of `checkout-view.tsx` and `order-detail-view.tsx`. No add-to-cart UI yet; header cart count not wired.
+- T-033 CC gaps still open: CC-04, CC-06, CC-08, CC-09, CC-10, CC-11, CC-13, CC-14, parts of CC-05 and CC-07.
+- Suggested: move payment transitions out of public `src/modules/orders/index.ts` (backend-api). devops optional: start-up log when NODE_ENV=production.
+- Residual: `returnItemToCart` has no 50-line cap.
 
 Next, in order:
-1. SEC-081 fix and SEC-080 re-check (security).
-2. T-033 CC-12; T-032 and T-031 code-review/security status still need re-checking.
-3. T-034 checkout UI; seller and admin work.
+1. Code review and security review of T-034; browser check.
+2. Remaining T-033 CC cases; T-031/T-032 review status re-check.
+3. Seller products/orders, admin area, E2E, CI.
 
 Do not run two e2e suites at once: they share database `marketplace_e2e` and port 3100.
 
-Agents must not type backslash-u escapes in tool input: the tool turns them into real invisible characters (likely how U+FEFF reached SECURITY.md). Generate them from code points in a script.
+Agents must not type backslash-u escapes in tool input: the tool turns them into real invisible characters. Generate them from code points in a script.
 
-Last known test results (session 100): `pnpm verify` exit 0 (format, lint, typecheck, unit, build); security reported `pnpm test` 4633 passed, 4 expected fail; `pnpm test:integration` 1379 passed, 6 expected fail. e2e not run.
+Last known test results (session 102): `pnpm verify` ok after SEC-081 change; security project 1291 passed earlier in session; e2e not run.
 
 Standing rules from the owner (D-019): never guess, park questions here and ask in batches; commit locally after each task passes its checks, never push without being told; stop for owner review at the five milestones.
 
@@ -81,9 +81,9 @@ Notes marked "stale?" were written while Docker was down; later sessions ran the
 | T-023 | Integration-test harness | VERIFIED | |
 | T-030 | Profile, addresses | IMPLEMENTED | stale?: code review APPROVED WITH FOLLOW-UPS (CR-91 to CR-96) |
 | T-031 | Cart | IMPLEMENTED | Code review CHANGES REQUIRED (`reviews/T-031-code-review.md`); security review pending |
-| T-032 | Checkout, orders, mock payment | IMPLEMENTED | Reviewed, fixes applied; integration suite 1357 passed (session 99); open: SEC-053, SEC-056, CR-T032-08, CR-T032-10 |
-| T-033 | Concurrency tests | IMPLEMENTED | Orchestrator has not re-run; gap: CC-12 not written |
-| T-034 | Checkout UI | NOT STARTED | |
+| T-032 | Checkout, orders, mock payment | IMPLEMENTED | Reviewed, fixes applied; integration suite 1357 passed (session 99); open: SEC-053, SEC-056, CR-T032-08 |
+| T-033 | Concurrency tests | IMPLEMENTED | Orchestrator has not re-run; CC-12 done; other CC gaps open |
+| T-034 | Checkout UI | IMPLEMENTED | Commit `cb07d84`; open questions in Resume here; not reviewed, no browser check |
 | T-035 | Reviews | NOT STARTED | |
 | T-040 | Seller onboarding | NOT STARTED | Row not updated, but session logs say T-040 is IMPLEMENTED (commit `6c2112c` and later) and was code-reviewed. Confirm with `git log` before starting |
 | T-041 | Uploads | IMPLEMENTED | Security review done (`reviews/T-041-security.md`, no Critical or High); not VERIFIED |
