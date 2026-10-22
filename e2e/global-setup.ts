@@ -19,8 +19,9 @@
  * variable and no DATABASE_URL_TEST, from the process or from `.env` (CR-41).
  */
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join, resolve } from "node:path";
 import { request } from "@playwright/test";
 
 import { redactConnectionSecrets } from "../tests/helpers/migrate-output";
@@ -29,6 +30,7 @@ import {
   E2E_BASE_DATABASE,
   E2E_DATABASE_URL,
   E2E_ORIGIN,
+  REPO_ROOT,
   SELLER,
   SELLER_STORAGE_STATE,
   readEnvFile,
@@ -58,6 +60,7 @@ function childEnvironment(databaseUrl: string): NodeJS.ProcessEnv {
 function run(label: string, script: string, args: string[], env: NodeJS.ProcessEnv) {
   const result = spawnSync(process.execPath, [resolve(script), ...args], {
     env,
+    cwd: REPO_ROOT,
     encoding: "utf8",
     timeout: STEP_TIMEOUT_MS,
     killSignal: "SIGKILL",
@@ -78,9 +81,22 @@ function run(label: string, script: string, args: string[], env: NodeJS.ProcessE
   );
 }
 
-const PRISMA_CLI = "node_modules/prisma/build/index.js";
-const TSX_CLI = "node_modules/tsx/dist/cli.mjs";
-const DATABASE_STEPS = "tests/e2e-support/database.ts";
+const requireFromRepo = createRequire(join(REPO_ROOT, "package.json"));
+
+/** Absolute path of a package's command-line entry, as its own `bin` field names it (CR-148). */
+function binPath(packageName: string, binName: string): string {
+  const manifestPath = requireFromRepo.resolve(`${packageName}/package.json`);
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+    bin?: string | Record<string, string>;
+  };
+  const relative = typeof manifest.bin === "string" ? manifest.bin : manifest.bin?.[binName];
+  if (relative === undefined) throw new Error(`e2e setup: ${packageName} has no bin ${binName}`);
+  return resolve(dirname(manifestPath), relative);
+}
+
+const PRISMA_CLI = binPath("prisma", "prisma");
+const TSX_CLI = binPath("tsx", "tsx");
+const DATABASE_STEPS = resolve(REPO_ROOT, "tests/e2e-support/database.ts");
 
 export default async function globalSetup(): Promise<void> {
   const e2eEnv = childEnvironment(E2E_DATABASE_URL);

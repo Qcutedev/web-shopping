@@ -22,14 +22,50 @@ import {
   type TestDatabase,
 } from "../../tests/helpers/test-database-url";
 
-import { E2E_DATABASE_NAME } from "./constants";
+import { E2E_DATABASE_NAME, REPO_ROOT } from "./constants";
 
-export { E2E_DATABASE_NAME, E2E_ORIGIN, E2E_PORT, SELLER, SELLER_STORAGE_STATE } from "./constants";
+export {
+  E2E_DATABASE_NAME,
+  E2E_ORIGIN,
+  E2E_PORT,
+  REPO_ROOT,
+  SELLER,
+  SELLER_STORAGE_STATE,
+} from "./constants";
 
 /** The `.env` file as data. Nothing is put into `process.env`. */
 export function readEnvFile(): Record<string, string | undefined> {
-  const path = resolve(process.cwd(), ".env");
+  const path = resolve(REPO_ROOT, ".env");
   return existsSync(path) ? parseEnv(readFileSync(path, "utf8")) : {};
+}
+
+/**
+ * The files `next dev` loads besides `.env` (later ones win in Next; for the refusal check every
+ * one counts). The e2e server inherits the parent environment and reads these itself, so a
+ * driver override in any of them reaches the server's database connection (CR-146).
+ */
+const OTHER_NEXT_ENV_FILES = [".env.local", ".env.development", ".env.development.local"] as const;
+
+/** Parsed content of each other env file that exists, keyed by file name. */
+function readOtherEnvFiles(): Array<[string, Record<string, string | undefined>]> {
+  const files: Array<[string, Record<string, string | undefined>]> = [];
+  for (const name of OTHER_NEXT_ENV_FILES) {
+    const path = resolve(REPO_ROOT, name);
+    if (existsSync(path)) files.push([name, parseEnv(readFileSync(path, "utf8"))]);
+  }
+  return files;
+}
+
+/** Refuses a driver override in a file other than `.env`; the message names the file and variable. */
+function assertNoOverrideInOtherEnvFiles(): void {
+  for (const [name, content] of readOtherEnvFiles()) {
+    try {
+      assertNoDriverEnvironmentOverride(content, "the .env file");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "refused";
+      throw new Error(`${name}: ${message}`, { cause: error });
+    }
+  }
 }
 
 function nonEmpty(value: string | undefined): string | undefined {
@@ -41,6 +77,7 @@ function resolveBase(): TestDatabase {
   const fileEnv = readEnvFile();
   assertNoDriverEnvironmentOverride(process.env, "the environment");
   assertNoDriverEnvironmentOverride(fileEnv, "the .env file");
+  assertNoOverrideInOtherEnvFiles();
   return resolveTestDatabase({
     testUrl: nonEmpty(process.env["DATABASE_URL_TEST"]) ?? nonEmpty(fileEnv["DATABASE_URL_TEST"]),
     otherUrls: [process.env["DATABASE_URL"], fileEnv["DATABASE_URL"]],

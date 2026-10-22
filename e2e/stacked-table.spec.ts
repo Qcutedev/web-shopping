@@ -15,7 +15,7 @@
  */
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { th } from "@/i18n/th";
-import { SELLER_STORAGE_STATE } from "./support/environment";
+import { SELLER_STORAGE_STATE } from "./support/constants";
 
 test.use({ storageState: SELLER_STORAGE_STATE });
 
@@ -45,8 +45,15 @@ async function isPainted(el: Locator): Promise<boolean> {
  * (CR-131, CR-132). Stops at the first element visited twice or when focus leaves the document
  * (the end of the Tab order). Throws when neither happens within the cap, so a page whose Tab
  * order was never fully walked cannot pass as "not reachable".
- */
-async function tabbingReaches(page: Page, selector: string): Promise<boolean> {
+ *
+ * Focus is followed into open shadow roots (CR-149): the Next dev overlay host (`nextjs-portal`)
+ * has several Tab stops of its own while `document.activeElement` stays on the host, so the
+ * innermost active element is the one tested and marked. A closed shadow root cannot be entered.
+ *
+ * One call per fresh `goto` (CR-150): the walk starts from wherever the browser's sequential
+ * focus start point is, and `blur()` does not reset that point. A second call on the same page
+ * would start after the last stop of the first, so its answer would not cover the whole page.
+ */ async function tabbingReaches(page: Page, selector: string): Promise<boolean> {
   await page.evaluate(() => {
     (document.activeElement as HTMLElement | null)?.blur();
     document.querySelectorAll("[data-e2e-tab-seen]").forEach((el) => {
@@ -57,7 +64,8 @@ async function tabbingReaches(page: Page, selector: string): Promise<boolean> {
   for (let i = 0; i < MAX_TABS; i += 1) {
     await page.keyboard.press("Tab");
     const state = await page.evaluate((sel) => {
-      const active = document.activeElement;
+      let active = document.activeElement;
+      while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
       if (active === null || active === document.body) return "left" as const;
       if (active.matches(sel)) return "found" as const;
       if (active.hasAttribute("data-e2e-tab-seen")) return "wrapped" as const;
