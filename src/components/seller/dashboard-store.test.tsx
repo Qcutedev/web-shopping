@@ -329,6 +329,33 @@ describe("StoreForm follows the stored store (CR-99)", () => {
     expect(screen.getByText(th.seller.store.suspendedNote)).toBeTruthy();
   });
 
+  it("clears field errors and the form message when the refresh suspends the store (CR-164)", async () => {
+    const user = userEvent.setup();
+    updateStore.mockResolvedValue({
+      ok: false,
+      status: 400,
+      code: "VALIDATION_ERROR",
+      // One field the form knows and one it does not: a field error and the form message.
+      fields: [
+        { path: "name", code: "too_small" },
+        { path: "unknownField", code: "invalid" },
+      ],
+      requestId: null,
+    });
+    const { rerender } = render(<StoreForm store={store} />);
+    const nameLabel = new RegExp(th.seller.store.fields.name);
+    await user.clear(screen.getByLabelText(nameLabel));
+    await user.type(screen.getByLabelText(nameLabel), "x");
+    await user.click(screen.getByRole("button", { name: th.seller.store.save }));
+    expect(await screen.findByText(th.seller.common.formInvalid)).toBeTruthy();
+    expect(screen.getByLabelText(nameLabel).getAttribute("aria-invalid")).toBe("true");
+
+    rerender(<StoreForm store={{ ...store, status: "SUSPENDED" }} />);
+    expect(screen.queryByText(th.seller.common.formInvalid)).toBeNull();
+    expect(screen.getByLabelText(nameLabel).getAttribute("aria-invalid")).toBeNull();
+    expect(screen.getByText(th.seller.store.suspendedNote)).toBeTruthy();
+  });
+
   it("keeps a typed name when only the status reason changes (CR-109)", () => {
     const { rerender } = render(<StoreForm store={store} />);
     fireEvent.change(screen.getByLabelText(new RegExp(th.seller.store.fields.name)), {
