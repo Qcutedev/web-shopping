@@ -501,6 +501,8 @@ describe("PATCH and DELETE /api/v1/me/addresses/{id}: ownership", () => {
         );
         const deadline = Date.now() + 5_000;
         for (;;) {
+          // pg_stat_activity is a snapshot taken once per transaction; clear it for each poll.
+          await tx.$queryRaw`SELECT 1 AS cleared FROM pg_stat_clear_snapshot()`;
           const [waiting] = await tx.$queryRaw<{ n: number }[]>`
             SELECT count(*)::int AS n FROM pg_stat_activity
             WHERE datname = current_database()
