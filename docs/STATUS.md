@@ -12,7 +12,7 @@ Not started: checkout and orders (T-032, T-034), reviews, seller onboarding and 
 
 ## Resume here
 
-Ninety-sixth session finished. No agent is running. All work is committed on `main` (no remote, nothing pushed) except the owner's unstaged deletion of `run-agents.ps1`, which is left untouched.
+Ninety-seventh session started. Running: `security` agent on items 1 and 2 (touches `docs/SECURITY.md` only, plus test read); `code-review` agent on item 3 (read-only, writes `docs/reviews/T-044-code-review.md`). Ninety-sixth session finished before it. All work is committed on `main` (no remote, nothing pushed) except the owner's unstaged deletion of `run-agents.ps1`, which is left untouched.
 
 Read first in a new session: CLAUDE.md, this file, `git status`, `git diff`.
 
