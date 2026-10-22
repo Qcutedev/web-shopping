@@ -20,7 +20,7 @@ Done in session 102 (local commits, not pushed): T-033 CC-12 test `tests/integra
 
 Open:
 - SEC-081: security re-check, then mark FIXED. SEC-082 (Low, qa): scanner pass 2 must cover `DATABASE_URL`, then flip its `it.fails`.
-- T-034 owner questions: new Thai copy needs product-requirements approval (including `CART_LINE_LIMIT`, hidden-line mark, "check status"); show the simulated-failure checkbox to all customers or hide by env flag; separate confirmation route or `/orders/{id}`; address cap over 50; automatic same-key resend after unknown outcome allowed?
+- T-034 owner questions answered: D-044. Follow-ups: product-requirements approves the new Thai copy; backend-api adds a 50-address cap per user.
 - T-034 not VERIFIED: no browser check at 360/768/1280 px, no e2e, no code review, security re-check of `checkout-view.tsx` and `order-detail-view.tsx`. No add-to-cart UI yet; header cart count not wired.
 - T-033 CC gaps still open: CC-04, CC-06, CC-08, CC-09, CC-10, CC-11, CC-13, CC-14, parts of CC-05 and CC-07.
 - Suggested: move payment transitions out of public `src/modules/orders/index.ts` (backend-api). devops optional: start-up log when NODE_ENV=production.

@@ -360,3 +360,13 @@ Owners: backend-api (`src/modules/inventory`, `src/modules/uploads`, `src/server
 ## Pending decisions for the user
 
 Undecided, none blocking the MVP: marketplace name and logo, real product photos, hosting provider for staging and production, production object storage, email provider, payment gateway.
+
+### D-044 Owner rulings on the T-034 checkout UI questions (2026-10-22)
+
+The owner told the orchestrator to take the orchestrator's recommendation for all five questions.
+
+1. New Thai copy stays in `src/i18n/th.ts` as proposals. product-requirements reviews the wording before T-034 is VERIFIED.
+2. The "test a failed payment (simulated)" checkbox stays visible to every customer. It is labelled as simulated, and checkout only works with the mock provider outside production. No environment flag.
+3. `/orders/{id}` is the order confirmation page. No separate route.
+4. Checkout shows the first 50 addresses. A cap on addresses per user (50) is added later by backend-api; no "more" control.
+5. After an unknown outcome, "Check status" may resend with the same idempotency key, only when a cart read shows the cart is unchanged (API_CONTRACTS 5.5.3 forbids automatic resend after a 409 only).
