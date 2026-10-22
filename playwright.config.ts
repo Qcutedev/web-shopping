@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
-import { E2E_DATABASE_URL, E2E_ORIGIN, E2E_PORT } from "./e2e/support/environment";
+import { randomBytes } from "node:crypto";
+import { E2E_DATABASE_URL, E2E_ORIGIN, E2E_PORT, E2E_UPLOAD_DIR } from "./e2e/support/environment";
+import { e2eServerCommand, e2eServerEnvironment } from "./e2e/support/server-environment";
 
 /**
  * Playwright configuration (T-060, first part: the stacked Table check, CR-118).
@@ -25,18 +27,18 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: `pnpm exec next dev --port ${E2E_PORT}`,
+    command: e2eServerCommand(),
     // Wait for the port, not /api/health: the health route needs the database, which
     // global-setup creates after the server is listening.
     port: E2E_PORT,
     reuseExistingServer: false,
     timeout: 180_000,
-    env: {
-      DATABASE_URL: E2E_DATABASE_URL,
-      APP_URL: E2E_ORIGIN,
-      NEXT_TELEMETRY_DISABLED: "1",
-      // Separate build dir: the e2e server must not share .next/ with pnpm dev (CR-136).
-      NEXT_DIST_DIR: ".next-e2e",
-    },
+    // AUTH_SECRET is generated per run and never logged (SEC-075).
+    env: e2eServerEnvironment({
+      databaseUrl: E2E_DATABASE_URL,
+      origin: E2E_ORIGIN,
+      uploadDir: E2E_UPLOAD_DIR,
+      authSecret: randomBytes(32).toString("hex"),
+    }),
   },
 });

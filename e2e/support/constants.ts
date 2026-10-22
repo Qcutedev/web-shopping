@@ -12,7 +12,12 @@ import { resolve } from "node:path";
 export const REPO_ROOT = resolve(__dirname, "../..");
 
 export const E2E_PORT = 3100;
-export const E2E_ORIGIN = `http://localhost:${E2E_PORT}`;
+/**
+ * The server listens on the loopback IPv4 address only (SEC-076) and the origin names that address,
+ * so the e2e cookies are not sent to a `localhost` development server (SEC-075).
+ */
+export const E2E_HOST = "127.0.0.1";
+export const E2E_ORIGIN = `http://${E2E_HOST}:${E2E_PORT}`;
 export const E2E_DATABASE_NAME = "marketplace_e2e";
 
 /** The seller account the suite signs in as. Local, throwaway, created by global-setup. */
@@ -21,5 +26,8 @@ export const SELLER = {
   email: "e2e-seller@example.test",
   password: "e2e-Seller-pass-1234",
 } as const;
+
+/** The e2e server's upload root, apart from the development one (SEC-075). Git-ignored, emptied by global-setup. */
+export const E2E_UPLOAD_DIR = resolve(REPO_ROOT, "e2e/.auth/uploads");
 
 export const SELLER_STORAGE_STATE = resolve(REPO_ROOT, "e2e/.auth/seller.json");

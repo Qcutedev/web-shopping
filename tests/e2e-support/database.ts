@@ -1,6 +1,6 @@
 /**
  * Database steps of the end-to-end setup, run in their own process by global-setup.ts
- * (`tsx tests/e2e-support/database.ts check|empty|seed`; `check` runs against the validated
+ * (`tsx tests/e2e-support/database.ts check|empty|canary|seed`; `check` runs against the validated
  * DATABASE_URL_TEST before the e2e database exists, `empty` and `seed` against `marketplace_e2e`). They run under tsx because the generated Prisma
  * client is an ES module, which Playwright's own TypeScript loader cannot import.
  *
@@ -18,6 +18,7 @@ import {
   type ConnectedTarget,
 } from "../helpers/test-database-url";
 import { E2E_DATABASE_NAME, SELLER } from "../../e2e/support/constants";
+import { CANARY_SLUG_PREFIX, isCanarySlug } from "../../e2e/support/server-identity";
 
 async function assertE2eDatabase(): Promise<void> {
   const rows = await db.$queryRawUnsafe<{ name: string }[]>("SELECT current_database() AS name");
@@ -65,8 +66,18 @@ async function empty(): Promise<void> {
   ]);
 }
 
+/**
+ * SEC-077: writes the canary category that global-setup then reads through the e2e origin. The
+ * slug comes from global-setup on the command line and must have the shape it generates.
+ */
+async function canary(slug: string | undefined): Promise<void> {
+  if (!isCanarySlug(slug)) throw new Error("e2e setup refused: bad canary slug.");
+  await createCategory({ name: "E2E canary", slug });
+}
+
 /** Makes the signed-up user a seller with an approved store and three published products. */
 async function seed(): Promise<void> {
+  await db.category.deleteMany({ where: { slug: { startsWith: CANARY_SLUG_PREFIX } } });
   const user = await db.user.update({ where: { email: SELLER.email }, data: { role: "SELLER" } });
   const store = await createStore({ ownerId: user.id, name: "ร้านทดสอบ E2E", slug: "e2e-store" });
   const category = await createCategory({ name: "หมวดทดสอบ E2E", slug: "e2e-category" });
@@ -91,8 +102,9 @@ async function main(): Promise<void> {
   }
   await assertE2eDatabase();
   if (step === "empty") await empty();
+  else if (step === "canary") await canary(process.argv[3]);
   else if (step === "seed") await seed();
-  else throw new Error("usage: database.ts check|empty|seed");
+  else throw new Error("usage: database.ts check|empty|canary <slug>|seed");
 }
 
 main()

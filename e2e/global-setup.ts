@@ -9,6 +9,8 @@
  * 2. Runs the committed migrations on `marketplace_e2e` (Prisma creates the database when it is
  *    missing; the URL differs from DATABASE_URL_TEST only in the database name).
  * 3. Empties every application table, so a run never depends on the one before.
+ *    Then proves that the server on the e2e origin reads that database, with a canary category
+ *    read through the public category list (SEC-077), before any request that writes.
  * 4. Registers the seller through the real sign-up endpoint.
  * 5. Promotes that user and gives it an approved store and products through the test factories.
  * 6. Signs in through the real sign-in endpoint and saves the session cookie for the specs.
@@ -19,17 +21,19 @@
  * variable and no DATABASE_URL_TEST, from the process or from `.env` (CR-41).
  */
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { request } from "@playwright/test";
 
 import { redactConnectionSecrets } from "../tests/helpers/migrate-output";
 import { inheritedDatabaseVariableNames } from "../tests/helpers/test-database-url";
+import { assertServerShowsCanary, newCanarySlug } from "./support/server-identity";
 import {
   E2E_BASE_DATABASE,
   E2E_DATABASE_URL,
   E2E_ORIGIN,
+  E2E_UPLOAD_DIR,
   REPO_ROOT,
   SELLER,
   SELLER_STORAGE_STATE,
@@ -108,12 +112,24 @@ export default async function globalSetup(): Promise<void> {
   );
   run("prisma migrate deploy", PRISMA_CLI, ["migrate", "deploy"], e2eEnv);
   run("empty", TSX_CLI, [DATABASE_STEPS, "empty"], e2eEnv);
+  // SEC-075: the e2e upload root is emptied with the tables, so no file outlives its row.
+  rmSync(E2E_UPLOAD_DIR, { recursive: true, force: true });
+  mkdirSync(E2E_UPLOAD_DIR, { recursive: true });
+
+  // SEC-077: prove the server on the origin reads the e2e database before anything is sent to it
+  // that writes. The canary is removed by the seed step.
+  const canarySlug = newCanarySlug();
+  run("canary", TSX_CLI, [DATABASE_STEPS, "canary", canarySlug], e2eEnv);
 
   const api = await request.newContext({
     baseURL: E2E_ORIGIN,
     extraHTTPHeaders: { Origin: E2E_ORIGIN },
   });
   try {
+    await assertServerShowsCanary(async () => {
+      const response = await api.get("/api/v1/categories");
+      return { status: response.status(), body: await response.text() };
+    }, canarySlug);
     const signUp = await api.post("/api/v1/auth/sign-up", { data: SELLER });
     if (!signUp.ok()) {
       throw new Error(`e2e setup: sign-up answered ${signUp.status()}`);
