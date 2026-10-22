@@ -100,3 +100,20 @@ Verdict: APPROVED, no blocking finding. CR-121 to CR-125 fixed; CR-126 not merge
 - **CR-142 (Info, frontend)** put the CR-126 reason in a comment at `product-form.tsx:66-69` and `store-form.tsx:77-80`.
 
 Not verified by the reviewer: tests against the old code (traced by reading), real browser, `pnpm verify`, `pnpm build`.
+
+## Review of 96ed30e and 25bbbf4 (e2e setup, distDir), ninety-third session
+
+Verdict: CHANGES REQUIRED. Validation reuse is correct; no path reaches a non-test database. Docker was down: `pnpm test:e2e` not run; CR-143 comes from reading Next source, not observed.
+
+- **CR-143 (Medium, blocking, devops)** `tsconfig.json`, `next.config.ts:7`: `next dev` with distDir `.next-e2e` appends `.next-e2e/dev/types/**/*.ts` and `.next-e2e/types/**/*.ts` to `include`, so each `pnpm test:e2e` dirties tracked `tsconfig.json`; if committed, `tsc` checks stale e2e types. Fix: commit both entries in `include` and add `.next-e2e` to `exclude`, or use a separate tsconfig; run e2e once and confirm clean `git status`; update `docs/DEPLOYMENT.md:71`.
+- **CR-144 (Low, devops)** e2e server rewrites ignored `next-env.d.ts`; with `pnpm dev` at the same time they flip it. "Does not share with pnpm dev" in `DEPLOYMENT.md:71` is partly true. Say so.
+- **CR-145 (Low, docs)** `TEST_STRATEGY.md:147`: "no DATABASE_URL_TEST" holds for setup steps only; webServer child inherits parent env and `next dev` loads `.env*`. Limit sentence or strip those variables from `webServer.env`.
+- **CR-146 (Low, qa)** `e2e/support/environment.ts:536-537`: `PGOPTIONS`, `NODE_PG_FORCE_NATIVE` refused only in `process.env` and `.env`, not `.env.local`, `.env.development*`. Run the check on those files; do not set to `""` (`pg` treats defined `NODE_PG_FORCE_NATIVE` as on).
+- **CR-147 (Low, qa)** `e2e/global-setup.ts:231`, `environment.ts:508`: paths use `process.cwd()`. Base on `import.meta.dirname`.
+- **CR-148 (Low, qa)** `global-setup.ts:253-254`: hardcoded `node_modules/prisma/build/index.js`, `tsx/dist/cli.mjs`. Resolve with `createRequire`.
+- **CR-149 (Low, qa)** `stacked-table.spec.ts:313-325`: shadow host with several Tab stops (`nextjs-portal`) ends the walk early; `TEST_STRATEGY.md:144` overstates. Follow `shadowRoot.activeElement` or `devIndicators: false` for e2e.
+- **CR-150 (Low, qa)** `stacked-table.spec.ts:300-301`: `blur()` does not reset Tab start; write the one-call-per-fresh-`goto` limit in the docstring.
+- **CR-151 (Nit, qa)** spec imports `SELLER_STORAGE_STATE` from `./support/environment`; import from `./support/constants`.
+- **CR-152 (Low, qa)** no global teardown; `e2e/.auth/seller.json`, `marketplace_e2e`, `.next-e2e/` remain (git-ignored, local). Document or add teardown.
+
+Security-sensitive parts (database targeting, session cookie file) still need the security agent.
