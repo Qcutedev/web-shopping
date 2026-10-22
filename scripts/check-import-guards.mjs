@@ -1,15 +1,22 @@
 // Regression check for architecture rule 7 (CLAUDE.md): checks that the ESLint import guards in
 // eslint.config.mjs reject the forbidden import spellings listed below and accept the allowed ones.
-// It covers accidental violations only. Not covered, and left to review: inline eslint-disable
-// comments, createRequire and other indirect require calls, re-exports through an allowed folder,
-// and type-only `typeof import()` queries.
+// Inline eslint-disable and config comments, createRequire, and other indirect require calls get
+// past the guard today (SEC-081, docs/SECURITY.md). They are listed below with the expectation
+// "SEC-081": the guard should reject them, and the script reports them as known gaps without
+// failing. Once the guard rejects one, the script fails until its expectation is changed to
+// `true`, the same way `it.fails` works in tests/security/cr-t032-10-import-guards.test.ts.
+// Not covered, and left to review: re-exports through an allowed folder and type-only
+// `typeof import()` queries.
 // Nothing is written to disk; each probe is linted from memory under a virtual file name.
 // Run: node scripts/check-import-guards.mjs
 import { ESLint } from "eslint";
 
 const eslint = new ESLint();
 
-/** [virtual file, source code, should lint report an error?] */
+/**
+ * [virtual file, source code, should lint report an error?]. The third element is `true`, `false`,
+ * or "SEC-081" (should be an error; a known gap until SEC-081 is fixed).
+ */
 const probes = [
   // Pages, route handlers, components, platform code, and root files must not reach the db layer.
   ["src/app/probe.ts", 'import { db } from "@/server/db";', true],
@@ -160,16 +167,130 @@ const probes = [
   // names only start with the same letters.
   ["prisma7.config.ts", 'import { defineConfig } from "prisma/config";', false],
   ["src/app/probe.ts", 'import x from "pgx-not-a-driver";', false],
+  // SEC-081: ways to load the db layer at run time that get past the guard today. Inline comments
+  // that switch the guard off.
+  [
+    "src/app/x/probe.ts",
+    '/* eslint-disable no-restricted-imports */\nimport { db } from "@/server/db";',
+    "SEC-081",
+  ],
+  [
+    "src/app/x/probe.ts",
+    '// eslint-disable-next-line no-restricted-imports\nimport { db } from "@/server/db";',
+    "SEC-081",
+  ],
+  ["src/app/x/probe.ts", '/* eslint-disable */\nimport { db } from "@/server/db";', "SEC-081"],
+  ["src/app/x/probe.ts", 'import { db } from "@/server/db"; // eslint-disable-line', "SEC-081"],
+  [
+    "src/app/x/probe.ts",
+    '/* eslint no-restricted-imports: "off" */\nimport { db } from "@/server/db";',
+    "SEC-081",
+  ],
+  [
+    "src/components/probe.tsx",
+    '/* eslint-disable */\nimport { db } from "@/server/db";',
+    "SEC-081",
+  ],
+  // createRequire in every way of reaching it.
+  [
+    "src/app/x/probe.ts",
+    'import { createRequire } from "node:module";\nconst m = createRequire(import.meta.url)("../../server/db");',
+    "SEC-081",
+  ],
+  [
+    "src/app/x/probe.ts",
+    'import { createRequire as cr } from "node:module";\nconst m = cr(import.meta.url)("../../server/db");',
+    "SEC-081",
+  ],
+  [
+    "src/app/x/probe.ts",
+    'import * as mod from "node:module";\nconst m = mod.createRequire(import.meta.url)("../../server/db");',
+    "SEC-081",
+  ],
+  [
+    "src/app/x/probe.ts",
+    'import Module from "node:module";\nconst m = Module.createRequire(import.meta.url)("../../server/db");',
+    "SEC-081",
+  ],
+  [
+    "src/app/x/probe.ts",
+    'import { createRequire } from "module";\nconst m = createRequire(import.meta.url)("../../server/db");',
+    "SEC-081",
+  ],
+  [
+    "src/app/x/probe.ts",
+    'const { createRequire } = await import("node:module");\nconst m = createRequire(import.meta.url)("../../server/db");',
+    "SEC-081",
+  ],
+  [
+    "src/app/x/probe.ts",
+    'const m = process.getBuiltinModule("node:module").createRequire(import.meta.url)("../../server/db");',
+    "SEC-081",
+  ],
+  [
+    "src/app/x/probe.js",
+    'const m = require("node:module").createRequire(__filename)("../../server/db");',
+    "SEC-081",
+  ],
+  // `require` reached other than as the callee of a direct call.
+  ["src/app/x/probe.js", 'const r = require;\nconst m = r("../../server/db");', "SEC-081"],
+  ["src/app/x/probe.js", 'const m = module.require("../../server/db");', "SEC-081"],
+  [
+    "src/app/x/probe.js",
+    'const { require: r } = module;\nconst m = r("../../server/db");',
+    "SEC-081",
+  ],
+  ["src/app/x/probe.js", 'const m = require.call(null, "../../server/db");', "SEC-081"],
+  ["src/app/x/probe.js", 'const m = require.apply(null, ["../../server/db"]);', "SEC-081"],
+  ["src/app/x/probe.js", 'const m = require["call"](null, "../../server/db");', "SEC-081"],
+  ["src/app/x/probe.js", 'const m = globalThis.require("../../server/db");', "SEC-081"],
+  // Code built from a string.
+  ["src/app/x/probe.js", 'const m = eval("require")("../../server/db");', "SEC-081"],
+  [
+    "src/app/x/probe.js",
+    'const m = new Function("return require")()("../../server/db");',
+    "SEC-081",
+  ],
+  // SEC-081 controls: the db layer, tests, and e2e support may use createRequire, and must stay
+  // clean after the guard is extended.
+  [
+    "src/server/db/probe.ts",
+    'import { createRequire } from "node:module";\nconst r = createRequire(import.meta.url);',
+    false,
+  ],
+  [
+    "tests/security/probe.test.ts",
+    'import { createRequire } from "node:module";\nconst r = createRequire(import.meta.url);',
+    false,
+  ],
+  [
+    "e2e/support/probe.ts",
+    'import { createRequire } from "node:module";\nconst r = createRequire(import.meta.url);',
+    false,
+  ],
 ];
 
 const GUARD_RULES = new Set(["no-restricted-imports", "no-restricted-syntax"]);
 let failures = 0;
+let knownGaps = 0;
 
-for (const [filePath, code, shouldReject] of probes) {
+for (const [filePath, code, expectation] of probes) {
   const [result] = await eslint.lintText(`${code}\nexport {};\n`, { filePath });
   const rejected = result.messages.some(
     (message) => message.severity === 2 && GUARD_RULES.has(message.ruleId ?? ""),
   );
+  if (expectation === "SEC-081") {
+    if (rejected) {
+      failures += 1;
+      console.error(
+        `FAIL ${filePath}: ${code}\n     SEC-081 gap is now rejected: change its expectation to true`,
+      );
+    } else {
+      knownGaps += 1;
+    }
+    continue;
+  }
+  const shouldReject = expectation;
   if (rejected !== shouldReject) {
     failures += 1;
     console.error(
@@ -179,6 +300,7 @@ for (const [filePath, code, shouldReject] of probes) {
 }
 
 console.log(
-  `${probes.length - failures} of ${probes.length} import-guard probes behaved as expected`,
+  `${probes.length - failures} of ${probes.length} import-guard probes behaved as expected` +
+    (knownGaps > 0 ? ` (${knownGaps} are known SEC-081 gaps, not yet rejected)` : ""),
 );
 process.exit(failures === 0 ? 0 : 1);

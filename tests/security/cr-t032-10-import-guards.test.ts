@@ -257,6 +257,17 @@ describe("rule 7: the real tree", () => {
     expect(offenders).toEqual([]);
   });
 
+  // SEC-081 re-check (2026-10-22): further spellings that get past the guard, probed in
+  // scripts/check-import-guards.mjs. None may appear in the real tree outside the db layer.
+  it("no other indirect loader appears outside the db layer", () => {
+    const INDIRECT =
+      /["'](node:)?module["']|getBuiltinModule|globalThis\.require|require\s*\.\s*(apply|call|bind)|require\s*\[|\brequire\s*:|\beval\s*\(|new\s+Function\s*\(/;
+    const offenders = SCANNED.filter((path) => !path.startsWith("src/server/db/")).filter((path) =>
+      INDIRECT.test(read(path)),
+    );
+    expect(offenders).toEqual([]);
+  });
+
   it("no module re-exports a database value from src/server/db", () => {
     // Pure helpers that read an error object; they open no connection and hold no client.
     const PURE = new Set([
