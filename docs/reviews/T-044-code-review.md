@@ -71,3 +71,20 @@ Verdict: APPROVE. CR-114 to CR-119 hold. No blocking finding. Checks by reviewer
 - **CR-125 (Info, ui-ux-design)** `table.tsx:97`: `useBelowMd()` adds a matchMedia listener for every Table, also unstacked ones.
 - **CR-126 (Info, frontend)** `product-form.tsx:66-80`, `store-form.tsx`: `seenEditableKey` and `ownKey` overlap; could merge. Behaviour correct.
 - **CR-127 (Info)** CR-118 Playwright half (qa) and CR-120 (product decision) remain open.
+
+## Review of 9489c3a (Playwright stacked Table check, CR-118 Playwright half), 2026-10-22
+
+Verdict: CHANGES REQUIRED. Reviewer re-ran lint, typecheck, format:check, `playwright test --list` (19 tests): all exit 0. Not run: `pnpm test:e2e` (Docker Desktop was down), so the 19-pass result and mutation checks are unreproduced.
+
+- **CR-128 (Medium, qa, blocking)** `e2e/support/environment.ts:19-33`: `e2eDatabaseUrl()` checks only the hostname. None of the `tests/helpers/test-database-url.ts` rules run (CR-34 server differs from `DATABASE_URL`, required port/user/password, normal form, `assertNoDriverEnvironmentOverride`, removal of inherited `PG*` before child processes, CR-41). `prisma migrate deploy` could create and migrate `marketplace_e2e` on the dev server if `DATABASE_URL_TEST` is mistyped. TRUNCATE is guarded by the name check, so no dev data is lost. Current `.env` is fine (dev 5432, test 5433). Fix: build the URL with `resolveTestDatabase` and replace only the database name; check the server before migrate; update TEST_STRATEGY.md.
+- **CR-129 (Low, qa)** `tests/e2e-support/database.ts:20-29` duplicates `resetDatabase` (hardcoded settings `4000, 500`, no single transaction). Share `INITIAL_SETTINGS`, `quoteIdentifier`, table and sequence listing from `reset.ts`.
+- **CR-130 (Low, qa)** `e2e/global-setup.ts:21-27`: `execFileSync` has no timeout, raw Prisma stderr is not sanitised (CR-29), `shell: true` triggers DEP0190.
+- **CR-131 (Low, qa)** `e2e/stacked-table.spec.ts:87-108`: uses `focus()`, not Tab, so keyboard reachability is not tested; layout read once with no retry.
+- **CR-132 (Low, qa)** `:44-54`: `tabbingReachesRegion` returns false after 80 Tabs without proving focus wrapped; the below-md case can pass vacuously.
+- **CR-133 (Low, qa)** `:145-152`: `toBeHidden()` passes when nothing matches; assert `toHaveCount(1)` first. Line 110 checks one label in one cell only.
+- **CR-134 (Low, qa)** `environment.ts:37-42` `adminDatabaseUrl()` is dead code with a wrong comment; line 11 loads `.env` into worker processes, parse it instead.
+- **CR-135 (Low, qa or devops)** `e2e/.auth/` is git-ignored but not in `.prettierignore`.
+- **CR-136 (Low, devops or frontend)** e2e `next dev` shares `.next/` with `pnpm dev` and typegen; use a separate `distDir` or document it.
+- **CR-137 (Info, qa)** TEST_STRATEGY.md says "only the database name replaced"; the query is stripped too.
+
+Security: note CR-128 for the next harness pass. `pnpm verify` and CI are not affected (they do not run e2e).
