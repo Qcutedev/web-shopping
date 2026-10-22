@@ -245,6 +245,32 @@ describe("Table", () => {
       }
     });
 
+    it("subscribes the listener when stacked switches on and removes it on unmount", () => {
+      const original = window.matchMedia;
+      const addEventListener = vi.fn();
+      const removeEventListener = vi.fn();
+      const matchMedia = vi
+        .fn()
+        .mockReturnValue({ matches: false, addEventListener, removeEventListener });
+      try {
+        window.matchMedia = matchMedia as unknown as typeof window.matchMedia;
+        const view = render(<Stacked stacked={false} />);
+        expect(addEventListener).not.toHaveBeenCalled();
+        view.rerender(<Stacked />);
+        expect(addEventListener).toHaveBeenCalledTimes(1);
+        expect(addEventListener).toHaveBeenCalledWith("change", expect.any(Function));
+        expect(removeEventListener).not.toHaveBeenCalled();
+        view.unmount();
+        expect(removeEventListener).toHaveBeenCalledTimes(1);
+        expect(removeEventListener).toHaveBeenCalledWith(
+          "change",
+          addEventListener.mock.calls[0]?.[1],
+        );
+      } finally {
+        window.matchMedia = original;
+      }
+    });
+
     it("draws no card inside the footer card", () => {
       render(
         <Table caption="x" stacked>

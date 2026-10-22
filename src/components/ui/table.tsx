@@ -53,8 +53,9 @@ function getBelowMd() {
 }
 
 /**
- * True below `md` (only tracked when `enabled`). A stacked table cannot scroll there, so its wrapper drops the keyboard stop
- * (an attribute cannot be responsive in CSS). The server renders the focusable form.
+ * True below `md` (only tracked when `enabled`). A stacked table cannot scroll there, so its
+ * wrapper drops the keyboard stop (an attribute cannot be responsive in CSS). The server renders
+ * the focusable form.
  */
 function useBelowMd(enabled: boolean) {
   // Unstacked tables never subscribe, so they add no matchMedia listener.
