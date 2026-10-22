@@ -108,8 +108,8 @@ describe("SEC-080: a driver value that only references another variable", () => 
     }
   });
 
-  // Open (SEC-080). Flip to `it` when fixed.
-  it.fails("the scanner refuses a driver value the server expands from the environment", () => {
+  // SEC-080, fixed: the scanner expands references against the real environment as the server does.
+  it("the scanner refuses a driver value the server expands from the environment", () => {
     vi.stubEnv("SEC080_PROBE", "-c role=x");
     const missed = references.filter(([, text]) => !scannerRefuses(text)).map(([label]) => label);
     expect(missed).toEqual([]);

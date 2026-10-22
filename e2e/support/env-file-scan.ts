@@ -56,24 +56,46 @@ function loadNextEnv(): NextEnvModule {
  */
 export function scanEnvText(text: string): Record<string, string> {
   const saved = { ...process.env };
-  try {
+  const log = {
+    info() {},
+    error(...args: unknown[]) {
+      throw new Error(`@next/env could not read the env file text: ${String(args[0])}`);
+    },
+  };
+  const parseWith = (environment: Record<string, string | undefined>): Record<string, string> => {
     for (const key of Object.keys(process.env)) delete process.env[key];
-    const nextEnv = loadNextEnv();
-    const log = {
-      info() {},
-      error(...args: unknown[]) {
-        throw new Error(`@next/env could not read the env file text: ${String(args[0])}`);
-      },
-    };
-    const [, parsed] = nextEnv.processEnv(
+    for (const [name, value] of Object.entries(environment)) {
+      if (value !== undefined) process.env[name] = value;
+    }
+    const [, parsed] = loadNextEnv().processEnv(
       [{ path: ".env", contents: text, env: {} }],
       REPO_ROOT,
       log,
       true,
     );
-    const result: Record<string, string> = {};
+    const out: Record<string, string> = {};
     for (const [name, value] of Object.entries(parsed ?? {})) {
-      if (value !== undefined) result[name] = value;
+      if (value !== undefined) out[name] = value;
+    }
+    return out;
+  };
+  const isDriverName = (name: string): boolean =>
+    REFUSED_ENVIRONMENT_VARIABLES.some((entry) => entry === name.toUpperCase());
+  try {
+    // Pass 1: empty environment, so a name the real environment already holds is still read from
+    // the file (the parser skips such names).
+    const result = parseWith({});
+    // Pass 2 (SEC-080): the server expands `$NAME` and `${NAME}` against the real environment.
+    // Parse again with the real environment, minus the driver names, and take the driver values
+    // from this pass, so a driver value that only references another variable is read as the
+    // server reads it.
+    const withoutDrivers: Record<string, string | undefined> = {};
+    for (const [name, value] of Object.entries(saved)) {
+      if (!isDriverName(name)) withoutDrivers[name] = value;
+    }
+    const expanded = parseWith(withoutDrivers);
+    for (const [name, value] of Object.entries(expanded)) {
+      if (isDriverName(name)) result[name] = value;
     }
     return result;
   } finally {
