@@ -77,6 +77,9 @@ export function StoreForm({ store }: { store: SellerStoreDto }) {
   const [seenEditableKey, setSeenEditableKey] = useState(editableKey);
   // Key of the record the typed values were last seeded from: the page's store, or the server's
   // answer to a save. The refresh after a save brings that same record and must not re-seed (CR-119).
+  // Separate from `seenEditableKey` on purpose (CR-126): that one only tracks the last prop seen, so
+  // after a save it holds the old key. Merged into one, the refresh would compare the new prop with
+  // the old key and re-seed, which brings CR-119 back.
   const [ownKey, setOwnKey] = useState(editableKey);
   if (seenStoreKey !== storeKey) {
     setSeenStoreKey(storeKey);

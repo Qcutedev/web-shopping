@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
+import type { ImageRef } from "@/modules/catalog/schema";
 import type { SellerProductDto } from "@/modules/inventory/schema";
 import { productEditableKey, storeEditableKey } from "./editable-key";
+
+const image: ImageRef = { key: "k", url: "/u" };
 
 const product: SellerProductDto = {
   id: "p1",
@@ -48,9 +51,7 @@ describe("productEditableKey", () => {
     expect(
       productEditableKey({ ...product, category: { id: "c2", name: "cat", isActive: true } }),
     ).not.toBe(base);
-    expect(
-      productEditableKey({ ...product, images: [{ key: "k", url: "/u", alt: "" } as never] }),
-    ).not.toBe(base);
+    expect(productEditableKey({ ...product, images: [image] })).not.toBe(base);
   });
 
   it("ignores stock and fields the form does not edit", () => {
@@ -71,7 +72,7 @@ describe("storeEditableKey", () => {
     expect(storeEditableKey({ ...store, name: "other" })).not.toBe(base);
     expect(storeEditableKey({ ...store, description: null })).not.toBe(base);
     expect(storeEditableKey({ ...store, contactPhone: "0899999999" })).not.toBe(base);
-    expect(storeEditableKey({ ...store, logo: { key: "k", url: "/u" } as never })).not.toBe(base);
+    expect(storeEditableKey({ ...store, logo: image })).not.toBe(base);
   });
 
   it("does not confuse a field boundary", () => {
