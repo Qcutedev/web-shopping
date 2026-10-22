@@ -1,18 +1,25 @@
 /**
- * Reads env files for the e2e refusal checks the way the e2e `next dev` server reads them (SEC-074).
+ * Reads env files for the e2e refusal checks with the parser the e2e `next dev` server uses
+ * (SEC-074, SEC-079).
  *
- * The server loads its files with `@next/env` (dotenv syntax). Node's `parseEnv` disagrees with
- * that parser on a byte order mark, on lone CR line ends, and on the colon form `NAME: value`, so
- * a file could set `PGOPTIONS` for the server while the check saw nothing. This scanner is
- * deliberately lenient and over-reports: it is built to read every form known to differ (the list
- * above, plus the JavaScript line terminators U+2028 and U+2029, SEC-078), not proven to read every
- * form dotenv reads. A line that dotenv would not read as an assignment may also be flagged;
- * refusing a run for it is the safe side.
+ * The server loads its files with `@next/env` (dotenv syntax). Node's `parseEnv` and any line
+ * scanner disagree with it on a byte order mark, lone CR line ends, the colon form, U+2028 and
+ * U+2029 as line ends, and an assignment whose name, `=` or `:`, and value sit on different lines.
+ * This module therefore does not parse by itself: it hands the text to the `@next/env` that `next`
+ * resolves to and reads back what that parser set. It cannot disagree with the server, because it
+ * is the server's parser. If the parser cannot be loaded or fails, the function throws and the run
+ * is refused (fail closed).
  *
- * Pure: no file access, no environment, no database. Safe to import from a unit test.
+ * No file access, no database. `process.env` is cleared for the duration of one synchronous call
+ * and restored in a `finally`, and each call loads its own copy of `@next/env`, so no state is
+ * shared with other callers. Safe to import from a unit test.
  */
 
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+
 import { REFUSED_ENVIRONMENT_VARIABLES } from "../../tests/helpers/test-database-url";
+import { REPO_ROOT } from "./constants";
 
 /** Every file `next dev` may load, whatever `NODE_ENV` is (`.env.test*` when it is `test`). */
 export const NEXT_ENV_FILE_NAMES = [
@@ -24,38 +31,55 @@ export const NEXT_ENV_FILE_NAMES = [
   ".env.test.local",
 ] as const;
 
-// JavaScript `^`/`$` in multiline mode, which dotenv uses, also break at U+2028 and U+2029.
-const LINE_END = new RegExp(
-  `\r\n|[\r\n${String.fromCodePoint(0x2028)}${String.fromCodePoint(0x2029)}]`,
-);
+type NextEnvModule = {
+  processEnv: (
+    loadedEnvFiles: Array<{ path: string; contents: string; env: Record<string, string> }>,
+    dir: string,
+    log: { info: () => void; error: (...args: unknown[]) => void },
+    forceReload: boolean,
+  ) => Array<Record<string, string | undefined> | undefined>;
+};
 
-const ASSIGNMENT = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*[=:]\s*(.*)$/;
-
-function cleanValue(rest: string): string {
-  const text = rest.trim();
-  const quote = text[0];
-  if (quote === '"' || quote === "'" || quote === "`") {
-    const end = text.indexOf(quote, 1);
-    return end === -1 ? text.slice(1) : text.slice(1, end);
-  }
-  const hash = text.search(/(^|\s)#/);
-  return (hash === -1 ? text : text.slice(0, hash)).trim();
+/** A fresh copy of the `@next/env` that the repository's `next` uses. */
+function loadNextEnv(): NextEnvModule {
+  const requireFromRepo = createRequire(join(REPO_ROOT, "package.json"));
+  const nextDir = dirname(requireFromRepo.resolve("next/package.json"));
+  const requireFromNext = createRequire(join(nextDir, "package.json"));
+  const entry = requireFromNext.resolve("@next/env");
+  delete requireFromNext.cache[entry];
+  return requireFromNext(entry) as NextEnvModule;
 }
 
 /**
- * Every `NAME=value` and `NAME: value` assignment of an env file text, last one wins. Names keep
- * their letter case. A leading byte order mark is dropped; CRLF, CR, LF, U+2028, and U+2029 all
- * end a line.
+ * Every assignment the e2e server's `@next/env` reads from an env file text, last one wins. Names
+ * keep their letter case. Throws if the parser cannot run.
  */
 export function scanEnvText(text: string): Record<string, string> {
-  const result: Record<string, string> = {};
-  const lines = text.replace(/^\uFEFF/, "").split(LINE_END);
-  for (const line of lines) {
-    const match = ASSIGNMENT.exec(line);
-    if (match === null) continue;
-    result[match[1] as string] = cleanValue(match[2] ?? "");
+  const saved = { ...process.env };
+  try {
+    for (const key of Object.keys(process.env)) delete process.env[key];
+    const nextEnv = loadNextEnv();
+    const log = {
+      info() {},
+      error(...args: unknown[]) {
+        throw new Error(`@next/env could not read the env file text: ${String(args[0])}`);
+      },
+    };
+    const [, parsed] = nextEnv.processEnv(
+      [{ path: ".env", contents: text, env: {} }],
+      REPO_ROOT,
+      log,
+      true,
+    );
+    const result: Record<string, string> = {};
+    for (const [name, value] of Object.entries(parsed ?? {})) {
+      if (value !== undefined) result[name] = value;
+    }
+    return result;
+  } finally {
+    for (const key of Object.keys(process.env)) delete process.env[key];
+    Object.assign(process.env, saved);
   }
-  return result;
 }
 
 /**

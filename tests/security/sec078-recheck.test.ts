@@ -9,8 +9,8 @@
  * scanner refuses a text the server does not read) is allowed by design and not asserted.
  *
  * Two families: a whole assignment that starts after the separator (SEC-078, fixed), and one
- * assignment whose name, `=` or `:`, and value are split by the separator (SEC-079, open,
- * `it.fails`).
+ * assignment whose name, `=` or `:`, and value are split by the separator (SEC-079, fixed:
+ * the scanner now parses with `@next/env` itself).
  *
  * Invisible characters are built with `String.fromCodePoint` only (SEC-043).
  */
@@ -126,14 +126,10 @@ describe("SEC-078 re-check: differential sweep of separators against @next/env",
     expect(nextEnvSetsDriver(`PGOPTIONS:${newline}-c role=x\n`)).toBe(true);
   });
 
-  // SEC-079 (open): name, `=` or `:`, and value on different lines. Flip to `it` when fixed.
-  it.fails(
-    "SEC-079: refuses an assignment split across line terminators",
-    () => {
-      const { serverReads, missed } = sweep(INSIDE);
-      expect(serverReads).toBeGreaterThan(20);
-      expect(missed).toEqual([]);
-    },
-    60_000,
-  );
+  // SEC-079 (fixed): name, `=` or `:`, and value on different lines.
+  it("SEC-079: refuses an assignment split across line terminators", () => {
+    const { serverReads, missed } = sweep(INSIDE);
+    expect(serverReads).toBeGreaterThan(20);
+    expect(missed).toEqual([]);
+  }, 60_000);
 });
