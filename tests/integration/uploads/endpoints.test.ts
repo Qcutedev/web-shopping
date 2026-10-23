@@ -19,6 +19,7 @@ import { POST as postUploadRoute } from "@/app/api/v1/seller/uploads/route";
 import {
   cleanUpExpiredOrphans,
   createUpload,
+  generateStorageKey,
   LocalDiskStorage,
   MAX_UNATTACHED_UPLOADS_PER_STORE,
   MAX_UPLOAD_FILE_BYTES,
@@ -42,8 +43,16 @@ import {
   createSellerOrderRow,
   createUpload as createUploadRow,
 } from "../../helpers/factories";
+import { diffSnapshots, snapshotDatabase } from "../../helpers/snapshot";
 import { APP_ORIGIN, APP_URL, resetProcessRateLimiter, stubAuthEnvironment } from "../auth/support";
-import { errorCode, json, request as jsonRequest, signedIn } from "../sellers/support";
+import { call as sellerProducts } from "../inventory/support";
+import {
+  errorCode,
+  json,
+  request as jsonRequest,
+  type SignedIn,
+  signedIn,
+} from "../sellers/support";
 
 let uploadDir: string;
 let outsideDir: string;
@@ -926,14 +935,16 @@ describe("SEC-068: GET /api/files/{key} serves a file that is not public only to
     return key;
   }
 
-  it("not public (unattached, draft, pending, rejected, taken down, archived, inactive category): only the owner, every other caller the unknown-key 404", async () => {
+  // Changed with BR-41 (SEC-090, 2026-10-23): an admin session now reads the pictures attached to
+  // a product; the unattached upload stays refused to the admin.
+  it("not public (unattached, draft, pending, rejected, taken down, archived, inactive category): the owner, the admin for product pictures only, every other caller the unknown-key 404", async () => {
     const owner = await signedIn("SELLER");
     const storeId = owner.storeId ?? "";
     const other = await signedIn("SELLER");
     const customer = await signedIn("CUSTOMER");
     const admin = await signedIn("ADMIN");
-    const keys = [
-      await uploadedKey(owner.cookie),
+    const unattached = await uploadedKey(owner.cookie);
+    const pictures = [
       await pictureOf(owner.cookie, storeId, { status: "DRAFT", moderationStatus: "PENDING" }),
       await pictureOf(owner.cookie, storeId, { moderationStatus: "PENDING" }),
       await pictureOf(owner.cookie, storeId, { moderationStatus: "REJECTED" }),
@@ -943,12 +954,14 @@ describe("SEC-068: GET /api/files/{key} serves a file that is not public only to
     ];
     const unknown = await answer("e".repeat(32));
     expect(unknown.status).toBe(404);
-    for (const key of keys) {
+    for (const key of [unattached, ...pictures]) {
       expect((await answer(key, owner.cookie)).status, key).toBe(200);
-      for (const cookie of [undefined, other.cookie, customer.cookie, admin.cookie]) {
+      for (const cookie of [undefined, other.cookie, customer.cookie]) {
         expect(await answer(key, cookie), key).toEqual(unknown);
       }
     }
+    expect(await answer(unattached, admin.cookie)).toEqual(unknown);
+    for (const key of pictures) expect((await answer(key, admin.cookie)).status, key).toBe(200);
   });
 
   it("public: a picture of a visible product, the logo of an approved store, and an order item picture are served to anyone", async () => {
@@ -1020,5 +1033,219 @@ describe("SEC-068: GET /api/files/{key} serves a file that is not public only to
     expect(plan).toContain("OrderItem_productImageUploadId_idx");
     expect(plan).toContain("ProductImage_uploadId_key");
     expect(plan).toContain("Store_logoUploadId_key");
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// BR-41 (SEC-090): an admin reads the pictures attached to any product; REQ-A-05 (a) to (g)
+// ---------------------------------------------------------------------------------------------
+
+describe("BR-41: GET /api/files/{key} with an admin session (REQ-A-05 acceptance)", () => {
+  /** The error envelope without its request id, or null for a 200 (whose body is drained). */
+  async function body(response: Response): Promise<unknown> {
+    if (response.status === 200) {
+      await response.arrayBuffer();
+      return null;
+    }
+    const { error } = await json<{ error: Record<string, unknown> }>(response);
+    const rest = { ...error };
+    delete rest.requestId;
+    return rest;
+  }
+
+  function get(key: string, cookie?: string): Promise<Response> {
+    return getFileRoute(fileRequest(key, cookie), fileContext(key));
+  }
+
+  /** The 404 of a key that matches the pattern and has no upload row. */
+  async function unknownKey(): Promise<unknown> {
+    const response = await get(generateStorageKey());
+    expect(response.status).toBe(404);
+    return body(response);
+  }
+
+  /** An upload of `storeId` with real bytes, written directly (a suspended store cannot upload). */
+  async function stored(
+    storeId: string,
+    contentType: "image/jpeg" | "image/png" = "image/jpeg",
+  ): Promise<{ id: string; key: string }> {
+    const key = generateStorageKey();
+    const bytes = contentType === "image/png" ? pngBytes(400) : jpegBytes(400);
+    await new LocalDiskStorage(uploadDir).put(key, bytes);
+    const row = await createUploadRow({
+      storeId,
+      storageKey: key,
+      contentType,
+      sizeBytes: bytes.byteLength,
+    });
+    return { id: row.id, key };
+  }
+
+  /** A product of `storeId` in the given state with one picture; returns the picture's key. */
+  async function pictureOf(
+    storeId: string,
+    product: {
+      status?: "DRAFT" | "PUBLISHED" | "ARCHIVED";
+      moderationStatus?: "PENDING" | "APPROVED" | "REJECTED" | "TAKEN_DOWN";
+      categoryActive?: boolean;
+      contentType?: "image/jpeg" | "image/png";
+    } = {},
+  ): Promise<{ key: string; productId: string }> {
+    const category = await createCategory({ isActive: product.categoryActive ?? true });
+    const row = await createProduct({
+      storeId,
+      categoryId: category.id,
+      status: product.status ?? "PUBLISHED",
+      moderationStatus: product.moderationStatus ?? "APPROVED",
+      ...(product.moderationStatus === "REJECTED" || product.moderationStatus === "TAKEN_DOWN"
+        ? { moderationNote: "x" }
+        : {}),
+    });
+    const upload = await stored(storeId, product.contentType);
+    await createProductImage({ productId: row.id, uploadId: upload.id });
+    return { key: upload.key, productId: row.id };
+  }
+
+  /** Every picture of (a): one per product state, plus a suspended store's; owner per picture. */
+  async function hiddenPictures(): Promise<{ key: string; owner: SignedIn; type: string }[]> {
+    const owner = await signedIn("SELLER");
+    const suspended = await signedIn("SELLER", "SUSPENDED");
+    const storeId = owner.storeId ?? "";
+    const states = [
+      { status: "PUBLISHED", moderationStatus: "PENDING", contentType: "image/png" },
+      { status: "DRAFT", moderationStatus: "PENDING" },
+      { moderationStatus: "REJECTED" },
+      { moderationStatus: "TAKEN_DOWN" },
+      { status: "ARCHIVED" },
+      { categoryActive: false },
+    ] as const;
+    const result: { key: string; owner: SignedIn; type: string }[] = [];
+    for (const state of states) {
+      const { key } = await pictureOf(storeId, state);
+      result.push({ key, owner, type: "contentType" in state ? state.contentType : "image/jpeg" });
+    }
+    const { key } = await pictureOf(suspended.storeId ?? "");
+    result.push({ key, owner: suspended, type: "image/jpeg" });
+    return result;
+  }
+
+  it("(a) an admin reads the picture of a PENDING published, draft, rejected, taken-down, archived product, and of a suspended store or inactive category", async () => {
+    const admin = await signedIn("ADMIN");
+    for (const { key, type } of await hiddenPictures()) {
+      const response = await get(key, admin.cookie);
+      expect({ key, status: response.status }).toEqual({ key, status: 200 });
+      expect(response.headers.get("content-type")).toBe(type);
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(response.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
+      expect(response.headers.get("set-cookie")).toBeNull();
+      expect(new Uint8Array(await response.arrayBuffer()).byteLength).toBe(
+        Number(response.headers.get("content-length")),
+      );
+    }
+  });
+
+  it("(b) the owning seller still reads each of them, a suspended owner included", async () => {
+    for (const { key, owner } of await hiddenPictures()) {
+      expect({ key, status: (await get(key, owner.cookie)).status }).toEqual({ key, status: 200 });
+    }
+  });
+
+  it("(c) no session, a customer, and another store's seller get the unknown-key 404", async () => {
+    const customer = await signedIn("CUSTOMER");
+    const other = await signedIn("SELLER");
+    const expected = await unknownKey();
+    for (const { key } of await hiddenPictures()) {
+      for (const [name, cookie] of [
+        ["anonymous", undefined],
+        ["customer", customer.cookie],
+        ["other seller", other.cookie],
+      ] as const) {
+        const response = await get(key, cookie);
+        expect({ name, status: response.status }).toEqual({ name, status: 404 });
+        expect({ name, body: await body(response) }).toEqual({ name, body: expected });
+      }
+    }
+  });
+
+  it("(d) an admin gets that same 404 for an unattached upload, an expired orphan, a key outside the pattern, and a suspended store's logo", async () => {
+    const admin = await signedIn("ADMIN");
+    const owner = await signedIn("SELLER");
+    const suspended = await signedIn("SELLER", "SUSPENDED");
+    const unattached = await stored(owner.storeId ?? "");
+    const orphan = await stored(owner.storeId ?? "");
+    await setAge(orphan.key, 25);
+    const logo = await stored(suspended.storeId ?? "");
+    await db.store.update({
+      where: { id: suspended.storeId ?? "" },
+      data: { logoUploadId: logo.id },
+    });
+    // Controls: the owners still read the unattached upload and the suspended store's logo.
+    expect((await get(unattached.key, owner.cookie)).status).toBe(200);
+    expect((await get(logo.key, suspended.cookie)).status).toBe(200);
+
+    const expected = await unknownKey();
+    for (const key of [unattached.key, orphan.key, "../not-a-key", "A".repeat(32), logo.key]) {
+      const response = await get(key, admin.cookie);
+      expect({ key, status: response.status }).toEqual({ key, status: 404 });
+      expect({ key, body: await body(response) }).toEqual({ key, body: expected });
+    }
+  });
+
+  it("(e) after the seller replaces a picture, the admin gets 404 for the old key and 200 for the new one", async () => {
+    const admin = await signedIn("ADMIN");
+    const owner = await signedIn("SELLER");
+    const storeId = owner.storeId ?? "";
+    const product = await createProduct({ storeId, moderationStatus: "PENDING" });
+    const oldKey = await uploadedKey(owner.cookie);
+    await createProductImage({
+      productId: product.id,
+      uploadId: (await db.upload.findUniqueOrThrow({ where: { storageKey: oldKey } })).id,
+    });
+    expect((await get(oldKey, admin.cookie)).status).toBe(200);
+
+    const newKey = await uploadedKey(owner.cookie);
+    const patched = await sellerProducts.patch(product.id, {
+      cookie: owner.cookie,
+      body: { imageKeys: [newKey] },
+    });
+    expect(patched.status).toBe(200);
+
+    const expected = await unknownKey();
+    const old = await get(oldKey, admin.cookie);
+    expect(old.status).toBe(404);
+    expect(await body(old)).toEqual(expected);
+    expect((await get(newKey, admin.cookie)).status).toBe(200);
+    // The old upload still exists and its owner still reads it inside the grace period.
+    expect((await get(oldKey, owner.cookie)).status).toBe(200);
+  });
+
+  it("(f) a deactivated admin's old session cookie gets the unknown-key 404 for a picture that is not public", async () => {
+    const admin = await signedIn("ADMIN");
+    const owner = await signedIn("SELLER");
+    const { key } = await pictureOf(owner.storeId ?? "", { moderationStatus: "PENDING" });
+    expect((await get(key, admin.cookie)).status).toBe(200);
+    // Written directly, so the session row survives and only the active flag refuses it.
+    await db.user.update({ where: { id: admin.userId }, data: { isActive: false } });
+    const response = await get(key, admin.cookie);
+    expect(response.status).toBe(404);
+    expect(await body(response)).toEqual(await unknownKey());
+  });
+
+  it("(g) the requests of (a) and (c) change no row of any table, the audit log included", async () => {
+    const admin = await signedIn("ADMIN");
+    const customer = await signedIn("CUSTOMER");
+    const other = await signedIn("SELLER");
+    const pictures = await hiddenPictures();
+    const auditBefore = await db.auditLog.count();
+    const before = await snapshotDatabase();
+    for (const { key } of pictures) {
+      expect((await get(key, admin.cookie)).status).toBe(200);
+      for (const cookie of [undefined, customer.cookie, other.cookie]) {
+        await body(await get(key, cookie));
+      }
+    }
+    expect(diffSnapshots(before, await snapshotDatabase())).toEqual([]);
+    expect(await db.auditLog.count()).toBe(auditBefore);
   });
 });

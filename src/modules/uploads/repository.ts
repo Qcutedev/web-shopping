@@ -101,6 +101,11 @@ export interface RegisteredFile {
    * product that is visible now (BR-05, `VISIBLE_PRODUCT_SQL`).
    */
   publicPicture: boolean;
+  /**
+   * True when a `ProductImage` row attaches the upload to a product, whatever that product's
+   * status, moderation status, store, or category (BR-41: what an admin session may read).
+   */
+  productPicture: boolean;
   /** True when some store has the upload as its logo, public or not. */
   isLogo: boolean;
 }
@@ -132,6 +137,7 @@ export function fileLookupStatement(storageKey: string, graceSeconds: number): P
           JOIN "Category" c ON c."id" = p."categoryId"
           WHERE pim."uploadId" = f."id" AND ${VISIBLE_PRODUCT_SQL})
       ) AS "publicPicture",
+      EXISTS (SELECT 1 FROM "ProductImage" pim WHERE pim."uploadId" = f."id") AS "productPicture",
       EXISTS (SELECT 1 FROM "Store" ls WHERE ls."logoUploadId" = f."id") AS "isLogo"
     FROM "Upload" f
     WHERE f."storageKey" = ${storageKey}`;

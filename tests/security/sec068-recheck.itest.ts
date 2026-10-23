@@ -5,6 +5,10 @@
  * this file is written from the rule in SECURITY.md SEC-068 "Remediation" (1) and API_CONTRACTS.md
  * section 5.8 "Who may read", not from those cases.
  *
+ * Changed with BR-41 (SEC-090, 2026-10-23, by backend-api; for security to re-check): an admin
+ * session now reads a file that is attached to a product as a picture, whatever the product's
+ * state (`expectOwnerOnly`, argument `admin`). Unattached uploads and logos stay refused to it.
+ *
  * This file holds no character outside printable ASCII and no backslash-u escape (SEC-040).
  *
  * The real route module is called in process with real session cookies, the worker's PostgreSQL
@@ -159,13 +163,36 @@ function nonOwners(c: Callers): [string, string | undefined][] {
   ];
 }
 
-/** Asserts: the owner gets 200 with the protective headers; every other caller the unknown-key 404. */
-async function expectOwnerOnly(key: string, c: Callers, expectedRefusal: unknown): Promise<void> {
+/**
+ * Who besides the owner reads a file that is not public. BR-41 (SEC-090, 2026-10-23): an admin
+ * session reads an upload attached to a product as a picture, whatever the product's state, and
+ * nothing else (an unattached upload, a logo).
+ */
+type AdminAccess = "admin reads (product picture)" | "admin refused";
+
+/**
+ * Asserts: the owner gets 200 with the protective headers; the admin gets the same 200 when
+ * `admin` says so; every other caller the unknown-key 404.
+ */
+async function expectOwnerOnly(
+  key: string,
+  c: Callers,
+  expectedRefusal: unknown,
+  admin: AdminAccess,
+): Promise<void> {
   for (const [name, cookie] of nonOwners(c)) {
+    if (name === "admin" && admin === "admin reads (product picture)") {
+      await expectServed(await getFile(key, cookie));
+      continue;
+    }
     const body = await refusal(await getFile(key, cookie));
     expect({ name, body }).toEqual({ name, body: expectedRefusal });
   }
-  const response = await getFile(key, c.owner.cookie);
+  await expectServed(await getFile(key, c.owner.cookie));
+}
+
+/** Asserts a 200 with the stored bytes and the protective headers. */
+async function expectServed(response: Response): Promise<void> {
   expect(response.status).toBe(200);
   expect(response.headers.get("content-type")).toBe("image/jpeg");
   expect(response.headers.get("x-content-type-options")).toBe("nosniff");
@@ -195,7 +222,7 @@ describe("SEC-068 re-check: a file that is not public is served to the owning se
   it("an unattached upload inside the grace period", async () => {
     const c = await callers();
     const { key } = await storedUpload(c.owner.storeId);
-    await expectOwnerOnly(key, c, await unknownKeyRefusal());
+    await expectOwnerOnly(key, c, await unknownKeyRefusal(), "admin refused");
   });
 
   for (const [label, state] of [
@@ -209,7 +236,7 @@ describe("SEC-068 re-check: a file that is not public is served to the owning se
     it(`a picture of ${label}`, async () => {
       const c = await callers();
       const { key } = await pictureOf(c.owner.storeId, state);
-      await expectOwnerOnly(key, c, await unknownKeyRefusal());
+      await expectOwnerOnly(key, c, await unknownKeyRefusal(), "admin reads (product picture)");
     });
   }
 
@@ -219,8 +246,8 @@ describe("SEC-068 re-check: a file that is not public is served to the owning se
     const { key } = await pictureOf(owner.storeId);
     const logo = await logoOf(owner.storeId);
     const expected = await unknownKeyRefusal();
-    await expectOwnerOnly(key, c, expected);
-    await expectOwnerOnly(logo, c, expected);
+    await expectOwnerOnly(key, c, expected, "admin reads (product picture)");
+    await expectOwnerOnly(logo, c, expected, "admin refused");
   });
 
   it("a deactivated owner: the product picture and logo are not public, and the owner's remaining session no longer reads them", async () => {
@@ -232,7 +259,12 @@ describe("SEC-068 re-check: a file that is not public is served to the owning se
     await db.user.update({ where: { id: c.owner.userId }, data: { isActive: false } });
     const expected = await unknownKeyRefusal();
     for (const k of [key, logo]) {
-      for (const [, cookie] of [...nonOwners(c), ["owner", c.owner.cookie] as const]) {
+      for (const [name, cookie] of [...nonOwners(c), ["owner", c.owner.cookie] as const]) {
+        // BR-41: the admin still reads the product picture (not the logo), whatever its store.
+        if (name === "admin" && k === key) {
+          await expectServed(await getFile(k, cookie));
+          continue;
+        }
         expect(await refusal(await getFile(k, cookie))).toEqual(expected);
       }
     }
@@ -310,7 +342,7 @@ describe("SEC-068 re-check: takedown, suspension, and category switch-off stop p
       where: { id: productId },
       data: { moderationStatus: "TAKEN_DOWN", moderationNote: "takedown" },
     });
-    await expectOwnerOnly(key, c, await unknownKeyRefusal());
+    await expectOwnerOnly(key, c, await unknownKeyRefusal(), "admin reads (product picture)");
     await db.product.update({ where: { id: productId }, data: { moderationStatus: "APPROVED" } });
     await expectPublic(key, c);
     expect(await db.upload.findUniqueOrThrow({ where: { id: uploadId } })).toEqual(before);
@@ -322,8 +354,8 @@ describe("SEC-068 re-check: takedown, suspension, and category switch-off stop p
     const logo = await logoOf(c.owner.storeId);
     await db.store.update({ where: { id: c.owner.storeId }, data: { status: "SUSPENDED" } });
     const expected = await unknownKeyRefusal();
-    await expectOwnerOnly(key, c, expected);
-    await expectOwnerOnly(logo, c, expected);
+    await expectOwnerOnly(key, c, expected, "admin reads (product picture)");
+    await expectOwnerOnly(logo, c, expected, "admin refused");
     await db.store.update({ where: { id: c.owner.storeId }, data: { status: "APPROVED" } });
     await expectPublic(key, c);
     await expectPublic(logo, c);
@@ -334,7 +366,7 @@ describe("SEC-068 re-check: takedown, suspension, and category switch-off stop p
     const { key, productId } = await pictureOf(c.owner.storeId);
     const { categoryId } = await db.product.findUniqueOrThrow({ where: { id: productId } });
     await db.category.update({ where: { id: categoryId }, data: { isActive: false } });
-    await expectOwnerOnly(key, c, await unknownKeyRefusal());
+    await expectOwnerOnly(key, c, await unknownKeyRefusal(), "admin reads (product picture)");
     await db.category.update({ where: { id: categoryId }, data: { isActive: true } });
     await expectPublic(key, c);
   });
@@ -348,7 +380,7 @@ describe("SEC-068 re-check: takedown, suspension, and category switch-off stop p
     await expect(
       createProductImage({ productId: visible.id, uploadId: taken.uploadId }),
     ).rejects.toThrow();
-    await expectOwnerOnly(taken.key, c, await unknownKeyRefusal());
+    await expectOwnerOnly(taken.key, c, await unknownKeyRefusal(), "admin reads (product picture)");
   });
 });
 

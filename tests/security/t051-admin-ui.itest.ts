@@ -89,27 +89,26 @@ async function queuedProductWithPicture() {
 }
 
 describe("SEC-090: the admin cannot see the pictures of a product awaiting approval", () => {
-  it("documents today: the review page links the picture, the owner reads it, the admin gets 404", async () => {
+  // Changed with the BR-41 fix (2026-10-23, backend-api; for security to re-check): the admin
+  // now reads the queued picture, so the last-but-one assertion is 200 instead of 404.
+  it("documents today: the review page links the picture, the owner and the admin read it, a request without a session gets 404", async () => {
     const { owner, admin, dto, key } = await queuedProductWithPicture();
     expect(dto.moderationStatus).toBe("PENDING");
     expect(dto.images.map((image) => image.url)).toEqual([`/api/files/${key}`]);
     expect((await getFile(`/api/files/${key}`, owner.cookie)).status).toBe(200);
-    expect((await getFile(`/api/files/${key}`, admin.cookie)).status).toBe(404);
+    expect((await getFile(`/api/files/${key}`, admin.cookie)).status).toBe(200);
     expect((await getFile(`/api/files/${key}`)).status).toBe(404);
   });
 
-  it.fails(
-    "the admin's session can read every picture the review page shows for a queued product",
-    async () => {
-      const { admin, dto } = await queuedProductWithPicture();
-      expect(dto.images.length).toBeGreaterThan(0);
-      for (const image of dto.images) {
-        const response = await getFile(image.url, admin.cookie);
-        expect(response.status).toBe(200);
-        expect(response.headers.get("x-content-type-options")).toBe("nosniff");
-      }
-    },
-  );
+  it("the admin's session can read every picture the review page shows for a queued product", async () => {
+    const { admin, dto } = await queuedProductWithPicture();
+    expect(dto.images.length).toBeGreaterThan(0);
+    for (const image of dto.images) {
+      const response = await getFile(image.url, admin.cookie);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    }
+  });
 
   it("whatever the fix, a request without a session still gets 404 for the queued picture (control)", async () => {
     const { dto } = await queuedProductWithPicture();

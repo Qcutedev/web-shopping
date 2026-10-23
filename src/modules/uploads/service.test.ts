@@ -46,6 +46,7 @@ type FoundRow = {
   sizeBytes: number;
   expiredOrphan: boolean;
   publicPicture?: boolean;
+  productPicture?: boolean;
   isLogo?: boolean;
 } | null;
 const findMock = vi.fn<(...args: unknown[]) => Promise<FoundRow>>(async () => null);
@@ -114,6 +115,7 @@ const servable = {
   storeId: "store-1",
   expiredOrphan: false,
   publicPicture: true,
+  productPicture: true,
   isLogo: false,
 };
 
@@ -374,25 +376,44 @@ describe("SEC-068: who may read a file (mayServe)", () => {
   // Against the data model, but the role is what is judged: a non-seller with the store id.
   const customerWithStore: Actor = { ...customer, storeId: "store-1" };
 
+  // Against the data model, but the role is what is judged: an admin with the store id.
+  const adminWithStore: Actor = { ...admin, storeId: "store-1" };
+
   it("a public file is served to everyone, anonymous included", () => {
-    const file = { storeId: "store-1", isPublic: true };
-    for (const who of [null, owner, otherSeller, customer, admin]) {
-      expect(mayServe(file, who)).toBe(true);
+    for (const isProductPicture of [true, false]) {
+      const file = { storeId: "store-1", isPublic: true, isProductPicture };
+      for (const who of [null, owner, otherSeller, customer, admin]) {
+        expect(mayServe(file, who)).toBe(true);
+      }
     }
   });
 
-  it("a file that is not public is served only to a SELLER of the owning store, suspended or not", () => {
-    const file = { storeId: "store-1", isPublic: false };
+  it("a file that is not public and attached to no product: only a SELLER of the owning store, suspended or not", () => {
+    const file = { storeId: "store-1", isPublic: false, isProductPicture: false };
     expect(mayServe(file, owner)).toBe(true);
     expect(mayServe(file, suspendedOwner)).toBe(true);
-    for (const who of [null, otherSeller, customer, admin, customerWithStore]) {
+    for (const who of [null, otherSeller, customer, admin, adminWithStore, customerWithStore]) {
+      expect(mayServe(file, who)).toBe(false);
+    }
+  });
+
+  it("BR-41: a product picture that is not public: the owning SELLER and any ADMIN, nobody else", () => {
+    const file = { storeId: "store-1", isPublic: false, isProductPicture: true };
+    expect(mayServe(file, owner)).toBe(true);
+    expect(mayServe(file, suspendedOwner)).toBe(true);
+    expect(mayServe(file, admin)).toBe(true);
+    for (const who of [null, otherSeller, customer, customerWithStore]) {
       expect(mayServe(file, who)).toBe(false);
     }
   });
 });
 
 describe("SEC-068: openFile serves a file that is not public only to its owner", () => {
-  const notPublic = { ...servable, publicPicture: false };
+  // Not public and attached to no product (an unattached upload, or a logo).
+  const notPublic = { ...servable, publicPicture: false, productPicture: false };
+  // BR-41: not public, attached to a product that is not visible.
+  const hiddenPicture = { ...servable, publicPicture: false, productPicture: true };
+  const admin: Actor = { userId: "user-4", role: "ADMIN", storeId: null, storeStatus: null };
   const resolver = (who: Actor | null) => vi.fn(async () => who);
 
   it("a public picture is served without asking for the session", async () => {
@@ -434,6 +455,54 @@ describe("SEC-068: openFile serves a file that is not public only to its owner",
     const file = await openFile(KEY, { storage: fakeStorage(jpegBytes(64)) }, resolve);
     expect(file.sizeBytes).toBe(64);
     expect(resolve).toHaveBeenCalledTimes(1);
+  });
+
+  it("BR-41: a hidden product picture is served to an admin, with the recorded type and size", async () => {
+    findMock.mockResolvedValueOnce({ contentType: "image/webp", sizeBytes: 64, ...hiddenPicture });
+    const resolve = resolver(admin);
+    const file = await openFile(KEY, { storage: fakeStorage(jpegBytes(64)) }, resolve);
+    expect(file.contentType).toBe("image/webp");
+    expect(file.sizeBytes).toBe(64);
+    expect(resolve).toHaveBeenCalledTimes(1);
+  });
+
+  it("BR-41: a hidden product picture is still 404 for anonymous, another seller, and a customer", async () => {
+    const warn = vi.fn();
+    for (const who of [
+      null,
+      { ...seller(), userId: "user-2", storeId: "store-2" },
+      { userId: "user-3", role: "CUSTOMER", storeId: null, storeStatus: null },
+    ] satisfies (Actor | null)[]) {
+      const storage = fakeStorage(jpegBytes(64));
+      findMock.mockResolvedValueOnce({
+        contentType: "image/jpeg",
+        sizeBytes: 64,
+        ...hiddenPicture,
+      });
+      await expect(openFile(KEY, { storage, log: { warn } }, resolver(who))).rejects.toMatchObject({
+        code: "NOT_FOUND",
+        status: 404,
+        details: {},
+      });
+      expect(storage.get).not.toHaveBeenCalled();
+    }
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("BR-41: an admin gets 404 for an unattached upload, a logo of a store that is not public, and an expired orphan", async () => {
+    for (const row of [
+      notPublic,
+      { ...notPublic, isLogo: true },
+      { ...notPublic, expiredOrphan: true },
+    ]) {
+      const storage = fakeStorage(jpegBytes(64));
+      findMock.mockResolvedValueOnce({ contentType: "image/jpeg", sizeBytes: 64, ...row });
+      await expect(openFile(KEY, { storage }, resolver(admin))).rejects.toMatchObject({
+        code: "NOT_FOUND",
+        status: 404,
+      });
+      expect(storage.get).not.toHaveBeenCalled();
+    }
   });
 
   it("a logo is public only when its store is public; asked for that upload id only", async () => {

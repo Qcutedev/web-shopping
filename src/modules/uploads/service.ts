@@ -12,7 +12,9 @@
  *                                        (SEC-065); then `mayServe` (SEC-068): served to anyone
  *                                        only when public (an order item's picture, a picture of
  *                                        a visible product, the logo of a public store), else
- *                                        only to a SELLER session of the owning store
+ *                                        only to a SELLER session of the owning store, or to
+ *                                        an ADMIN session when the upload is attached to a
+ *                                        product as a picture (BR-41, SEC-090)
  *
  * The owner of an upload is the caller's store, taken from the session (`actor.storeId` with
  * `actor.userId`), never from the request (CLAUDE.md rule 6). Uploading attaches nothing.
@@ -154,19 +156,34 @@ export interface FileAccess {
   storeId: string;
   /** An order item's picture, a picture of a visible product, or the logo of a public store. */
   isPublic: boolean;
+  /**
+   * Attached to a product as a picture (a `ProductImage` row), whatever the product's status,
+   * moderation status, store, or category.
+   */
+  isProductPicture: boolean;
 }
 
 /**
- * SEC-068 item 1 (section 5.8 "Serving"): a public file is served to anyone, with or without a
- * session. Any other registered upload (an unattached one inside the grace period, a picture of a
- * draft, of a product awaiting approval, rejected, or taken down, or hidden by its store, owner,
- * or category, the logo of a suspended store) is served only to a `SELLER` whose session's store
- * owns it, whatever that store's status (BR-14: a suspended seller still reads). Everyone else,
- * an admin included, is answered as for an unknown key.
+ * SEC-068 item 1 and BR-41 (section 5.8 "Serving"): a public file is served to anyone, with or
+ * without a session. Any other registered upload (an unattached one inside the grace period, a
+ * picture of a draft, of a product awaiting approval, rejected, or taken down, or hidden by its
+ * store, owner, or category, the logo of a suspended store) is served to:
+ *
+ *   - a `SELLER` whose session's store owns it, whatever that store's status (BR-14: a suspended
+ *     seller still reads);
+ *   - an `ADMIN` only when it is attached to a product as a picture, whatever that product's state
+ *     (BR-41, SEC-090: the admin moderates pictures). An upload attached to no product and the
+ *     logo of a store that is not public stay unreadable by an admin.
+ *
+ * Everyone else is answered as for an unknown key. The actor comes from `getActor`, which is null
+ * for a user who is not active, so a deactivated admin reads nothing here (REQ-A-02).
  */
 export function mayServe(file: FileAccess, actor: Actor | null): boolean {
   if (file.isPublic) return true;
-  return actor !== null && actor.role === "SELLER" && actor.storeId === file.storeId;
+  if (actor === null) return false;
+  if (actor.role === "SELLER") return actor.storeId === file.storeId;
+  if (actor.role === "ADMIN") return file.isProductPicture;
+  return false;
 }
 
 /** Resolves the caller's actor from the request's session; asked only for a file not public. */
@@ -195,7 +212,11 @@ export async function openFile(
   const row = await findUploadByKey(key, ORPHAN_GRACE_PERIOD_SECONDS);
   if (row === null || row.expiredOrphan) throw fileNotFound();
   const isPublic = row.publicPicture || (row.isLogo && (await isLogoOfPublicStore(row.id)));
-  const access: FileAccess = { storeId: row.storeId, isPublic };
+  const access: FileAccess = {
+    storeId: row.storeId,
+    isPublic,
+    isProductPicture: row.productPicture,
+  };
   if (!isPublic && !mayServe(access, await resolveActor())) throw fileNotFound();
   if (!isUploadContentType(row.contentType)) {
     deps.log?.warn("A registered upload has a type that is not allowed", { storageKey: key });
