@@ -181,9 +181,8 @@ export function callEndpoint(
   endpoint: Endpoint,
   options: CallOptions & { id?: string; query?: string } = {},
 ): Promise<Response> {
-  const id = options.id ?? "unknown-id";
-  const path = `${BASE}${endpoint.path.replace("{id}", encodeURIComponent(id))}${options.query ?? endpoint.query ?? ""}`;
-  const { id: _id, query: _query, ...rest } = options;
+  const { id = "unknown-id", query, ...rest } = options;
+  const path = `${BASE}${endpoint.path.replace("{id}", encodeURIComponent(id))}${query ?? endpoint.query ?? ""}`;
   const callOptions: CallOptions =
     endpoint.body !== undefined && rest.body === undefined && rest.rawBody === undefined
       ? { ...rest, body: endpoint.body }
