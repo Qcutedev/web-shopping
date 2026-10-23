@@ -722,6 +722,32 @@ describe("T-020 review: the catalog route files are thin", () => {
     "src/app/api/v1/seller/orders/[id]/status/route.ts",
     "src/app/api/v1/seller/orders/route.ts",
     "src/app/api/v1/seller/summary/route.ts",
+    // T-050 admin routes (23 files, 26 handlers); each guard read and checked in
+    // tests/security/t050-admin.test.ts and tests/security/t050-admin.itest.ts
+    // (docs/reviews/T-050-security.md).
+    "src/app/api/v1/admin/applications/[id]/approve/route.ts",
+    "src/app/api/v1/admin/applications/[id]/reject/route.ts",
+    "src/app/api/v1/admin/applications/route.ts",
+    "src/app/api/v1/admin/audit-logs/route.ts",
+    "src/app/api/v1/admin/categories/[id]/route.ts",
+    "src/app/api/v1/admin/categories/route.ts",
+    "src/app/api/v1/admin/orders/[id]/route.ts",
+    "src/app/api/v1/admin/orders/route.ts",
+    "src/app/api/v1/admin/products/[id]/approve/route.ts",
+    "src/app/api/v1/admin/products/[id]/reject/route.ts",
+    "src/app/api/v1/admin/products/[id]/route.ts",
+    "src/app/api/v1/admin/products/[id]/takedown/route.ts",
+    "src/app/api/v1/admin/products/route.ts",
+    "src/app/api/v1/admin/reports/route.ts",
+    "src/app/api/v1/admin/seller-orders/[id]/status/route.ts",
+    "src/app/api/v1/admin/settings/route.ts",
+    "src/app/api/v1/admin/stores/[id]/reinstate/route.ts",
+    "src/app/api/v1/admin/stores/[id]/suspend/route.ts",
+    "src/app/api/v1/admin/stores/route.ts",
+    "src/app/api/v1/admin/summary/route.ts",
+    "src/app/api/v1/admin/users/[id]/deactivate/route.ts",
+    "src/app/api/v1/admin/users/[id]/reactivate/route.ts",
+    "src/app/api/v1/admin/users/route.ts",
   ];
   const nonAuthRoutes = filesUnder(join(ROOT, "src", "app", "api", "v1"), (path) =>
     path.endsWith("route.ts"),
