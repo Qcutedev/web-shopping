@@ -13,7 +13,7 @@ Not started: checkout UI (T-034), reviews, seller onboarding and seller products
 ## Resume here
 
 
-Session 107 started. Running in parallel: (a) code-review agent on T-050 (read-only, writes `docs/reviews/T-050-code-review.md`); (b) security agent on T-050 (paths `docs/SECURITY.md`, `docs/reviews/T-050-security.md`, `tests/security/t020-t018-catalog-shell.test.ts`); (c) frontend agent on T-051 admin UI (paths `src/app/admin/**`, `src/components/admin/**`, `src/i18n/th.ts`). If no commit follows, inspect `git status` first.
+Session 107 finished. Local commits, not pushed. T-050 code review (`docs/reviews/T-050-code-review.md`) fixed in `f57d929`..`2a87136` except CR-T050-05 (database owner: shared FK helper, SQLSTATE 23001 and 23503) and CR-T050-08. T-050 security review `2fe8748` (`docs/reviews/T-050-security.md`): SEC-088 (Medium, OPEN, owner decides D-024/T12: fix by re-checking acting admin in each write transaction, also sellers approve/reject, or accept) and SEC-089 (High, OPEN: `next` 16.4.0 has 3 advisories, upgrade `next` and `eslint-config-next` to 16.4.1+ before any deploy; start after no agent edits src). T-051 IMPLEMENTED `854fd13`, `89f9957`: 12 admin pages; `pnpm test` 5640 passed; typecheck, lint, format ok; no browser check, build or e2e. T-051 needs its own security review (TM-15), product-requirements review of `th.admin` Thai copy, backend-api to make `src/modules/admin/schema.ts` browser-safe (client copy in `src/components/admin/client-schemas.ts`), no admin link in storefront header, Q42(a) paid time not in order list. Docker container `marketplace-db-test-1` running.
 
 Session 106 finished. Local commits, not pushed. (1) Guard fix `84b93f6`; security re-check `b8f8171`: SEC-081, SEC-083, SEC-084 stay OPEN, new Low SEC-085, SEC-086, SEC-087. OWNER QUESTION: keep fixing the name-based guard (devops, re-check again) or widen D-045 in writing. (2) T-040/T-042/T-043 rows corrected to IMPLEMENTED. (3) T-050 IMPLEMENTED (`e57e3c7`, `961e568`, `c25a89e`): 26 admin endpoints, typecheck, lint, format ok, integration 1471 passed. `pnpm test` fails 1 case by design: security route-list gate `tests/security/t020-t018-catalog-shell.test.ts` needs the 23 `src/app/api/v1/admin/` routes listed after security review. Not yet done: code review, security review of T-050. Commits carry trailer "Claude Opus 5.5" (agent used its own model name); amend only if owner wants.
 
@@ -102,8 +102,8 @@ Notes marked "stale?" were written while Docker was down; later sessions ran the
 | T-043 | Seller orders | IMPLEMENTED | Security review, code review CR-T043-01 to 06 fixed `5b03eac`; not VERIFIED |
 | T-044 | Seller UI | IMPLEMENTED | Code reviewed through CR-156 ([reviews/T-044-code-review.md](reviews/T-044-code-review.md)); e2e 19 passed |
 | T-045 | Seller isolation tests | IMPLEMENTED | Security re-check done in session 84 (`e18965e`); no new finding |
-| T-050 | Admin module | IMPLEMENTED | Commits `e57e3c7` to `c25a89e`; integration 30 admin tests passed; code and security review pending |
-| T-051 | Admin UI | NOT STARTED | |
+| T-050 | Admin module | IMPLEMENTED | Commits `e57e3c7` to `2a87136`; code and security review done; integration 36 admin tests passed; SEC-088, SEC-089, CR-T050-05/08 open |
+| T-051 | Admin UI | IMPLEMENTED | Commits `854fd13`, `89f9957`; component tests pass; no browser check, no security review |
 | T-052 | Admin permission tests | NOT STARTED | |
 | T-060 | E2E suite | NOT STARTED | A Playwright setup exists (19 tests, from T-044 work); the full suite is not started |
 | T-061 | Code review | NOT STARTED | |
