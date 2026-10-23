@@ -12,7 +12,8 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { deactivateUser as deactivateUserService } from "@/modules/admin";
-import { failOrderPayment } from "@/modules/orders";
+import { isProductCategoryForeignKeyViolation } from "@/modules/admin/repository";
+import { completeOrderPayment, failOrderPayment } from "@/modules/orders";
 import { db } from "@/server/db";
 
 import {
@@ -232,7 +233,16 @@ describe("users", () => {
       id: other.id,
     });
     expect(response.status).toBe(200);
-    expect((await db.user.findUniqueOrThrow({ where: { id: other.id } })).role).toBe("ADMIN");
+    const stored = await db.user.findUniqueOrThrow({ where: { id: other.id } });
+    expect(stored).toMatchObject({ role: "ADMIN", isActive: false });
+    const audit = await auditRows(other.id);
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({
+      actorId: admin.userId,
+      action: "USER_DEACTIVATED",
+      targetType: "User",
+      metadata: { role: "ADMIN", before: { isActive: true }, after: { isActive: false } },
+    });
   });
 
   it("the last active admin cannot be deactivated (service, under the admin row locks)", async () => {
@@ -628,6 +638,36 @@ describe("categories", () => {
     await expectUnchanged(before);
   });
 
+  it("only the Product.categoryId key is read as CATEGORY_HAS_PRODUCTS (CR-T050-06)", async () => {
+    // The real errors of PostgreSQL through the adapter, not a hand-built one.
+    const category = await createCategory();
+    await createProduct({ categoryId: category.id });
+    const productKey = await db.category.delete({ where: { id: category.id } }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(productKey).not.toBeNull();
+    expect(isProductCategoryForeignKeyViolation(productKey)).toBe(true);
+
+    const otherKey = await db.auditLog
+      .create({
+        data: {
+          actorId: "no-such-user",
+          action: "CATEGORY_DELETED",
+          targetType: "Category",
+          targetId: category.id,
+          metadata: {},
+        },
+      })
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+    expect(otherKey).toMatchObject({ code: "P2003" });
+    expect(isProductCategoryForeignKeyViolation(otherKey)).toBe(false);
+    expect(await db.category.count({ where: { id: category.id } })).toBe(1);
+  });
+
   it("switching a category off changes no product", async () => {
     const category = await createCategory();
     const product = await createProduct({ categoryId: category.id });
@@ -828,6 +868,54 @@ describe("orders", () => {
     expect(await failOrderPayment(pending.order.id, "SIMULATED_DECLINE")).toBe(true);
     expect((await db.product.findUniqueOrThrow({ where: { id: product.id } })).stock).toBe(5);
     expect(await db.cartItem.count({ where: { cart: { userId: pending.order.userId } } })).toBe(0);
+  });
+
+  it("an admin may cancel a part before payment; the later success leaves it cancelled and its stock restored", async () => {
+    const product = await createProduct({ stock: 5 });
+    const pending = await createOrder({
+      paymentStatus: "PENDING",
+      lines: [{ productId: product.id, quantity: 2 }],
+    });
+    const sellerOrderId = pending.sellerOrders[0]!.id;
+    const cancelled = await callEndpoint(endpoint("POST seller order status"), {
+      cookie: admin.cookie,
+      id: sellerOrderId,
+      body: { to: "CANCELLED" },
+    });
+    expect(cancelled.status).toBe(200);
+    const beforePayment = await dataOf<{ sellerOrders: { cancellationKind: string }[] }>(cancelled);
+    expect(beforePayment.sellerOrders[0]!.cancellationKind).toBe("BEFORE_PAYMENT");
+    expect((await db.product.findUniqueOrThrow({ where: { id: product.id } })).stock).toBe(5);
+
+    expect(await completeOrderPayment(pending.order.id, "MOCK-ref-cr-t050-09")).toBe(true);
+    expect(
+      (await db.order.findUniqueOrThrow({ where: { id: pending.order.id } })).paymentStatus,
+    ).toBe("PAID");
+    expect(
+      (await db.sellerOrder.findUniqueOrThrow({ where: { id: sellerOrderId } })).fulfilmentStatus,
+    ).toBe("CANCELLED");
+    // The payment takes nothing from stock again: the cancel's restore stands, once.
+    expect((await db.product.findUniqueOrThrow({ where: { id: product.id } })).stock).toBe(5);
+    const view = await dataOf<{
+      paymentStatus: string;
+      sellerOrders: { cancellationKind: string }[];
+    }>(await callEndpoint(endpoint("GET order"), { cookie: admin.cookie, id: pending.order.id }));
+    expect(view.paymentStatus).toBe("PAID");
+    expect(view.sellerOrders[0]!.cancellationKind).toBe("REFUND_OUTSIDE_SYSTEM");
+    // A second cancel is refused and restores nothing.
+    expect(
+      await reasonOf(
+        await callEndpoint(endpoint("POST seller order status"), {
+          cookie: admin.cookie,
+          id: sellerOrderId,
+          body: { to: "CANCELLED" },
+        }),
+      ),
+    ).toBe("INVALID_STATE_TRANSITION");
+    expect((await db.product.findUniqueOrThrow({ where: { id: product.id } })).stock).toBe(5);
+    expect((await auditRows(sellerOrderId)).map((row) => row.action)).toEqual([
+      "SELLER_ORDER_CANCELLED",
+    ]);
   });
 });
 
