@@ -418,7 +418,7 @@ Rules refined on 2026-10-11 from D-028 and D-029. D-028 names no blocked task fo
 | BR-38 hidden cart line (Q36) | T-031, T-034 | none yet |
 | BR-26 script and an existing account (Q37) | T-016 | none yet |
 | BR-14 view-only access while suspended | T-040, T-041, T-042, T-043, T-044 | none yet |
-| BR-41 admin reads product pictures (SEC-090), REQ-A-05 criteria (a) to (g) | T-041 (file endpoint), T-050, T-051 | partial: `tests/security/t051-admin-ui.itest.ts` describe "SEC-090" holds an `it.fails` for (a) with a `PENDING` product. NOT COVERED until written (qa, security): (a) other statuses, (c), (d), (e), (f), (g); the SEC-068 re-check `expectOwnerOnly` in `tests/security/sec068-recheck.itest.ts` lists the admin among refused callers and must move the admin out for attached product pictures only |
+| BR-41 admin reads product pictures (SEC-090), REQ-A-05 criteria (a) to (g) | T-041 (file endpoint), T-050, T-051 | covered: `tests/integration/uploads/endpoints.test.ts` describe "BR-41" (a) to (g), `tests/security/sec090-recheck.itest.ts`, `tests/security/sec068-recheck.itest.ts`, `tests/security/t051-admin-ui.itest.ts`; security re-check passed (SEC-090 FIXED) |
 | REQ-A-01 dashboard figures | T-050, T-051 | none yet |
 | REQ-S-02 contact phone | T-040, T-044 | none yet |
 | BR-20 payment timeout of 15 minutes | T-032 | none yet |

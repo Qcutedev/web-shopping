@@ -8,7 +8,8 @@
  *
  * Who may read (SEC-068, decided in the service, `mayServe`): anyone, without a session, for an
  * order item's picture, a picture of a visible product, and the logo of a public store; for any
- * other registered upload only a seller whose session's store owns it. The session is looked up
+ * other registered upload only a seller whose session's store owns it, and an admin for a file
+ * attached to a product as a picture (BR-41, SEC-090). The session is looked up
  * through the guard `getActor`, and only when the file is not public (`openFile` calls the
  * resolver), so a public file costs no session lookup. No session is required, so a request
  * without one is never 401.
