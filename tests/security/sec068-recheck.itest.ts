@@ -5,9 +5,10 @@
  * this file is written from the rule in SECURITY.md SEC-068 "Remediation" (1) and API_CONTRACTS.md
  * section 5.8 "Who may read", not from those cases.
  *
- * Changed with BR-41 (SEC-090, 2026-10-23, by backend-api; for security to re-check): an admin
- * session now reads a file that is attached to a product as a picture, whatever the product's
- * state (`expectOwnerOnly`, argument `admin`). Unattached uploads and logos stay refused to it.
+ * Changed with BR-41 (SEC-090, 2026-10-23, by backend-api; re-checked and accepted by security
+ * the same day): an admin session now reads a file that is attached to a product as a picture,
+ * whatever the product's state (`expectOwnerOnly`, argument `admin`). Unattached uploads and logos
+ * stay refused to it. Every other caller's expectation is unchanged.
  *
  * This file holds no character outside printable ASCII and no backslash-u escape (SEC-040).
  *

@@ -6,7 +6,7 @@ Result: **no Critical finding.** The access guard of the pages holds, the client
 
 - **SEC-090 (High):** the product review page shows the pictures of a product awaiting approval through `/api/files/{key}`, which refuses an admin session (SEC-068 item 1). The admin approves without seeing the pictures, and they become public on approval. Picture moderation (BR-17, BR-18) does not happen.
 
-SEC-089 (High, `next` 16.4.0 advisories) is still open: `pnpm audit --prod` gives the same three advisories. Under AGENT_WORKFLOW.md "Review gates" item 4, T-051 is not done while SEC-089 or SEC-090 is open.
+SEC-089 (High, `next` 16.4.0 advisories) is still open: `pnpm audit --prod` gives the same three advisories. Under AGENT_WORKFLOW.md "Review gates" item 4, T-051 is not done while SEC-089 or SEC-090 is open. Update 2026-10-23: SEC-090 is fixed and re-checked ([SEC-090-recheck.md](SEC-090-recheck.md)); SEC-089 was not re-checked there.
 
 A clean scanner run shows only that the scanner found nothing. Passing tests show only that the tested attacks fail. Neither shows that the admin pages are secure.
 
@@ -46,7 +46,7 @@ The rename commit `89f9957` changed `title` to `heading` on Thai copy objects an
 
 Full entries, with reproduction and remediation, are in [../SECURITY.md](../SECURITY.md).
 
-- **SEC-090 (High, OPEN):** the admin product review page cannot show the pictures it asks the admin to approve. Reproduction: `tests/security/t051-admin-ui.itest.ts`, describe "SEC-090". A documented case shows today's state: the admin DTO links `/api/files/{key}`, the owner gets 200, and the admin gets 404. The `it.fails` case asserts that the admin reads every picture; flipped in a temporary copy (deleted), it failed with `AssertionError: expected 404 to be 200`. Remediation: a rule and a build for an admin read of non-public product pictures (API_CONTRACTS 5.8 already asks for one), with the SEC-068 re-check adjusted. Until then, the page must not offer approval without the pictures, or it must say that they could not be loaded.
+- **SEC-090 (High), FIXED 2026-10-23** by BR-41 (commit 027edfa); re-check in [SEC-090-recheck.md](SEC-090-recheck.md). Original entry: the admin product review page cannot show the pictures it asks the admin to approve. Reproduction: `tests/security/t051-admin-ui.itest.ts`, describe "SEC-090". A documented case shows today's state: the admin DTO links `/api/files/{key}`, the owner gets 200, and the admin gets 404. The `it.fails` case asserts that the admin reads every picture; flipped in a temporary copy (deleted), it failed with `AssertionError: expected 404 to be 200`. Remediation: a rule and a build for an admin read of non-public product pictures (API_CONTRACTS 5.8 already asks for one), with the SEC-068 re-check adjusted. Until then, the page must not offer approval without the pictures, or it must say that they could not be loaded.
 
 ## Commands and results
 

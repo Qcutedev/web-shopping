@@ -4,9 +4,12 @@
  *
  * SEC-090: the admin product review page (src/components/admin/product-section.tsx) shows the
  * pictures of a product awaiting approval as `<img src="/api/files/{key}">`, but the file endpoint
- * serves a picture of a product that is not visible only to the owning seller (SEC-068 item 1,
- * API_CONTRACTS 5.8). So the admin approves a product without being able to see its pictures, and
- * the pictures become public at the moment of approval. Moderation of pictures does not happen.
+ * served a picture of a product that is not visible only to the owning seller (SEC-068 item 1,
+ * API_CONTRACTS 5.8). So the admin approved a product without being able to see its pictures.
+ * FIXED by BR-41 (commit 027edfa); re-checked 2026-10-23 by security, see
+ * docs/reviews/T-051-security.md "SEC-090 re-check" and tests/security/sec090-recheck.itest.ts.
+ * The first case below documented the defect (admin 404); since the fix it asserts the BR-41
+ * behaviour (admin 200, no session 404). Changed by backend-api, accepted by security.
  *
  * This file holds no character outside printable ASCII and no backslash-u escape (SEC-040).
  *
@@ -88,10 +91,10 @@ async function queuedProductWithPicture() {
   return { owner, admin, dto, key };
 }
 
-describe("SEC-090: the admin cannot see the pictures of a product awaiting approval", () => {
-  // Changed with the BR-41 fix (2026-10-23, backend-api; for security to re-check): the admin
-  // now reads the queued picture, so the last-but-one assertion is 200 instead of 404.
-  it("documents today: the review page links the picture, the owner and the admin read it, a request without a session gets 404", async () => {
+describe("SEC-090 (fixed by BR-41): the admin sees the pictures of a product awaiting approval", () => {
+  // Changed with the BR-41 fix (2026-10-23, backend-api; re-checked and accepted by security the
+  // same day): the admin now reads the queued picture, so the admin assertion is 200, not 404.
+  it("the review page links the picture; the owner and the admin read it; a request without a session gets 404", async () => {
     const { owner, admin, dto, key } = await queuedProductWithPicture();
     expect(dto.moderationStatus).toBe("PENDING");
     expect(dto.images.map((image) => image.url)).toEqual([`/api/files/${key}`]);
