@@ -56,7 +56,7 @@ import type { Role } from "@/server/auth/actor";
 import { db, type DbTransaction, isUniqueIndexViolation, Prisma } from "@/server/db";
 
 import type { AdminTargetStatus } from "./schema";
-import { type ModerationDecision, moderationRule } from "./state";
+import { activationMove, type ModerationDecision, moderationRule } from "./state";
 
 /** Interactive transaction limits of an admin write. */
 export const ADMIN_TRANSACTION_OPTIONS = { maxWait: 5_000, timeout: 10_000 } as const;
@@ -106,13 +106,35 @@ async function snapshot<T>(read: (tx: DbTransaction) => Promise<T>): Promise<T> 
   }, READ_TRANSACTION_OPTIONS);
 }
 
-function isKnownError(error: unknown, code: string): boolean {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === code;
+/** The foreign key of `Product.categoryId` (Restrict), named by the first migration. */
+export const PRODUCT_CATEGORY_FOREIGN_KEY = "Product_categoryId_fkey";
+
+/**
+ * PostgreSQL's `restrict_violation` (`23001`, a delete of a referenced row under `ON DELETE
+ * RESTRICT`) and `foreign_key_violation` (`23503`, the same under `NO ACTION`).
+ */
+const REFERENCE_VIOLATION_SQLSTATES: readonly unknown[] = ["23001", "23503"];
+
+function field(value: unknown, key: string): unknown {
+  if (typeof value !== "object" || value === null) return undefined;
+  return Object.hasOwn(value, key) ? (value as Record<string, unknown>)[key] : undefined;
 }
 
-/** P2003: a foreign key refused the write. */
-export function isForeignKeyViolation(error: unknown): boolean {
-  return isKnownError(error, "P2003");
+/**
+ * True only when `Product_categoryId_fkey` refused a model-API write: `P2003`, SQLSTATE `23001`
+ * or `23503` in `meta.driverAdapterError.cause.originalCode`, and that constraint in
+ * `cause.constraint.index`. Observed with Prisma 7.10 and `@prisma/adapter-pg` against
+ * PostgreSQL: deleting a referenced category is `P2003` with `23001` (`RestrictViolation`).
+ * Any other foreign key, such as `AuditLog_actorId_fkey`, is false, so its error goes on as a
+ * 500 (CR-T050-06). The message beside them is never read.
+ */
+export function isProductCategoryForeignKeyViolation(error: unknown): boolean {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2003") {
+    return false;
+  }
+  const cause = field(field(error.meta, "driverAdapterError"), "cause");
+  if (!REFERENCE_VIOLATION_SQLSTATES.includes(field(cause, "originalCode"))) return false;
+  return field(field(cause, "constraint"), "index") === PRODUCT_CATEGORY_FOREIGN_KEY;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -318,6 +340,7 @@ interface LockedUser {
  * products are hidden by the visibility rule, which reads the owner's flag.
  */
 export async function deactivateUser(userId: string, adminId: string): Promise<ActivationOutcome> {
+  const move = activationMove("deactivate");
   return db.$transaction(async (tx) => {
     const target = await tx.user.findUnique({ where: { id: userId }, select: { role: true } });
     if (target === null) return { kind: "not-found" } as const;
@@ -341,12 +364,12 @@ export async function deactivateUser(userId: string, adminId: string): Promise<A
                FOR NO KEY UPDATE`;
     const locked = lockedRows[0];
     if (locked === undefined) return { kind: "not-found" } as const;
-    if (!locked.isActive) return { kind: "invalid-state" } as const;
+    if (locked.isActive !== move.from) return { kind: "invalid-state" } as const;
     if (locked.role === "ADMIN" && activeAdminCount <= 1) return { kind: "last-admin" } as const;
 
     const { count } = await tx.user.updateMany({
-      where: { id: userId, isActive: true },
-      data: { isActive: false },
+      where: { id: userId, isActive: move.from },
+      data: { isActive: move.to },
     });
     if (count !== 1) return { kind: "invalid-state" } as const;
     // The same statement as deleteSessionsOfUser in src/server/auth/session.ts, which modules may
@@ -359,8 +382,8 @@ export async function deactivateUser(userId: string, adminId: string): Promise<A
       targetId: userId,
       metadata: {
         role: locked.role,
-        before: { isActive: true },
-        after: { isActive: false },
+        before: { isActive: move.from },
+        after: { isActive: move.to },
         sessionsRevoked: sessions.count,
       },
     });
@@ -374,16 +397,17 @@ export async function deactivateUser(userId: string, adminId: string): Promise<A
  * (`USER_REACTIVATED`). The user signs in again; nothing else is written (DATA_MODEL.md 4.5).
  */
 export async function reactivateUser(userId: string, adminId: string): Promise<ActivationOutcome> {
+  const move = activationMove("reactivate");
   return db.$transaction(async (tx) => {
     const rows = await tx.$queryRaw<LockedUser[]>`
       SELECT "role"::text AS "role", "isActive" FROM "User" WHERE "id" = ${userId}
          FOR NO KEY UPDATE`;
     const locked = rows[0];
     if (locked === undefined) return { kind: "not-found" } as const;
-    if (locked.isActive) return { kind: "invalid-state" } as const;
+    if (locked.isActive !== move.from) return { kind: "invalid-state" } as const;
     const { count } = await tx.user.updateMany({
-      where: { id: userId, isActive: false },
-      data: { isActive: true },
+      where: { id: userId, isActive: move.from },
+      data: { isActive: move.to },
     });
     if (count !== 1) return { kind: "invalid-state" } as const;
     await writeAudit(tx, {
@@ -391,7 +415,11 @@ export async function reactivateUser(userId: string, adminId: string): Promise<A
       action: AUDIT_ACTIONS.userReactivated,
       targetType: AUDIT_TARGETS.user,
       targetId: userId,
-      metadata: { role: locked.role, before: { isActive: false }, after: { isActive: true } },
+      metadata: {
+        role: locked.role,
+        before: { isActive: move.from },
+        after: { isActive: move.to },
+      },
     });
     return { kind: "done", row: await readUser(tx, userId) } as const;
   }, ADMIN_TRANSACTION_OPTIONS);
@@ -880,8 +908,10 @@ export async function createCategory(
   }
 }
 
-export type CategoryWriteOutcome =
-  { kind: "done"; row: CategoryRow } | { kind: "not-found" } | { kind: "has-products" };
+export type CategoryUpdateOutcome = { kind: "done"; row: CategoryRow } | { kind: "not-found" };
+
+export type CategoryDeleteOutcome =
+  { kind: "deleted" } | { kind: "not-found" } | { kind: "has-products" };
 
 interface LockedCategory {
   name: string;
@@ -901,7 +931,7 @@ export async function updateCategory(
   categoryId: string,
   change: { name?: string; sortOrder?: number; isActive?: boolean },
   adminId: string,
-): Promise<CategoryWriteOutcome> {
+): Promise<CategoryUpdateOutcome> {
   return db.$transaction(async (tx) => {
     const rows = await tx.$queryRaw<LockedCategory[]>`
       SELECT "name", "slug", "sortOrder", "isActive" FROM "Category" WHERE "id" = ${categoryId}
@@ -953,12 +983,13 @@ export async function updateCategory(
  * transaction: lock (`FOR UPDATE`; none is `not-found`), any referencing product is
  * `has-products` and nothing changes, delete, one audit row. A seller's product write holds the
  * category's `FOR SHARE` lock, so one that commits first is counted here; the `Restrict` key on
- * `Product.categoryId` is the backstop (its violation is the same `has-products`).
+ * `Product.categoryId` is the backstop (a violation of that key only is the same `has-products`;
+ * any other error goes on).
  */
 export async function deleteCategory(
   categoryId: string,
   adminId: string,
-): Promise<Exclude<CategoryWriteOutcome, { kind: "done" }> | { kind: "deleted" }> {
+): Promise<CategoryDeleteOutcome> {
   try {
     return await db.$transaction(async (tx) => {
       const rows = await tx.$queryRaw<LockedCategory[]>`
@@ -989,7 +1020,7 @@ export async function deleteCategory(
       return { kind: "deleted" } as const;
     }, ADMIN_TRANSACTION_OPTIONS);
   } catch (error) {
-    if (isForeignKeyViolation(error)) return { kind: "has-products" };
+    if (isProductCategoryForeignKeyViolation(error)) return { kind: "has-products" };
     throw error;
   }
 }

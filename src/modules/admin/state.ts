@@ -21,7 +21,6 @@
  * Pure: no database and no framework import.
  */
 import type { ModerationStatusValue, ProductStatusValue } from "@/modules/inventory";
-import { invalidStateTransition } from "@/server/errors";
 
 export const MODERATION_DECISIONS = ["approve", "reject", "takedown"] as const;
 export type ModerationDecision = (typeof MODERATION_DECISIONS)[number];
@@ -91,21 +90,10 @@ export function judgeModerationDecision(
   return "ok";
 }
 
-/** 409 INVALID_STATE_TRANSITION unless the table allows the decision on this state. */
-export function assertModerationDecision(
-  decision: ModerationDecision,
-  current: Omit<ModerationState, "contentRevision">,
-): void {
-  const rule = moderationRule(decision);
-  if (
-    current.moderationStatus !== rule.from ||
-    (rule.requiresStatus !== null && current.status !== rule.requiresStatus)
-  ) {
-    throw invalidStateTransition();
-  }
-}
-
-/** The active-flag table of a user (DATA_MODEL.md section 4.5). */
+/**
+ * The active-flag table of a user (DATA_MODEL.md section 4.5). The repository's lock check and
+ * guarded update of `deactivateUser` and `reactivateUser` take their values from here.
+ */
 export const USER_ACTIVATION_TRANSITIONS = Object.freeze([
   { action: "deactivate", from: true, to: false },
   { action: "reactivate", from: false, to: true },

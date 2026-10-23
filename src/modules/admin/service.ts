@@ -342,8 +342,6 @@ export async function updateCategory(
       return toAdminCategoryDto(outcome.row);
     case "not-found":
       throw adminNotFound();
-    case "has-products":
-      throw categoryHasProducts();
   }
 }
 

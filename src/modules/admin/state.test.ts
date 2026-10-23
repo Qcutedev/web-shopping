@@ -9,7 +9,6 @@ import { MODERATION_STATUSES, PRODUCT_STATUSES } from "@/modules/inventory";
 
 import {
   activationMove,
-  assertModerationDecision,
   judgeModerationDecision,
   MODERATION_DECISIONS,
   type ModerationDecision,
@@ -90,17 +89,6 @@ describe("judgeModerationDecision", () => {
         3,
       ),
     ).toBe("stale-revision");
-  });
-});
-
-describe("assertModerationDecision", () => {
-  it("throws 409 INVALID_STATE_TRANSITION outside the table", () => {
-    expect(() =>
-      assertModerationDecision("approve", { status: "PUBLISHED", moderationStatus: "APPROVED" }),
-    ).toThrow(expect.objectContaining({ code: "INVALID_STATE_TRANSITION" }));
-    expect(() =>
-      assertModerationDecision("takedown", { status: "DRAFT", moderationStatus: "APPROVED" }),
-    ).not.toThrow();
   });
 });
 
