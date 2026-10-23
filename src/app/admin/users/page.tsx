@@ -14,7 +14,7 @@ export default function UsersPage({ searchParams }: PageProps<"/admin/users">) {
   return (
     <AdminFrame
       current="users"
-      title={th.admin.users.title}
+      heading={th.admin.users.title}
       description={th.admin.users.description}
     >
       <Suspense fallback={<AdminSkeleton rows={2} />}>

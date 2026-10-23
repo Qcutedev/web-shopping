@@ -14,7 +14,7 @@ export default function AuditPage({ searchParams }: PageProps<"/admin/audit-logs
   return (
     <AdminFrame
       current="auditLogs"
-      title={th.admin.audit.title}
+      heading={th.admin.audit.title}
       description={th.admin.audit.description}
     >
       <Suspense fallback={<AdminSkeleton rows={2} />}>

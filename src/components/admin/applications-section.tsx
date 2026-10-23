@@ -37,7 +37,7 @@ export function ApplicationsListView({
       filterForm={
         <FilterForm
           action={ADMIN_ROUTES.applications}
-          label={th.admin.applications.filter.title}
+          label={th.admin.applications.filter.formLabel}
           resetHref={ADMIN_ROUTES.applications}
         >
           <SelectField

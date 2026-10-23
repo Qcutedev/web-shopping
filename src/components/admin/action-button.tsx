@@ -38,7 +38,7 @@ export type AdminActionKind = AdminActionSpec["kind"];
 
 interface ActionCopy {
   trigger: string;
-  title: string;
+  heading: string;
   note: string;
   confirm: string;
   done: string;
@@ -51,7 +51,7 @@ interface ActionCopy {
 export const ACTION_COPY: Readonly<Record<AdminActionKind, ActionCopy>> = {
   "user.deactivate": {
     trigger: th.admin.users.deactivate,
-    title: th.admin.users.deactivateConfirm,
+    heading: th.admin.users.deactivateConfirm,
     note: th.admin.users.deactivateConfirmNote,
     confirm: th.admin.users.deactivateConfirmAction,
     done: th.admin.users.deactivated,
@@ -60,7 +60,7 @@ export const ACTION_COPY: Readonly<Record<AdminActionKind, ActionCopy>> = {
   },
   "user.reactivate": {
     trigger: th.admin.users.reactivate,
-    title: th.admin.users.reactivateConfirm,
+    heading: th.admin.users.reactivateConfirm,
     note: th.admin.users.reactivateConfirmNote,
     confirm: th.admin.users.reactivateConfirmAction,
     done: th.admin.users.reactivated,
@@ -69,7 +69,7 @@ export const ACTION_COPY: Readonly<Record<AdminActionKind, ActionCopy>> = {
   },
   "application.approve": {
     trigger: th.admin.applications.approve,
-    title: th.admin.applications.approveConfirm,
+    heading: th.admin.applications.approveConfirm,
     note: th.admin.applications.approveConfirmNote,
     confirm: th.admin.applications.approveConfirmAction,
     done: th.admin.applications.approved,
@@ -78,7 +78,7 @@ export const ACTION_COPY: Readonly<Record<AdminActionKind, ActionCopy>> = {
   },
   "application.reject": {
     trigger: th.admin.applications.reject,
-    title: th.admin.applications.rejectConfirm,
+    heading: th.admin.applications.rejectConfirm,
     note: th.admin.applications.rejectConfirmNote,
     confirm: th.admin.applications.rejectConfirmAction,
     done: th.admin.applications.rejected,
@@ -87,7 +87,7 @@ export const ACTION_COPY: Readonly<Record<AdminActionKind, ActionCopy>> = {
   },
   "store.suspend": {
     trigger: th.admin.stores.suspend,
-    title: th.admin.stores.suspendConfirm,
+    heading: th.admin.stores.suspendConfirm,
     note: th.admin.stores.suspendConfirmNote,
     confirm: th.admin.stores.suspendConfirmAction,
     done: th.admin.stores.suspended,
@@ -96,7 +96,7 @@ export const ACTION_COPY: Readonly<Record<AdminActionKind, ActionCopy>> = {
   },
   "store.reinstate": {
     trigger: th.admin.stores.reinstate,
-    title: th.admin.stores.reinstateConfirm,
+    heading: th.admin.stores.reinstateConfirm,
     note: th.admin.stores.reinstateConfirmNote,
     confirm: th.admin.stores.reinstateConfirmAction,
     done: th.admin.stores.reinstated,
@@ -105,7 +105,7 @@ export const ACTION_COPY: Readonly<Record<AdminActionKind, ActionCopy>> = {
   },
   "product.approve": {
     trigger: th.admin.products.approve,
-    title: th.admin.products.approveConfirm,
+    heading: th.admin.products.approveConfirm,
     note: th.admin.products.approveConfirmNote,
     confirm: th.admin.products.approveConfirmAction,
     done: th.admin.products.approved,
@@ -114,7 +114,7 @@ export const ACTION_COPY: Readonly<Record<AdminActionKind, ActionCopy>> = {
   },
   "product.reject": {
     trigger: th.admin.products.reject,
-    title: th.admin.products.rejectConfirm,
+    heading: th.admin.products.rejectConfirm,
     note: th.admin.products.rejectConfirmNote,
     confirm: th.admin.products.rejectConfirmAction,
     done: th.admin.products.rejected,
@@ -123,7 +123,7 @@ export const ACTION_COPY: Readonly<Record<AdminActionKind, ActionCopy>> = {
   },
   "product.takedown": {
     trigger: th.admin.products.takedown,
-    title: th.admin.products.takedownConfirm,
+    heading: th.admin.products.takedownConfirm,
     note: th.admin.products.takedownConfirmNote,
     confirm: th.admin.products.takedownConfirmAction,
     done: th.admin.products.takenDown,
@@ -132,7 +132,7 @@ export const ACTION_COPY: Readonly<Record<AdminActionKind, ActionCopy>> = {
   },
   "category.deactivate": {
     trigger: th.admin.categories.deactivate,
-    title: th.admin.categories.deactivateConfirm,
+    heading: th.admin.categories.deactivateConfirm,
     note: th.admin.categories.deactivateConfirmNote,
     confirm: th.admin.categories.deactivateConfirmAction,
     done: th.admin.categories.deactivated,
@@ -141,7 +141,7 @@ export const ACTION_COPY: Readonly<Record<AdminActionKind, ActionCopy>> = {
   },
   "category.reactivate": {
     trigger: th.admin.categories.reactivate,
-    title: th.admin.categories.reactivateConfirm,
+    heading: th.admin.categories.reactivateConfirm,
     note: th.admin.categories.reactivateConfirmNote,
     confirm: th.admin.categories.reactivateConfirmAction,
     done: th.admin.categories.reactivated,
@@ -150,7 +150,7 @@ export const ACTION_COPY: Readonly<Record<AdminActionKind, ActionCopy>> = {
   },
   "category.delete": {
     trigger: th.admin.categories.delete,
-    title: th.admin.categories.deleteConfirm,
+    heading: th.admin.categories.deleteConfirm,
     note: th.admin.categories.deleteConfirmNote,
     confirm: th.admin.categories.deleteConfirmAction,
     done: th.admin.categories.deleted,
@@ -159,7 +159,7 @@ export const ACTION_COPY: Readonly<Record<AdminActionKind, ActionCopy>> = {
   },
   "order.cancel": {
     trigger: th.admin.orders.actions.cancel,
-    title: th.admin.orders.actions.cancelConfirm,
+    heading: th.admin.orders.actions.cancelConfirm,
     note: th.admin.orders.actions.cancelConfirmNote,
     confirm: th.admin.orders.actions.cancelConfirmAction,
     done: th.admin.orders.actions.cancelled,
@@ -168,7 +168,7 @@ export const ACTION_COPY: Readonly<Record<AdminActionKind, ActionCopy>> = {
   },
   "order.deliver": {
     trigger: th.admin.orders.actions.deliver,
-    title: th.admin.orders.actions.deliverConfirm,
+    heading: th.admin.orders.actions.deliverConfirm,
     note: th.admin.orders.actions.deliverConfirmNote,
     confirm: th.admin.orders.actions.deliverConfirmAction,
     done: th.admin.orders.actions.delivered,
@@ -324,7 +324,7 @@ export function AdminAction({
         dismissible={!pending}
         closeLabel={th.dialog.close}
         onClose={close}
-        title={copy.title}
+        title={copy.heading}
         description={copy.note}
         initialFocusRef={copy.reason ? reasonRef : undefined}
         footer={

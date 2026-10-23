@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 
 export default function ProductPage({ params }: PageProps<"/admin/products/[id]">) {
   return (
-    <AdminFrame current="products" title={th.admin.products.detailTitle}>
+    <AdminFrame current="products" heading={th.admin.products.detailTitle}>
       <Suspense fallback={<AdminSkeleton rows={3} />}>
         <ProductSection params={params} />
       </Suspense>

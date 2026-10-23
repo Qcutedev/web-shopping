@@ -14,7 +14,7 @@ export default function DashboardPage() {
   return (
     <AdminFrame
       current="dashboard"
-      title={th.admin.dashboard.title}
+      heading={th.admin.dashboard.title}
       description={th.admin.dashboard.description}
     >
       <Suspense fallback={<AdminSkeleton rows={3} />}>

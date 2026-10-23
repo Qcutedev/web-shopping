@@ -14,7 +14,7 @@ export default function CategoriesPage({ searchParams }: PageProps<"/admin/categ
   return (
     <AdminFrame
       current="categories"
-      title={th.admin.categories.title}
+      heading={th.admin.categories.title}
       description={th.admin.categories.description}
     >
       <Suspense fallback={<AdminSkeleton rows={2} />}>

@@ -39,7 +39,7 @@ export function StoresListView({
       filterForm={
         <FilterForm
           action={ADMIN_ROUTES.stores}
-          label={filter.title}
+          label={filter.formLabel}
           resetHref={ADMIN_ROUTES.stores}
         >
           <InputField

@@ -116,12 +116,16 @@ export function SettingsForm({ settings }: { settings: SettingsDto }) {
         {formMessage ? <Alert tone="danger">{formMessage}</Alert> : null}
         <InputField
           label={th.admin.settings.shippingFee}
-          labelSuffix={<NoticeLabel>{th.notice.simulatedShipping}</NoticeLabel>}
           name="flatShippingFeeSatang"
           inputMode="decimal"
           value={feeText}
           onChange={(event) => setFeeText(event.target.value)}
-          helperText={th.admin.settings.shippingFeeHelper}
+          helperText={
+            <>
+              {th.admin.settings.shippingFeeHelper}{" "}
+              <NoticeLabel>{th.notice.simulatedShipping}</NoticeLabel>
+            </>
+          }
           errorText={errors.flatShippingFeeSatang}
           autoComplete="off"
           required

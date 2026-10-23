@@ -43,7 +43,7 @@ export function OrdersListView({
       filterForm={
         <FilterForm
           action={ADMIN_ROUTES.orders}
-          label={filter.title}
+          label={filter.formLabel}
           resetHref={ADMIN_ROUTES.orders}
         >
           <InputField

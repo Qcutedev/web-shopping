@@ -37,7 +37,7 @@ export function AuditListView({
       filterForm={
         <FilterForm
           action={ADMIN_ROUTES.auditLogs}
-          label={filter.title}
+          label={filter.formLabel}
           resetHref={ADMIN_ROUTES.auditLogs}
         >
           <InputField

@@ -58,7 +58,7 @@ function PartActions({ order, part }: { order: AdminOrderDto; part: AdminSellerO
   const canDeliver = isFulfilmentTransitionAllowed(part.fulfilmentStatus, "DELIVERED", "ADMIN");
   return (
     <div className="mt-4 flex flex-col gap-2">
-      <h3 className="type-card-title">{text.title}</h3>
+      <h3 className="type-card-title">{text.heading}</h3>
       {!canCancel && !canDeliver ? (
         <p className="type-small text-foreground-secondary">{text.none}</p>
       ) : null}

@@ -14,7 +14,7 @@ export default function ReportsPage({ searchParams }: PageProps<"/admin/reports"
   return (
     <AdminFrame
       current="reports"
-      title={th.admin.reports.title}
+      heading={th.admin.reports.title}
       description={th.admin.reports.description}
     >
       <Suspense fallback={<AdminSkeleton rows={2} />}>

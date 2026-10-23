@@ -49,7 +49,7 @@ export function ProductsListView({
       filterForm={
         <FilterForm
           action={ADMIN_ROUTES.products}
-          label={filter.title}
+          label={filter.formLabel}
           resetHref={queue ? ADMIN_ROUTES.products : `${ADMIN_ROUTES.products}?view=all`}
         >
           <SelectField name="view" label={filter.view} defaultValue={view}>

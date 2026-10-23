@@ -14,7 +14,7 @@ export default function SettingsPage() {
   return (
     <AdminFrame
       current="settings"
-      title={th.admin.settings.title}
+      heading={th.admin.settings.title}
       description={th.admin.settings.description}
     >
       <Suspense fallback={<AdminSkeleton rows={1} />}>

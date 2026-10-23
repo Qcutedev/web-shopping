@@ -65,13 +65,13 @@ export function AdminNav({ current }: { current?: AdminPage }) {
  */
 export function AdminFrame({
   current,
-  title,
+  heading,
   description,
   action,
   children,
 }: {
   current?: AdminPage;
-  title: string;
+  heading: string;
   description?: string;
   action?: ReactNode;
   children: ReactNode;
@@ -80,7 +80,7 @@ export function AdminFrame({
     <div className="container-page flex flex-1 flex-col gap-6 py-8">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex min-w-0 flex-col gap-2">
-          <h1 className="type-page-title">{title}</h1>
+          <h1 className="type-page-title">{heading}</h1>
           {description ? (
             <p className="type-body text-foreground-secondary">{description}</p>
           ) : null}

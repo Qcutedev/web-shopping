@@ -39,7 +39,11 @@ export function UsersListView({
       hrefForPage={(page) => listHref(ADMIN_ROUTES.users, USER_KEYS, params, query.pageSize, page)}
       emptyTitle={th.admin.users.emptyTitle}
       filterForm={
-        <FilterForm action={ADMIN_ROUTES.users} label={filter.title} resetHref={ADMIN_ROUTES.users}>
+        <FilterForm
+          action={ADMIN_ROUTES.users}
+          label={filter.formLabel}
+          resetHref={ADMIN_ROUTES.users}
+        >
           <InputField
             type="search"
             name="q"

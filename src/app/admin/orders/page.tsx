@@ -14,7 +14,7 @@ export default function OrdersPage({ searchParams }: PageProps<"/admin/orders">)
   return (
     <AdminFrame
       current="orders"
-      title={th.admin.orders.title}
+      heading={th.admin.orders.title}
       description={th.admin.orders.description}
     >
       <Suspense fallback={<AdminSkeleton rows={2} />}>

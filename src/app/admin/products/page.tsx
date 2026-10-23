@@ -14,7 +14,7 @@ export default function ProductsPage({ searchParams }: PageProps<"/admin/product
   return (
     <AdminFrame
       current="products"
-      title={th.admin.products.title}
+      heading={th.admin.products.title}
       description={th.admin.products.description}
     >
       <Suspense fallback={<AdminSkeleton rows={2} />}>
