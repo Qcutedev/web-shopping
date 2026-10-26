@@ -12,6 +12,8 @@ Not started: checkout UI (T-034), reviews, seller onboarding and seller products
 
 ## Resume here
 
+Session 111 started. Three tasks: (1) T-072 security headers, agent devops, paths `next.config.ts`, `src/proxy.ts` or middleware, `tests/security/headers*`, `docs/SECURITY.md`; (2) T-035 reviews backend half, agent backend-api, paths `src/modules/reviews/**`, `src/app/api/v1/**/reviews/**`, `tests/**/reviews/**`, `docs/API_CONTRACTS.md`; (3) T-071 Dockerfile and runbook, agent devops, after T-072 (both touch `next.config.ts`): paths `Dockerfile`, `.dockerignore`, `docs/RUNBOOK*`. No `pnpm build` while another runs (shared `.next`). If no commit follows, inspect `git status` first.
+
 Session 110 finished. Local commits, not pushed. No agent running. SEC-089 FIXED and re-checked (`f9d916f`, `8c47d0b`, `docs/reviews/SEC-089-recheck.md`): `next` 16.4.3, `zod` 4.6.7, `pnpm audit --prod` clean, `pnpm verify` ok, e2e 19 passed. Advisory texts not read yet (no web access in agent). Docker `marketplace-db-test-1` running. T-051 now blocked only by owner approval of Thai copy (`docs/reviews/T-051-copy-review.md`) and a browser check.
 
 Session 109 finished. Local commits, not pushed. No agent running. SEC-090 FIXED and security re-checked (`1b6ca5c`, `docs/reviews/SEC-090-recheck.md`): TEST_STRATEGY pointers `3160560`; BR-41 `ef45406` (owner: all statuses); build `027edfa`, `10c0cd9`; full integration 1507 passed (backend-api run). SEC-089 upgrade done in session 110 (`next` 16.4.3, `zod` 4.6.7, audit clean, `pnpm verify` ok; security re-check and e2e pending). Optional frontend: review page shows empty box when a picture's bytes are missing.
