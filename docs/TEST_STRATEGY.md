@@ -437,7 +437,9 @@ End-to-end tests use their own database, separate from every integration databas
 | Integration and API | The test PostgreSQL container from `docker compose` (127.0.0.1:5433), the schema, and the harness | T-012, T-013, T-023 |
 | End-to-end | The above, a built or running application, Playwright and its browsers | T-060 |
 
-Whether each of these is in place is recorded in [STATUS.md](STATUS.md), not here. On 2026-10-12 the first two rows are satisfied on the development machine and `pnpm test:integration` runs there. Playwright is not installed, so `pnpm test:e2e` cannot run and no task that depends on it can be marked `VERIFIED`. The integration suite has not run in CI: no workflow exists yet (T-070).
+Whether each of these is in place is recorded in [STATUS.md](STATUS.md), not here. On 2026-10-12 the first two rows are satisfied on the development machine and `pnpm test:integration` runs there. On that date Playwright was not installed, so `pnpm test:e2e` could not run; whether it runs now is recorded in STATUS.md.
+
+CI: `.github/workflows/ci.yml` exists (T-070) with five jobs: `verify` (`pnpm verify`), `integration` (`pnpm test:integration` against the `db-test` container), `e2e` (`pnpm test:e2e` with Chromium, report uploaded on failure), `audit` (`pnpm audit --prod`), and `secret-scan` (gitleaks v8.30.1 CLI, download checked against a committed SHA-256, full git history, no third-party action because no verifiable action SHA was available). `.github/dependabot.yml` updates `npm` (minor and patch grouped), `github-actions`, and `docker` weekly on Monday, Asia/Bangkok. **None of this has run on GitHub: the repository has no remote (blocker B-04), so no job result exists and no CI claim is verified.** Gitleaks may flag findings in the existing history on its first run. See [DEPLOYMENT.md](DEPLOYMENT.md), "CI pipeline".
 
 ## Risks and open concerns
 
