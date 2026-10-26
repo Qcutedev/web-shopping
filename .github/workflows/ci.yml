@@ -4,7 +4,6 @@
 # (docs/DEPLOYMENT.md, "CI pipeline"). The first real run is the acceptance check of T-070.
 #
 # Not in this workflow, on purpose:
-# - Secret scan: no scanner has been chosen (no paid service without approval).
 # - Deployment of any kind: needs human approval recorded in docs/DECISIONS.md.
 #
 # Secrets: nothing here reads a repository secret. The database password, the auth secret, and
@@ -148,6 +147,40 @@ jobs:
       # registry audit endpoint; a registry outage fails the job instead of passing it.
       - name: Audit production dependencies
         run: pnpm audit --prod
+
+  # Secret scan over the full git history with the gitleaks CLI (MIT, free, no licence key).
+  # The CLI is downloaded from a fixed release and checked against a SHA-256 committed here,
+  # so a changed or tampered archive fails the job. No third-party action is used.
+  # To upgrade: change GITLEAKS_VERSION and GITLEAKS_SHA256 together (value from the release's
+  # gitleaks_<version>_checksums.txt, file gitleaks_<version>_linux_x64.tar.gz).
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GITLEAKS_VERSION: "8.30.1"
+      GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+    steps:
+      - name: Check out (full history)
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install gitleaks
+        run: |
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 \
+            --output "${RUNNER_TEMP}/${archive}" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}"
+          echo "${GITLEAKS_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum --check --strict
+          mkdir "${RUNNER_TEMP}/gitleaks"
+          tar -xzf "${RUNNER_TEMP}/${archive}" -C "${RUNNER_TEMP}/gitleaks" gitleaks
+          echo "${RUNNER_TEMP}/gitleaks" >> "$GITHUB_PATH"
+
+      # --redact keeps a found value out of the log. Any finding exits 1 and fails the job.
+      - name: Scan history for secrets
+        run: gitleaks git --redact --no-banner --verbose .
 
   # End-to-end tests (Playwright). The suite starts its own `next dev` on 127.0.0.1:3100 and
   # uses the database `marketplace_e2e`, created by e2e/global-setup.ts on the db-test server.

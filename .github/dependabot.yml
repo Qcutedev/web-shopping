@@ -1,0 +1,36 @@
+# Dependabot version updates (T-070). Weekly, one grouped pull request per ecosystem so the
+# review load stays small. Security updates are separate and not limited by these groups.
+# Actions pinned by commit SHA stay pinned: Dependabot updates the SHA and the version comment.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Asia/Bangkok
+    open-pull-requests-limit: 5
+    # Major versions (framework, Prisma, Zod, ...) are not grouped: one pull request each.
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Asia/Bangkok
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Asia/Bangkok
+    groups:
+      docker:
+        patterns: ["*"]
