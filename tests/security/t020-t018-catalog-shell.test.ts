@@ -697,6 +697,9 @@ describe("T-020 review: the catalog route files are thin", () => {
     "src/app/api/v1/checkout/route.ts",
     "src/app/api/v1/orders/[id]/route.ts",
     "src/app/api/v1/orders/route.ts",
+    // T-035 review create route; reviewed in tests/security/t035-reviews.test.ts and
+    // tests/security/t035-reviews.itest.ts (docs/reviews/T-035-security.md).
+    "src/app/api/v1/orders/[id]/items/[itemId]/review/route.ts",
     "src/app/api/v1/me/addresses/[id]/route.ts",
     "src/app/api/v1/me/addresses/route.ts",
     "src/app/api/v1/me/route.ts",
