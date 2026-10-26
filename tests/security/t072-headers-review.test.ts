@@ -93,16 +93,13 @@ describe("SEC-091: the global CSP replaces the uploaded-file sandbox policy", ()
     expect(source).toContain(`"Content-Security-Policy": "default-src 'none'; sandbox"`);
   });
 
-  it.fails(
-    "the CSP a browser receives for /api/files/{key} is default-src 'none' with sandbox",
-    async () => {
-      const h = await effectiveConfigHeaders("/api/files/0123456789abcdef.webp");
-      const fromConfig = h.get("content-security-policy");
-      // Either the config leaves the header to the route, or it sets the strict one itself.
-      if (fromConfig !== undefined) {
-        expect(fromConfig).toMatch(/default-src 'none'/);
-        expect(fromConfig).toMatch(/\bsandbox\b/);
-      }
-    },
-  );
+  it("the CSP a browser receives for /api/files/{key} is default-src 'none' with sandbox", async () => {
+    const h = await effectiveConfigHeaders("/api/files/0123456789abcdef.webp");
+    const fromConfig = h.get("content-security-policy");
+    // Either the config leaves the header to the route, or it sets the strict one itself.
+    if (fromConfig !== undefined) {
+      expect(fromConfig).toMatch(/default-src 'none'/);
+      expect(fromConfig).toMatch(/\bsandbox\b/);
+    }
+  });
 });

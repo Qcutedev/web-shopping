@@ -58,6 +58,12 @@ const nextConfig: NextConfig = {
           appUrl: process.env.APP_URL,
         }),
       },
+      // SEC-091: uploaded files keep their own strict policy. A later rule overrides the site CSP
+      // for the same key, so a browser gets the route's `default-src 'none'; sandbox`.
+      {
+        source: "/api/files/:path*",
+        headers: [{ key: "Content-Security-Policy", value: "default-src 'none'; sandbox" }],
+      },
     ];
   },
   distDir: process.env.NEXT_DIST_DIR || ".next",

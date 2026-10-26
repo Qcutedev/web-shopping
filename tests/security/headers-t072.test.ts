@@ -65,8 +65,10 @@ describe("next config", () => {
 
   it("applies the headers to every path", async () => {
     const rules = await nextConfig.headers?.();
-    expect(rules).toHaveLength(1);
+    // Rule 0 is the site-wide policy; rule 1 restores the strict policy for uploads (SEC-091).
+    expect(rules).toHaveLength(2);
     expect(rules?.[0]?.source).toBe("/:path*");
     expect(rules?.[0]?.headers.some((x) => x.key === "Content-Security-Policy")).toBe(true);
+    expect(rules?.[1]?.source).toBe("/api/files/:path*");
   });
 });
