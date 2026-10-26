@@ -117,7 +117,7 @@ Notes marked "stale?" were written while Docker was down; later sessions ran the
 | T-062 | Security review | NOT STARTED | |
 | T-063 | Fixes, regression | NOT STARTED | |
 | T-070 | CI workflow | NOT STARTED | |
-| T-071 | Dockerfile, staging runbook | NOT STARTED | |
+| T-071 | Dockerfile, staging runbook | IMPLEMENTED | `Dockerfile`, `docs/RUNBOOK-STAGING.md`, `scripts/container-smoke.ps1`: both images build, migrate applies offline, container `/api/health` 200, headers present (local run, 2026-10-26). Not deployed; no provider chosen; no CI run |
 | T-072 | Security headers | IMPLEMENTED | next.config.ts, tests/security/headers-t072.test.ts (7 pass), D-046; dev `/` 200 with headers; not run under `next start` |
 | T-080 | Docs audit | NOT STARTED | |
 | T-081 | Final acceptance | NOT STARTED | |

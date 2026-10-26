@@ -1,0 +1,40 @@
+# Keep the build context small and free of secrets. Nothing here is copied into an image.
+.git
+.github
+.claude
+node_modules
+.pnpm-store
+.next
+.next-e2e
+out
+coverage
+playwright-report
+test-results
+blob-report
+logs
+uploads
+storage
+*.log
+*.tsbuildinfo
+next-env.d.ts
+
+# Environment files: never in the build context (SEC-011). Only .env.example is tracked.
+.env
+.env.*
+!.env.example
+
+# Keys and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+
+# Not needed to build or run. `e2e/` and `tests/` stay in: `next build` type-checks them
+# through tsconfig.json and fails without them.
+docs
+Dockerfile
+.dockerignore
+docker-compose*.yml
+prisma/generated

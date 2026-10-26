@@ -2,7 +2,7 @@
 
 Owner: devops agent.
 
-**State on 2026-10-11: nothing is deployed. There is no staging URL and no production URL. No hosting provider is chosen, and no CI workflow or Dockerfile exists.** This document is the plan and the runbook skeleton. Sections marked `Planned` have not been exercised; the exercised sections are "Local databases" and, since 2026-10-12, "Environment variables" and "Health endpoint" (local runs only). Task status is recorded only in [STATUS.md](STATUS.md); this document does not repeat it.
+**State on 2026-10-11: nothing is deployed. There is no staging URL and no production URL. No hosting provider is chosen.** (Update 2026-10-26: a `Dockerfile` and [RUNBOOK-STAGING.md](RUNBOOK-STAGING.md) exist since T-071 and were run locally only.) This document is the plan and the runbook skeleton. Sections marked `Planned` have not been exercised; the exercised sections are "Local databases" and, since 2026-10-12, "Environment variables" and "Health endpoint" (local runs only). Task status is recorded only in [STATUS.md](STATUS.md); this document does not repeat it.
 
 **Also true on 2026-10-11: no server log is collected anywhere, no backup of any database exists, and nothing in the system runs on a schedule.** The owner's rules on logs, sessions, and backups (D-025 OQ-21; D-026 OQ-47 to OQ-50; D-028) are written below as requirements for the staging runbook (T-071) and for T-015. Every one of them is marked **NOT IMPLEMENTED**: that label means no configuration, script, job, or check for it exists, and nothing in this document is evidence that the rule is met.
 
@@ -441,7 +441,7 @@ About step 4: `pnpm db:migrate` runs `prisma migrate dev`, which is for local de
 
 ### Build and migration image (Planned, T-070 and T-071; code-review finding CR-16)
 
-**NOT IMPLEMENTED. This is a design. No Dockerfile, image, or workflow exists, and no part of this section has been built or run.** It is built and verified in the Dockerfile task (T-071) and the CI task (T-070); until then every statement below about what an install or an image does is a requirement to check, not an observation.
+**Built in T-071 on 2026-10-26 (`Dockerfile`, local only, nothing deployed).** The image, its two targets, and the local run are described in [RUNBOOK-STAGING.md](RUNBOOK-STAGING.md). One deviation from point 2 below: the runtime image is a production-only install (`--ignore-scripts`) plus the generated client from the build stage, not the standalone output, because `next.config.ts` does not set `output: "standalone"`. Points 1, 3, 4, 5 and 6 and the three checks at the end of this section were met in the local run (`scripts/container-smoke.ps1`); the CI task (T-070) has not run them. The text below is the original design.
 
 The finding: `postinstall` in `package.json` runs `prisma generate`, and `prisma` is a development dependency. A production-only install (`pnpm install --prod`) therefore fails: the script runs and the `prisma` command is not installed.
 
