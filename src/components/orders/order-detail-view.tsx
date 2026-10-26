@@ -12,6 +12,7 @@ import { th } from "@/i18n/th";
 import { formatDateTime } from "@/lib/format";
 import { ROUTES, storeHref } from "@/lib/routes";
 import type { OrderDto, OrderItemDto } from "@/modules/orders/schema";
+import { ItemReview } from "./item-review";
 import { FulfilmentBadge, PaymentBadge } from "./status-badges";
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
@@ -178,6 +179,12 @@ export function OrderDetailView({ order }: { order: OrderDto }) {
                       <span className="text-foreground-secondary">{detail.lineTotal} </span>
                       <Price satang={item.lineTotalSatang} />
                     </p>
+                    <ItemReview
+                      orderId={order.id}
+                      itemId={item.id}
+                      review={item.review}
+                      delivered={part.fulfilmentStatus === "DELIVERED"}
+                    />
                   </div>
                 </li>
               ))}

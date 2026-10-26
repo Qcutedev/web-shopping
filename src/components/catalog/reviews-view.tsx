@@ -4,6 +4,23 @@ import { th } from "@/i18n/th";
 import { formatDate } from "@/lib/format";
 import type { ReviewDto } from "@/modules/catalog/schema";
 
+/** One review: rating, comment, date. The comment is customer text, shown as plain text. */
+export function ReviewCard({ review }: { review: ReviewDto }) {
+  return (
+    <Card as="article" className="flex flex-col gap-1">
+      <p className="type-label">
+        {fill(th.catalog.product.reviewRating, { rating: review.rating })}
+      </p>
+      <p className="type-body text-foreground-secondary [overflow-wrap:anywhere] whitespace-pre-line">
+        {review.comment ?? th.catalog.product.noComment}
+      </p>
+      <p className="type-caption text-foreground-muted">
+        <time dateTime={review.createdAt}>{formatDate(review.createdAt)}</time>
+      </p>
+    </Card>
+  );
+}
+
 /** Pure view of reviews. The comment is customer text: plain text only, never markup. */
 export function ReviewsView({ reviews }: { reviews: readonly ReviewDto[] }) {
   return (
@@ -17,17 +34,7 @@ export function ReviewsView({ reviews }: { reviews: readonly ReviewDto[] }) {
         <ul className="flex flex-col gap-3">
           {reviews.map((review) => (
             <li key={review.id}>
-              <Card as="article" className="flex flex-col gap-1">
-                <p className="type-label">
-                  {fill(th.catalog.product.reviewRating, { rating: review.rating })}
-                </p>
-                <p className="type-body text-foreground-secondary [overflow-wrap:anywhere] whitespace-pre-line">
-                  {review.comment ?? th.catalog.product.noComment}
-                </p>
-                <p className="type-caption text-foreground-muted">
-                  <time dateTime={review.createdAt}>{formatDate(review.createdAt)}</time>
-                </p>
-              </Card>
+              <ReviewCard review={review} />
             </li>
           ))}
         </ul>

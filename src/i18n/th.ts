@@ -227,6 +227,26 @@ export const th = {
       cancelledNote: "ยกเลิกแล้ว",
       cartReturnBody: "สินค้าในคำสั่งซื้อนี้ถูกคืนเข้าตะกร้าของคุณแล้ว",
     },
+    // Proposals (T-035 review form): wording written by the frontend agent, not yet approved.
+    review: {
+      write: "เขียนรีวิว",
+      formTitle: "รีวิวสินค้า",
+      ratingLegend: "ให้คะแนนสินค้า",
+      // {rating} is a whole number from 1 to 5.
+      ratingOption: "{rating} ดาว",
+      commentLabel: "ความคิดเห็น (ไม่บังคับ)",
+      // {max} is the longest comment in characters.
+      commentHelper: "ไม่เกิน {max} ตัวอักษร",
+      immutableNote: "รีวิวที่ส่งแล้วจะแก้ไขหรือลบไม่ได้",
+      submit: "ส่งรีวิว",
+      yourReview: "รีวิวของคุณ",
+      submitted: "ขอบคุณสำหรับรีวิว ระบบบันทึกรีวิวของคุณแล้ว",
+      ratingRequired: "กรุณาเลือกคะแนน 1 ถึง 5 ดาว",
+      // {max} is the longest comment in characters.
+      commentTooLong: "ความคิดเห็นยาวเกิน {max} ตัวอักษร",
+      commentInvalid:
+        "ความคิดเห็นมีอักขระที่ใช้ไม่ได้ กรุณาลบอักขระควบคุมหรืออักขระที่มองไม่เห็นออก",
+    },
   },
   order: {
     // Mark on an order whose payment failed (D-028, Q35 (a); BR-20).
@@ -253,6 +273,9 @@ export const th = {
     reasons: {
       CART_LINE_LIMIT:
         "ตะกร้ามีสินค้าได้สูงสุด 50 รายการที่ไม่ซ้ำกัน กรุณานำสินค้าบางรายการออก หรือชำระเงินสำหรับสินค้าในตะกร้าก่อน",
+      // Proposals (T-035 review form).
+      NOT_DELIVERED: "รีวิวสินค้าได้เมื่อจัดส่งสำเร็จแล้วเท่านั้น",
+      DUPLICATE_REVIEW: "สินค้ารายการนี้มีรีวิวแล้ว กรุณาโหลดหน้านี้ใหม่เพื่อดูรีวิว",
     },
     loadFailed: "โหลดข้อมูลไม่สำเร็จ",
     loadFailedTitle: "ไม่สามารถแสดงข้อมูลได้",

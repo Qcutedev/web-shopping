@@ -103,6 +103,18 @@ describe("OrderListView", () => {
 });
 
 describe("OrderDetailView", () => {
+  it("offers the review form only for an item of a delivered seller order", () => {
+    const base = order();
+    const delivered = order({
+      sellerOrders: [{ ...base.sellerOrders[0]!, fulfilmentStatus: "DELIVERED" }],
+    });
+    const { unmount } = render(<OrderDetailView order={base} />);
+    expect(screen.queryByRole("button", { name: th.orders.review.write })).toBeNull();
+    unmount();
+    render(<OrderDetailView order={delivered} />);
+    expect(screen.getByRole("button", { name: th.orders.review.write })).toBeTruthy();
+  });
+
   it("confirms a paid order and labels the mock payment and simulated shipping", () => {
     render(<OrderDetailView order={order()} />);
     expect(screen.getByText(th.orders.confirmation.paidTitle)).toBeTruthy();
