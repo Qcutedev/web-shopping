@@ -4,8 +4,6 @@
 # (docs/DEPLOYMENT.md, "CI pipeline"). The first real run is the acceptance check of T-070.
 #
 # Not in this workflow, on purpose:
-# - Playwright / end-to-end tests: the owner decision on how e2e reaches a production-mode
-#   database (CR-49) is open, and T-060 is not built.
 # - Secret scan: no scanner has been chosen (no paid service without approval).
 # - Deployment of any kind: needs human approval recorded in docs/DECISIONS.md.
 #
@@ -43,7 +41,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
 
@@ -51,7 +49,7 @@ jobs:
         run: corepack enable
 
       - name: Set up Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -84,7 +82,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
 
@@ -92,7 +90,7 @@ jobs:
         run: corepack enable
 
       - name: Set up Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -133,7 +131,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Check out
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
 
@@ -141,7 +139,7 @@ jobs:
         run: corepack enable
 
       - name: Set up Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -150,3 +148,65 @@ jobs:
       # registry audit endpoint; a registry outage fails the job instead of passing it.
       - name: Audit production dependencies
         run: pnpm audit --prod
+
+  # End-to-end tests (Playwright). The suite starts its own `next dev` on 127.0.0.1:3100 and
+  # uses the database `marketplace_e2e`, created by e2e/global-setup.ts on the db-test server.
+  # Port 3100 and that database are fixed, so only one e2e run may use them at a time: this is
+  # one job on a fresh runner, and the workflow-level concurrency group stops a second run of
+  # the same ref. The suite itself has one worker.
+  e2e:
+    name: End-to-end tests (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Enable pnpm (Corepack)
+        run: corepack enable
+
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      # Same database settings as the integration job. DATABASE_URL must name another server
+      # than DATABASE_URL_TEST (the e2e setup refuses otherwise); the e2e server gets its own
+      # DATABASE_URL, AUTH_SECRET, and APP_URL from playwright.config.ts.
+      - name: Start the test database
+        run: |
+          db_password="$(openssl rand -hex 24)"
+          dev_password="$(openssl rand -hex 24)"
+          echo "::add-mask::${db_password}"
+          echo "::add-mask::${dev_password}"
+          {
+            echo "DATABASE_URL=postgresql://marketplace:${dev_password}@127.0.0.1:5432/marketplace_ci?schema=public"
+            echo "DATABASE_URL_TEST=postgresql://marketplace:${db_password}@127.0.0.1:5433/marketplace_test?schema=public"
+          } >> "$GITHUB_ENV"
+          POSTGRES_TEST_PASSWORD="${db_password}" docker compose up -d --wait db-test
+
+      # PLAYWRIGHT_HTML_OPEN=never: the HTML reporter must never start a report server on failure.
+      - name: End-to-end tests
+        env:
+          PLAYWRIGHT_HTML_OPEN: never
+        run: pnpm test:e2e --reporter=list,html
+
+      - name: Upload Playwright report
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
