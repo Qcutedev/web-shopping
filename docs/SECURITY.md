@@ -1793,13 +1793,13 @@ Re-check evidence: none yet.
 
 ### SEC-089 The installed Next.js 16.4.0 has two published Critical remote code execution advisories and one High denial-of-service advisory
 Severity: High
-Status: OPEN
+Status: FIXED, security re-check pending (2026-10-26)
 Owner: orchestrator or devops (`package.json`, `pnpm-lock.yaml`)
 Location: package.json:28 (`"next": "16.4.0"`)
 Description: found by `pnpm audit --prod` during the T-050 review (2026-10-23). Advisories against `next >=16.0.0 <=16.4.0`, patched in 16.4.1: GHSA-2464-fhr4-w9xw (critical, "Unauthenticated Remote Code Execution in Image Optimization API when SVG files are used"), GHSA-673q-mjm6-r5xr (critical, "Unauthenticated Remote Code Execution in `use cache` functions returning typed arrays"), GHSA-p3m5-59mp-jv5r (high, "Denial of Service in App Router using Server Actions"). Advisory texts were not fetched (no third-party access from this review); only the titles and version ranges from the audit output are known. What was checked locally: `src` has no `"use cache"` and no `"use server"`; both `next/image` uses pass `unoptimized`; `public/` holds no file; uploads refuse SVG (T-041); `next.config.ts` sets no `images` option, so the optimisation endpoint keeps its defaults and is still served. So the two RCE preconditions named in the titles were not found in this code, but that is not proof the endpoints are unreachable (`cacheComponents: true` is on, and the framework's own code paths were not read), and the DoS title names a feature every App Router server has. High rather than Critical because no reachable path was shown; it must not be lowered further without reading the advisories.
 Reproduction: `pnpm audit --prod` (pnpm 12.11.2): "3 vulnerabilities found, Severity: 1 high | 2 critical"; `pnpm audit --prod --json` lists the three ids above.
 Remediation: upgrade `next` (and `eslint-config-next` to the same version) to 16.4.1 or later, `pnpm install`, record the version in DECISIONS.md, run `pnpm verify` and the e2e suite. Until then, do not deploy. Read the three advisories when upgrading and note any configuration they require.
-Re-check evidence: none yet.
+Re-check evidence: none yet. Fix evidence (2026-10-26, orchestrator): `next` and `eslint-config-next` 16.4.3 (latest), `zod` ^4.6.7 (a new High advisory GHSA-mrhx-c7xc-m3w5, zod <4.6.6, appeared in the same audit); `pnpm audit --prod` -> "No known vulnerabilities found"; `pnpm verify` -> 207 files, 5688 passed, 32 expected fail, build compiled. Advisory texts still not read; e2e not run.
 
 ### SEC-090 The admin product review page cannot show the pictures it asks the admin to approve
 Severity: High
