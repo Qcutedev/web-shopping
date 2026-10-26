@@ -12,7 +12,7 @@ Not started: checkout UI (T-034), reviews, seller onboarding and seller products
 
 ## Resume here
 
-Session 112 started. Three agents in parallel, disjoint paths: (1) security: route-list gate `tests/security/t020-t018-catalog-shell.test.ts` + review of T-035 review endpoint and T-072 headers, paths `tests/security/**`, `docs/reviews/`, `docs/SECURITY.md`; (2) frontend: T-035 review form, paths `src/app/(storefront)/**`, `src/components/**`, `src/i18n/th.ts`; (3) qa: adopt `tests/integration/reviews/endpoints.test.ts`, paths `tests/integration/reviews/**`, `docs/TEST_STRATEGY.md`. If no commit follows, inspect `git status` first.
+Session 112 finished. Local commits, not pushed. No agent running. T-035 IMPLEMENTED: backend `589eef4`..`3b73244`, frontend form `6abab92` (no browser check; new Thai keys `th.orders.review.*`, `th.errors.reasons.NOT_DELIVERED`/`DUPLICATE_REVIEW` await owner approval), qa `732682d` (32 review integration tests, full integration 1549 passed), security `694f0bb`..`9dfb5e1` (route-list gate fixed, `pnpm test` 5796 passed). Open: SEC-091 (Medium, T-072: site CSP overrides upload CSP `default-src 'none'; sandbox` on `/api/files/{key}`; orchestrator fixes `next.config.ts` with a later headers rule, flips `it.fails` in `tests/security/t072-headers-review.test.ts`, security re-checks); SEC-092 (Medium, owner decides review moderation; minimum admin hide-review action with audit row); SEC-072 (Low). Owner questions: notice text when a reviewed product is hidden; DUPLICATE_REVIEW closes form and asks reload, acceptable? Docker `marketplace-db-test-1` and `marketplace-db-dev-1` running.
 
 Session 111 finished. Local commits, not pushed. No agent running. T-072 IMPLEMENTED `9457ac8` (D-046 ACCEPTED by owner 2026-10-26: static CSP keeps `unsafe-inline`; security review pending). T-035 backend IMPLEMENTED `589eef4`..`3b73244` (`POST /orders/{id}/items/{itemId}/review`; `pnpm test` fails 1 by design until security adds the route to `REVIEWED_NON_CATALOG_ROUTES` in `tests/security/t020-t018-catalog-shell.test.ts`; comment rules approved by owner (D-047); frontend review form, qa adopt `tests/integration/reviews/endpoints.test.ts`, database add REVIEW_TRANSACTION_OPTIONS to DATA_MODEL 21.5). T-071 IMPLEMENTED `9d0dfcf` (`scripts/container-smoke.ps1` SMOKE OK; `APP_URL` must be a build arg; no standalone output). A hung python shell from devops may still run.
 
@@ -104,7 +104,7 @@ Notes marked "stale?" were written while Docker was down; later sessions ran the
 | T-032 | Checkout, orders, mock payment | IMPLEMENTED | Reviewed, fixes applied; integration suite 1357 passed (session 99); open: SEC-053, SEC-056, CR-T032-08 |
 | T-033 | Concurrency tests | IMPLEMENTED | Orchestrator has not re-run; CC-12 done; other CC gaps open |
 | T-034 | Checkout UI | IMPLEMENTED | Commit `cb07d84`; code review found 1 blocking (Resume here); security ok; no browser check |
-| T-035 | Reviews | NOT STARTED | |
+| T-035 | Reviews | IMPLEMENTED | Backend, form, tests, security review done (`reviews/T-035-security.md`); SEC-092 open; no browser check |
 | T-040 | Seller onboarding | IMPLEMENTED | Commit `6c2112c` and later; code reviewed; not VERIFIED |
 | T-041 | Uploads | IMPLEMENTED | Security review done (`reviews/T-041-security.md`, no Critical or High); not VERIFIED |
 | T-042 | Seller products, inventory | IMPLEMENTED | Security review (SEC-067 to SEC-070) and code review CR-T042-01 to 08 done, follow-ups `adb37c8`; not VERIFIED |
