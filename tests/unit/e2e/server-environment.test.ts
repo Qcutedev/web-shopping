@@ -52,4 +52,13 @@ describe("e2e server start-up (SEC-074 to SEC-076)", () => {
       `${REPO_ROOT.replaceAll("\\", "/")}/e2e/.auth/uploads`,
     );
   });
+
+  it("gives SIGN_UP_RATE_LIMIT to the e2e server only, never to the runner process (CR-S116-03)", async () => {
+    const before = process.env["SIGN_UP_RATE_LIMIT"];
+    const { default: config } = await import("../../../playwright.config");
+    expect(config.webServer).toMatchObject({
+      env: { SIGN_UP_RATE_LIMIT: "1000", NODE_ENV: "development" },
+    });
+    expect(process.env["SIGN_UP_RATE_LIMIT"]).toBe(before);
+  });
 });

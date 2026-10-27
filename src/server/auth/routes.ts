@@ -90,8 +90,11 @@ export type AuthRuntimeSource = AuthRuntime | (() => AuthRuntime);
 /** The runtime of a running server: the validated configuration and the process-wide limiter. */
 export function getAuthRuntime(): AuthRuntime {
   const env = getEnv();
-  // The default limit (5) returns the shared `rateLimiter`; env.ts refuses another in production.
-  const signUp = signUpRateLimiter(env.signUpRateLimit, env.nodeEnv);
+  // The default limit (5) returns the shared `rateLimiter`. env.ts refuses another in production
+  // by the runtime NODE_ENV. `nodeEnv` is deliberately not passed: the default of
+  // `signUpRateLimiter` is `process.env.NODE_ENV`, which a production build inlines as
+  // "production", so this is a second refusal that does not depend on the runtime value (SEC-093).
+  const signUp = signUpRateLimiter(env.signUpRateLimit);
   return {
     auth: getAuth(),
     appOrigin: env.appOrigin,

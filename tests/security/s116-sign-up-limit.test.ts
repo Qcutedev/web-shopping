@@ -98,20 +98,36 @@ describe("S116 949285f: the override limiter shares the process table (holds)", 
   });
 });
 
-describe("SEC-093: the second production refusal reads the runtime NODE_ENV, not the build-time one", () => {
+describe("SEC-093: the second production refusal reads the build-time NODE_ENV, not the runtime one", () => {
   // Simulates a production build (inlined process.env.NODE_ENV === "production") started with a
   // runtime NODE_ENV of "test" and SIGN_UP_RATE_LIMIT=1000. env.ts sees "test" and accepts the
-  // variable; getAuthRuntime then passes env.nodeEnv ("test") to signUpRateLimiter, so the
-  // "refuses a second time" guard never sees "production". Fixed when getAuthRuntime refuses.
-  it.fails("getAuthRuntime refuses a raised sign-up limit in a production build", async () => {
+  // variable; getAuthRuntime must still refuse, because signUpRateLimiter reads its own default.
+  it("getAuthRuntime refuses a raised sign-up limit in a production build", async () => {
     vi.stubEnv("NODE_ENV", "production");
     const { getAuthRuntime } = await import("@/server/auth/routes");
     expect(() => getAuthRuntime()).toThrow(/sign-up rate limit/);
   });
 
-  it("control: the same runtime yields limit 1000 today", async () => {
-    vi.stubEnv("NODE_ENV", "production");
+  it("control: outside production the same runtime yields limit 1000, limiter and rule together", async () => {
+    vi.stubEnv("NODE_ENV", "development");
     const { getAuthRuntime } = await import("@/server/auth/routes");
-    expect(getAuthRuntime().signUpRule).toMatchObject({ name: "sign-up", limit: 1000 });
+    const runtime = getAuthRuntime();
+    expect(runtime.signUpRule).toMatchObject({ name: "sign-up", limit: 1000 });
+    const { limiter, rule } = signUpRateLimiter(1000, "development");
+    expect(runtime.limiter).toBe(limiter);
+    expect(runtime.signUpRule).toEqual(rule);
+  });
+
+  it("CR-S116-04: the raised limiter accepts the rule of the same runtime (no 500 on sign-up)", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    const { getAuthRuntime } = await import("@/server/auth/routes");
+    const runtime = getAuthRuntime();
+    if (runtime.signUpRule === undefined) throw new Error("rule missing");
+    const result = await runtime.limiter.consume("198.51.100.118", runtime.signUpRule);
+    expect(result.allowed).toBe(true);
+    // The default rule is rejected by the raised limiter; the pairing is what makes sign-up work.
+    await expect(runtime.limiter.consume("198.51.100.118", RATE_LIMITS.SIGN_UP)).rejects.toThrow(
+      TypeError,
+    );
   });
 });

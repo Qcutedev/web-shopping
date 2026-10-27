@@ -51,7 +51,7 @@ A clean scanner run shows only that the scanner found nothing. Passing tests sho
 
 ### SEC-093 The second production refusal of SIGN_UP_RATE_LIMIT reads the runtime NODE_ENV, not the build-time one
 
-Severity: Low. Status: OPEN. Full entry in [../SECURITY.md](../SECURITY.md#sec-093-the-second-production-refusal-of-sign_up_rate_limit-reads-the-runtime-node_env-not-the-build-time-one).
+Severity: Low. Status: FIXED, pending security re-check. Full entry in [../SECURITY.md](../SECURITY.md#sec-093-the-second-production-refusal-of-sign_up_rate_limit-reads-the-runtime-node_env-not-the-build-time-one).
 
 Remediation in short: at `src/server/auth/routes.ts:94`, refuse when either the inlined `process.env.NODE_ENV` or `env.nodeEnv` is `production`. Then flip the `it.fails` in `tests/security/s116-sign-up-limit.test.ts`. The owner decides on the wider fix: refuse to start when the build-time and runtime `NODE_ENV` disagree.
 

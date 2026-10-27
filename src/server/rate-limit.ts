@@ -551,6 +551,9 @@ export const rateLimiter: RateLimiter = buildRateLimiter(
 /** The largest `sign-up` limit `signUpRateLimiter` accepts. A bound against a typing error. */
 export const MAX_SIGN_UP_LIMIT_OVERRIDE = 1_000;
 
+// Intentionally a module-level value and not part of `processState()` (CR-S116-05): it holds a rule
+// set and a limiter object, not counts, and the table shared across copies is data only. A copy
+// that rebuilds it (for example under HMR) counts in the same table, so nothing is lost.
 let signUpOverride: { limit: number; limiter: RateLimiter } | undefined;
 
 /**
