@@ -1,6 +1,6 @@
 /**
  * Unit tests of the reviews contract schemas (docs/API_CONTRACTS.md section 5.6; REQ-C-14):
- * the rating range, the comment rule (provisional limit, blank is null, plain text kept as sent
+ * the rating range, the comment rule (D-047 limit, blank is null, plain text kept as sent
  * apart from the line normalisation), strict bodies, and the path parameters.
  */
 import { describe, expect, it } from "vitest";

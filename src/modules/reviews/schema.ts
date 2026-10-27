@@ -8,8 +8,8 @@
  * `storeId`, and `createdAt` included, is `400 VALIDATION_ERROR` and nothing is written. The
  * product and the reviewer always come from the order item and the session.
  *
- * Text limit of `comment` (item 8.2-7, set for this endpoint in T-035; **provisional** until the
- * owner or the orchestrator rules): multi-line, at most REVIEW_COMMENT_MAX characters after the
+ * Text limit of `comment` (item 8.2-7, set for this endpoint in T-035; owner approved 2026-10-26,
+ * D-047 item 1): multi-line, at most REVIEW_COMMENT_MAX characters after the
  * normalisation of the store description (`normaliseMultiLineText`: CR LF and a lone CR become LF,
  * trailing white space of every line and surrounding white space of the whole text are removed),
  * every non-empty line under the display-name rule `NAME_ALLOWED_TEXT`. A comment that is absent,
@@ -30,7 +30,7 @@ import { normaliseMultiLineText } from "@/modules/sellers/schema";
 export const MIN_RATING = 1;
 export const MAX_RATING = 5;
 
-/** Provisional (file comment). */
+/** D-047 item 1 (file comment). */
 export const REVIEW_COMMENT_MAX = 2000;
 
 /** Longest id accepted in a path (section 1.4; the same bound as the other modules). */

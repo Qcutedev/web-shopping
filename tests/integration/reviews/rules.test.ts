@@ -150,6 +150,13 @@ describe("review comment rules (D-047 item 1)", () => {
         body: { rating: 5, comment },
       });
       expect(response.status).toBe(400);
+      const { error } = await json<{
+        error: { code: string; details: { fields: { path: string; code: string }[] } };
+      }>(response);
+      expect(error.code).toBe("VALIDATION_ERROR");
+      expect(error.details.fields.map(({ path, code }) => ({ path, code }))).toEqual([
+        { path: "comment", code: "custom" },
+      ]);
     }
     expect(await db.review.count({ where: { orderItemId: item.id } })).toBe(0);
   });
@@ -242,6 +249,9 @@ describe("item-level eligibility inside one order", () => {
       body: { rating: 5 },
     });
     expect(refused.status).toBe(409);
+    const { error } = await json<{ error: { code: string; details: unknown } }>(refused);
+    expect(error.code).toBe("CONFLICT");
+    expect(error.details).toEqual({ reason: "NOT_DELIVERED" });
     expect(await db.review.count({ where: { orderItemId: shippedItem.id } })).toBe(0);
   });
 
