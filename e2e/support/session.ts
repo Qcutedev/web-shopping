@@ -6,6 +6,7 @@ import { expect, type Browser, type BrowserContext, type Page } from "@playwrigh
 import { th } from "@/i18n/th";
 import { uniqueEmail } from "./accounts";
 import { E2E_ORIGIN } from "./constants";
+import { takeSignIn } from "./sign-in-budget";
 
 /** Header the API requires on every mutation (API_CONTRACTS 1.1). */
 export const ORIGIN_HEADERS = { Origin: E2E_ORIGIN } as const;
@@ -53,6 +54,7 @@ export async function registerCustomer(browser: Browser, prefix: string): Promis
   await page.goto("/sign-in");
   await page.getByLabel(th.auth.email).fill(email);
   await page.getByLabel(th.auth.password).fill(password);
+  await takeSignIn();
   await page.getByRole("button", { name: th.auth.signInSubmit }).click();
   await expect(page.getByRole("button", { name: ACCOUNT_BUTTON })).toBeVisible({ timeout: 30_000 });
   return { context, page, name, email };
