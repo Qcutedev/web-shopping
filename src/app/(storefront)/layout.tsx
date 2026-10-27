@@ -1,5 +1,5 @@
-import { AppShell } from "@/components/shell/app-shell";
+import { StorefrontShell } from "@/components/shell/storefront-shell";
 
 export default function StorefrontLayout({ children }: LayoutProps<"/">) {
-  return <AppShell>{children}</AppShell>;
+  return <StorefrontShell>{children}</StorefrontShell>;
 }

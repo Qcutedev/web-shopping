@@ -5,6 +5,7 @@ import { ROUTES } from "@/lib/routes";
 import { AppShell } from "./app-shell";
 import { MAX_SEARCH_TEXT_LENGTH } from "@/modules/catalog/schema";
 import { CartLink } from "./cart-link";
+import { SignedOutNav } from "./signed-out-nav";
 
 describe("AppShell", () => {
   it("has one main landmark that holds the page, one banner, and one footer", () => {
@@ -45,18 +46,29 @@ describe("AppShell", () => {
     expect(within(form).getByRole("button", { name: th.shell.header.search.submit })).toBeTruthy();
   });
 
-  it("links to sign-in, open-store, and cart", () => {
-    render(<AppShell>x</AppShell>);
+  it("links to sign-up, sign-in, open-store, and cart for a visitor", () => {
+    render(<AppShell headerSession={<SignedOutNav />}>x</AppShell>);
     const nav = screen.getByRole("navigation", { name: th.shell.header.navLabel });
     expect(
       within(nav).getByRole("link", { name: th.shell.header.signIn }).getAttribute("href"),
     ).toBe(ROUTES.signIn);
+    expect(
+      within(nav).getByRole("link", { name: th.shell.header.signUp }).getAttribute("href"),
+    ).toBe(ROUTES.signUp);
     expect(
       within(nav).getByRole("link", { name: th.shell.header.openStore }).getAttribute("href"),
     ).toBe(ROUTES.openStore);
     expect(
       within(nav).getByRole("link", { name: th.shell.header.cart.label }).getAttribute("href"),
     ).toBe(ROUTES.cart);
+  });
+
+  it("shows only the cart link beside open-store while the session part loads (default)", () => {
+    render(<AppShell>x</AppShell>);
+    const nav = screen.getByRole("navigation", { name: th.shell.header.navLabel });
+    expect(within(nav).queryByRole("link", { name: th.shell.header.signIn })).toBeNull();
+    expect(within(nav).queryByRole("link", { name: th.shell.header.signUp })).toBeNull();
+    expect(within(nav).getByRole("link", { name: th.shell.header.cart.label })).toBeTruthy();
   });
 
   it("shows the open-store header link at every width (CR-70)", () => {

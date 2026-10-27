@@ -26,6 +26,19 @@ export const th = {
       // approved
       openStore: "เปิดร้านค้า",
       signIn: "เข้าสู่ระบบ",
+      // proposal (header sign-up link, signed-in menu, session 116): not yet approved by the owner.
+      signUp: "สมัครสมาชิก",
+      account: {
+        // Visible name of the menu button when the profile could not be read.
+        fallbackName: "บัญชีของฉัน",
+        // {name} is the user's display name. Accessible name of the menu button.
+        buttonLabel: "เมนูบัญชีของ {name}",
+        profile: "บัญชีของฉัน",
+        orders: "คำสั่งซื้อของฉัน",
+        signOut: "ออกจากระบบ",
+        signingOut: "กำลังออกจากระบบ",
+        signOutFailed: "ออกจากระบบไม่สำเร็จ กรุณาลองอีกครั้ง",
+      },
       cart: {
         // proposal. {count} is the number of items in the cart.
         label: "ตะกร้าสินค้า",

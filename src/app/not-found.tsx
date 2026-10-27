@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { AppShell } from "@/components/shell/app-shell";
+import { StorefrontShell } from "@/components/shell/storefront-shell";
 import { buttonVariants } from "@/components/ui/button";
 import { th } from "@/i18n/th";
 import { ROUTES } from "@/lib/routes";
@@ -14,7 +14,7 @@ export const metadata: Metadata = { title: th.notFound.title };
  */
 export default function NotFound() {
   return (
-    <AppShell>
+    <StorefrontShell>
       <div className="container-page flex flex-col items-start gap-4 py-14">
         <h1 className="type-page-title text-foreground">{th.notFound.title}</h1>
         <p className="type-body text-foreground-secondary">{th.notFound.body}</p>
@@ -22,6 +22,6 @@ export default function NotFound() {
           {th.notFound.backHome}
         </Link>
       </div>
-    </AppShell>
+    </StorefrontShell>
   );
 }

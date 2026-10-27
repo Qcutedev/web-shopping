@@ -1,23 +1,23 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { SearchField } from "@/components/ui/search-field";
 import { MAX_SEARCH_TEXT_LENGTH } from "@/modules/catalog/schema";
 import { th } from "@/i18n/th";
 import { ROUTES, SEARCH_QUERY_PARAM } from "@/lib/routes";
 import { CartLink } from "./cart-link";
-
-const NAV_LINK =
-  "type-label text-foreground-nav hover:text-foreground focus-ring inline-flex min-h-11 items-center rounded-sm px-2";
+import { NAV_LINK } from "./nav-link";
 
 /**
- * Storefront header: brand, pill search, "เปิดร้านค้า", "เข้าสู่ระบบ", and the cart button
+ * Storefront header: brand, pill search, "เปิดร้านค้า", the session part, and the cart button
  * (docs/DESIGN_SYSTEM.md, "Storefront header"). It renders no request data, so it stays in the
  * static shell. Below 768 px the search field takes its own row. "เปิดร้านค้า" shows at every
  * width (D-036 item 8, CR-70); the footer keeps its own link too.
  *
- * Not in this task: the second row of category links (needs the category pages of T-021) and a
- * signed-in state (needs the sign-in page and an account menu).
+ * `session` is the session-dependent part of the nav (sign-up and sign-in links, or the account
+ * menu, then the cart link). The layout passes it behind Suspense; the default is the plain cart
+ * link, which is also the loading state. Not in this task: the second row of category links.
  */
-export function SiteHeader() {
+export function SiteHeader({ session = <CartLink /> }: { session?: ReactNode }) {
   return (
     <header className="border-border bg-background border-b">
       <div className="container-page flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
@@ -36,10 +36,7 @@ export function SiteHeader() {
           <Link href={ROUTES.openStore} className={NAV_LINK}>
             {th.shell.header.openStore}
           </Link>
-          <Link href={ROUTES.signIn} className={NAV_LINK}>
-            {th.shell.header.signIn}
-          </Link>
-          <CartLink />
+          {session}
         </nav>
         <div className="order-3 w-full md:order-2 md:w-auto md:flex-1">
           <SearchField
