@@ -34,7 +34,17 @@ async function hydrated(page: Page): Promise<void> {
 test.beforeAll(async ({ browser }) => {
   const page = await browser.newPage({ baseURL: E2E_ORIGIN });
   for (const path of ["/sign-in", "/sign-up"]) {
-    await page.goto(path, { timeout: 170_000 });
+    // The reload the dev server does after compiling can abort the navigation that triggered it
+    // (net::ERR_ABORTED); the route is compiled by then, so a second attempt succeeds. This is
+    // the warm-up only: no test assertion is retried.
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        await page.goto(path, { timeout: 170_000 });
+        break;
+      } catch (error) {
+        if (attempt >= 3 || !String(error).includes("ERR_ABORTED")) throw error;
+      }
+    }
     await hydrated(page);
   }
   await page.close();
