@@ -24,14 +24,21 @@ export async function createDraft(
   seller: APIRequestContext,
   prefix: string,
   stock: number,
+  /** Category id for a seller other than seller two (see shop.ts categoryTwoId). */
+  categoryId?: string,
 ): Promise<MadeProduct> {
   // The public category answer has no id; the seller's own seeded product does (category two).
-  const own = (await json(await seller.get("/api/v1/seller/products"))) as {
-    data: { category: { id: string; name: string } }[];
-  };
-  const category = {
-    data: own.data.find((item) => item.category.name === SEEDED.categoryTwo.name)?.category,
-  };
+  const category: { data: { id: string } | undefined } = { data: undefined };
+  if (categoryId) {
+    category.data = { id: categoryId };
+  } else {
+    const own = (await json(await seller.get("/api/v1/seller/products"))) as {
+      data: { category: { id: string; name: string } }[];
+    };
+    category.data = own.data.find(
+      (item) => item.category.name === SEEDED.categoryTwo.name,
+    )?.category;
+  }
   if (!category.data) throw new Error("seller two has no product in the e2e category two");
   const stamp = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const title = `${prefix} ${stamp}`;
