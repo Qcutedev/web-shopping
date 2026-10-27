@@ -2,7 +2,8 @@
  * Helpers for specs that act as several people at once. Each person gets a browser context of
  * their own, so cookies never mix.
  */
-import type { Browser, BrowserContext, Page } from "@playwright/test";
+import { expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { th } from "@/i18n/th";
 import { uniqueEmail } from "./accounts";
 import { E2E_ORIGIN } from "./constants";
 
@@ -22,25 +23,50 @@ export async function openAs(browser: Browser, storageState: string): Promise<Pe
   return { context, page: await context.newPage(), name: "", email: "" };
 }
 
+const ACCOUNT_BUTTON = new RegExp(th.shell.header.account.buttonLabel.replace("{name}", ".+"));
+
 /**
- * Registers a new customer through the real sign-up endpoint and signs in. There is no sign-up
- * or sign-in page yet (docs/STATUS.md), so the endpoints are the only way in; the cookie lands in
- * the context and the pages then run as that customer.
+ * Registers a new customer through the real /sign-up page, signs out through the header account
+ * menu, and signs in again through the real /sign-in page. The session cookie lands in the
+ * context, so the pages then run as that customer. A failed step throws with the page's alert
+ * text, so a broken form is reported as such.
  */
 export async function registerCustomer(browser: Browser, prefix: string): Promise<Person> {
   const name = `E2E ${prefix}`;
   const email = uniqueEmail(prefix);
   const password = "e2e-Customer-pass-1234";
   const context = await browser.newContext({ baseURL: E2E_ORIGIN });
-  const signUp = await context.request.post("/api/v1/auth/sign-up", {
-    headers: ORIGIN_HEADERS,
-    data: { name, email, password },
-  });
-  if (!signUp.ok()) throw new Error(`sign-up answered ${signUp.status()}`);
-  const signIn = await context.request.post("/api/v1/auth/sign-in", {
-    headers: ORIGIN_HEADERS,
-    data: { email, password },
-  });
-  if (!signIn.ok()) throw new Error(`sign-in answered ${signIn.status()}`);
-  return { context, page: await context.newPage(), name, email };
+  const page = await context.newPage();
+
+  await page.goto("/sign-up");
+  await page.getByLabel(th.auth.name).fill(name);
+  await page.getByLabel(th.auth.email).fill(email);
+  await page.getByLabel(th.auth.password).fill(password);
+  await page.getByRole("button", { name: th.auth.signUpSubmit }).click();
+  await expect(page.getByRole("button", { name: ACCOUNT_BUTTON })).toBeVisible();
+
+  await page.getByRole("button", { name: ACCOUNT_BUTTON }).click();
+  await page.getByRole("button", { name: th.shell.header.account.signOut }).click();
+  await expect(page.getByRole("link", { name: th.shell.header.signIn }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: ACCOUNT_BUTTON })).toHaveCount(0);
+
+  await page.goto("/sign-in");
+  await page.getByLabel(th.auth.email).fill(email);
+  await page.getByLabel(th.auth.password).fill(password);
+  await page.getByRole("button", { name: th.auth.signInSubmit }).click();
+  await expect(page.getByRole("button", { name: ACCOUNT_BUTTON })).toBeVisible();
+  return { context, page, name, email };
+}
+
+/** Adds a product to the cart through the product page's add-to-cart control. */
+export async function addToCartOnPage(page: Page, slug: string, quantity = 1): Promise<void> {
+  await page.goto(`/products/${slug}`);
+  for (let step = 1; step < quantity; step += 1) {
+    await page.getByRole("button", { name: th.cart.increase }).click();
+  }
+  await expect(page.getByRole("spinbutton", { name: th.cart.add.quantity })).toHaveValue(
+    String(quantity),
+  );
+  await page.getByRole("button", { name: th.cart.add.submit }).click();
+  await expect(page.getByText(th.cart.add.success)).toBeVisible();
 }

@@ -4,48 +4,38 @@
  * taken from the products, and a seller moving their part of the order through fulfilment while
  * the customer watches.
  *
- * There is no add-to-cart button and no sign-in page yet (docs/STATUS.md), so the customer is
- * registered through the sign-up endpoint and the cart and the address are filled through the
- * cart and address endpoints. Everything after that, cart page onwards, is the real UI.
+ * The customer registers on /sign-up, signs out from the header menu, signs in on /sign-in, and
+ * fills the cart with the add-to-cart control of two product pages. Only the delivery address
+ * is set up through the address endpoint (setup, not the journey under test). Everything else
+ * is the real UI.
  *
- * The tests run in order and share one customer: sign-up is limited to 5 per hour per address and
- * global-setup plus seller-onboarding.spec.ts already use 4 (see seller-onboarding.spec.ts).
+ * The tests run in order and share one customer.
  *
  * Amounts (shipping is a flat 40.00 per store, tests/helpers/reset.ts):
  *   store one: 2 x 123.45 = 246.90 + 40.00      store two: 1 x 250.00 + 40.00
  *   items 496.90, shipping 80.00, total 576.90
  */
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+// addToCartOnPage and registerCustomer drive the real pages (see support/session.ts).
 import { th } from "@/i18n/th";
 import { SEEDED, SELLER_TWO_STORAGE_STATE } from "./support/accounts";
 import { E2E_ORIGIN } from "./support/constants";
-import { ORIGIN_HEADERS, openAs, registerCustomer, type Person } from "./support/session";
+import {
+  ORIGIN_HEADERS,
+  addToCartOnPage,
+  openAs,
+  registerCustomer,
+  type Person,
+} from "./support/session";
 
 test.describe.configure({ mode: "serial" });
 
 let customer: Person;
 let orderId = "";
 
-async function productId(api: APIRequestContext, slug: string): Promise<string> {
-  const response = await api.get(`/api/v1/products/${slug}`);
-  expect(response.ok()).toBe(true);
-  return ((await response.json()) as { data: { id: string } }).data.id;
-}
-
 async function post(api: APIRequestContext, url: string, data: unknown): Promise<void> {
   const response = await api.post(url, { headers: ORIGIN_HEADERS, data });
   expect(response.ok(), `${url} answered ${response.status()}`).toBe(true);
-}
-
-async function fillCart(api: APIRequestContext): Promise<void> {
-  await post(api, "/api/v1/cart/items", {
-    productId: await productId(api, SEEDED.productOne.slug),
-    quantity: 2,
-  });
-  await post(api, "/api/v1/cart/items", {
-    productId: await productId(api, SEEDED.productTwoA.slug),
-    quantity: 1,
-  });
 }
 
 async function expectNoSideScroll(page: Page): Promise<void> {
@@ -69,7 +59,9 @@ test.beforeAll(async ({ browser }) => {
     postalCode: "10110",
     isDefault: true,
   });
-  await fillCart(api);
+  // The cart is filled through the add-to-cart control of two product pages (two stores).
+  await addToCartOnPage(customer.page, SEEDED.productOne.slug, 2);
+  await addToCartOnPage(customer.page, SEEDED.productTwoA.slug, 1);
 });
 
 test.afterAll(async () => {

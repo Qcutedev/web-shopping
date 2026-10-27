@@ -1,8 +1,7 @@
 /**
  * Journey 6: a customer applies to sell, an admin rejects with a reason, the customer reapplies,
- * the admin approves, and the applicant's role follows. One applicant walks the whole path:
- * sign-up is limited to 5 per hour per address (RATE_LIMITS.SIGN_UP) and global-setup already
- * uses 3, so the suite registers one applicant here and one customer in checkout.spec.ts.
+ * the admin approves, and the applicant's role follows. The applicant registers and signs in
+ * through the real /sign-up and /sign-in pages.
  *
  * Also checks that a seller is refused the admin pages (the server says so, not only the menu).
  */
