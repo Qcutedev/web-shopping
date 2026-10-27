@@ -28,6 +28,12 @@ import { request } from "@playwright/test";
 
 import { redactConnectionSecrets } from "../tests/helpers/migrate-output";
 import { inheritedDatabaseVariableNames } from "../tests/helpers/test-database-url";
+import {
+  ADMIN,
+  ADMIN_STORAGE_STATE,
+  SELLER_TWO,
+  SELLER_TWO_STORAGE_STATE,
+} from "./support/accounts";
 import { assertServerShowsCanary, newCanarySlug } from "./support/server-identity";
 import {
   E2E_BASE_DATABASE,
@@ -101,6 +107,7 @@ function binPath(packageName: string, binName: string): string {
 const PRISMA_CLI = binPath("prisma", "prisma");
 const TSX_CLI = binPath("tsx", "tsx");
 const DATABASE_STEPS = resolve(REPO_ROOT, "tests/e2e-support/database.ts");
+const EXTRA_SEED_STEP = resolve(REPO_ROOT, "tests/e2e-support/seed-extra.ts");
 
 export default async function globalSetup(): Promise<void> {
   const e2eEnv = childEnvironment(E2E_DATABASE_URL);
@@ -134,18 +141,45 @@ export default async function globalSetup(): Promise<void> {
     if (!signUp.ok()) {
       throw new Error(`e2e setup: sign-up answered ${signUp.status()}`);
     }
+    // The admin and the second seller sign up through the real endpoint too; the extra seed then
+    // promotes them and gives the second seller a store (tests/e2e-support/seed-extra.ts).
+    for (const account of [ADMIN, SELLER_TWO]) {
+      const response = await api.post("/api/v1/auth/sign-up", { data: account });
+      if (!response.ok()) {
+        throw new Error(`e2e setup: sign-up of ${account.name} answered ${response.status()}`);
+      }
+    }
     run("seed", TSX_CLI, [DATABASE_STEPS, "seed"], e2eEnv);
+    run("seed extra", TSX_CLI, [EXTRA_SEED_STEP], e2eEnv);
+  } finally {
+    await api.dispose();
+  }
+  // Roles are read from the database on each request, but a fresh sign-in per account keeps the
+  // saved state free of cookies from the sign-up calls above.
+  await saveSignedInState(SELLER, SELLER_STORAGE_STATE);
+  await saveSignedInState(ADMIN, ADMIN_STORAGE_STATE);
+  await saveSignedInState(SELLER_TWO, SELLER_TWO_STORAGE_STATE);
+}
 
+async function saveSignedInState(
+  account: { email: string; password: string },
+  path: string,
+): Promise<void> {
+  const api = await request.newContext({
+    baseURL: E2E_ORIGIN,
+    extraHTTPHeaders: { Origin: E2E_ORIGIN },
+  });
+  try {
     const signIn = await api.post("/api/v1/auth/sign-in", {
-      data: { email: SELLER.email, password: SELLER.password },
+      data: { email: account.email, password: account.password },
     });
     if (!signIn.ok()) {
       throw new Error(`e2e setup: sign-in answered ${signIn.status()}`);
     }
-    mkdirSync(dirname(SELLER_STORAGE_STATE), { recursive: true });
+    mkdirSync(dirname(path), { recursive: true });
     // Written pretty-printed so that `pnpm format:check`, which reads the file, accepts it.
     const state = await api.storageState();
-    writeFileSync(SELLER_STORAGE_STATE, `${JSON.stringify(state, null, 2)}\n`);
+    writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`);
   } finally {
     await api.dispose();
   }
