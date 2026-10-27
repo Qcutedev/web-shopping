@@ -12,6 +12,7 @@ export const ROUTES = {
   checkout: "/checkout",
   orders: "/orders",
   signIn: "/sign-in",
+  signUp: "/sign-up",
   openStore: "/seller/apply",
   // Account area (T-030). `src/proxy.ts` already gates `/account/*`.
   account: "/account",
