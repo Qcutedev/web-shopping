@@ -133,7 +133,7 @@ Notes:
 
 ### Updating the database image
 
-The image is pinned by digest (SEC-008), so `docker compose pull` never changes what runs. The digest in `docker-compose.yml` is the multi-platform index digest of `postgres:18-trixie` as pulled on 2026-10-11. No dependency bot updates it yet: there is no remote repository, and the bot configuration is part of the CI task (T-070). Until then the update is done by hand:
+The image is pinned by digest (SEC-008), so `docker compose pull` never changes what runs. The digest in `docker-compose.yml` is the multi-platform index digest of `postgres:18-trixie` as pulled on 2026-10-11. No dependency bot updates it: `.github/dependabot.yml` covers `npm`, `github-actions`, and the `Dockerfile` (`docker`), not `docker-compose.yml`, and it has never run because there is no remote repository. The update is done by hand:
 
 1. Pull the current image behind the tag and print its digest:
 
@@ -429,7 +429,7 @@ In the commands below `$baseUrl` is the origin of the environment being released
 
 | # | Step | Check |
 | --- | --- | --- |
-| 1 | All checks pass on the commit to release | `pnpm verify`, then `pnpm test:integration` (exists since T-023) and `pnpm test:e2e` (**Planned**, T-060). Each must exit 0. Once CI exists (T-070), the CI run on that commit replaces the local run |
+| 1 | All checks pass on the commit to release | `pnpm verify`, then `pnpm test:integration` (exists since T-023) and `pnpm test:e2e` (exists; the suite is still small, see STATUS.md for T-060). Each must exit 0. The `.github/workflows/ci.yml` jobs `verify`, `integration`, and `e2e` run the same commands; once that workflow has run on GitHub (it has not yet, see "CI pipeline"), the CI run on that commit replaces the local run |
 | 2 | No open Critical or High security finding | **Manual**: read the findings register in [SECURITY.md](SECURITY.md) |
 | 3 | Back up the target database and confirm the backup is restorable | **Planned**: the commands depend on the hosting provider, which is not chosen. See "Database backups". The pre-release backup is a database backup like any other: it is stored in the same place, readable by the same people, and deleted automatically after 30 days |
 | 4 | Apply migrations | `pnpm db:migrate:deploy`, which runs `prisma migrate deploy`, with `DATABASE_URL` set to the target database for that command. Must exit 0. **Planned** (T-071): the script exists since T-013, but where it runs in a deployment is not built; see "Build and migration image" below. On production this is a production migration and needs explicit human approval recorded in DECISIONS.md (CLAUDE.md, "Needs human approval") |
@@ -829,7 +829,7 @@ For the production readiness checklist, all **Manual** until a provider is chose
 
 Nothing below is done. Each item states how it is checked.
 
-- [ ] Build and full test suite pass on the release commit. Check: `pnpm verify`, `pnpm test:integration` (exists since T-023), `pnpm test:e2e` (**Planned**, T-060), each exit 0
+- [ ] Build and full test suite pass on the release commit. Check: `pnpm verify`, `pnpm test:integration` (exists since T-023), `pnpm test:e2e` (exists; suite still small, see STATUS.md for T-060), each exit 0
 - [ ] No open Critical or High security finding. **Manual**: findings register in SECURITY.md
 - [ ] Environment variables set and validated, values not exposed. Check: the application starts and release procedure step 6 passes (since T-011 an invalid variable ends the server at start with exit code 1 and names the variable); **Manual**: no secret is visible in logs or the hosting console's public settings
 - [ ] `AUTH_SECRET` unique to the environment. **Manual**
