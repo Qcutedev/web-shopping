@@ -22,8 +22,11 @@ const getActor = vi.fn();
 vi.mock("@/server/auth/session", () => ({ getActor: (...args: unknown[]) => getActor(...args) }));
 const getProfile = vi.fn();
 vi.mock("@/modules/profile", () => ({ getProfile: (...args: unknown[]) => getProfile(...args) }));
-const getCart = vi.fn();
-vi.mock("@/modules/cart", () => ({ getCart: (...args: unknown[]) => getCart(...args) }));
+// Since 21c9c33 (CR-S116-02) the header calls countCartLines (one COUNT), not getCart.
+const countCartLines = vi.fn();
+vi.mock("@/modules/cart", () => ({
+  countCartLines: (...args: unknown[]) => countCartLines(...args),
+}));
 
 import { AccountMenu } from "@/components/shell/account-menu";
 import { HeaderSession } from "@/components/shell/header-session";
@@ -36,7 +39,7 @@ const HOSTILE = '<img src=x onerror="alert(1)">';
 beforeEach(() => {
   getActor.mockReset();
   getProfile.mockReset();
-  getCart.mockReset();
+  countCartLines.mockReset();
 });
 
 function childrenOf(node: unknown): ReactElement[] {
@@ -56,7 +59,7 @@ describe("S116 2bd6ded: only the name and a number cross to the client", () => {
       role: "ADMIN",
       store: null,
     });
-    getCart.mockResolvedValue({ stores: [{ items: [{ id: "a" }, { id: "b" }] }] });
+    countCartLines.mockResolvedValue(2);
     const tree = await HeaderSession();
     const [menu, cart] = childrenOf(tree);
     expect(menu?.type).toBe(AccountMenu);
@@ -69,10 +72,10 @@ describe("S116 2bd6ded: only the name and a number cross to the client", () => {
     const actor = { userId: "u2", role: "CUSTOMER", storeId: null, storeStatus: null };
     getActor.mockResolvedValue(actor);
     getProfile.mockResolvedValue({ name: "x" });
-    getCart.mockResolvedValue({ stores: [] });
+    countCartLines.mockResolvedValue(0);
     await HeaderSession();
     expect(getProfile.mock.calls).toEqual([[actor]]);
-    expect(getCart.mock.calls).toEqual([[actor]]);
+    expect(countCartLines.mock.calls).toEqual([[actor]]);
   });
 });
 

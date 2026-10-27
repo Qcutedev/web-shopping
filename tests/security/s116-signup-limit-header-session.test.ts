@@ -285,7 +285,16 @@ async function loadHeaderSession(actor: unknown, profile: unknown, cart: unknown
   }));
   vi.doMock("@/server/auth/session", () => ({ getActor: () => Promise.resolve(actor) }));
   vi.doMock("@/modules/profile", () => ({ getProfile: () => Promise.resolve(profile) }));
-  vi.doMock("@/modules/cart", () => ({ getCart: () => Promise.resolve(cart) }));
+  // Since 21c9c33 (CR-S116-02) the header reads one COUNT through countCartLines, not the priced
+  // cart. The count is derived from the same fixture; getCart stays mocked so a return to the
+  // priced cart still exercises the canary checks below.
+  const lines = (cart as { stores?: { items: unknown[] }[] } | undefined)?.stores?.flatMap(
+    (store) => store.items,
+  ).length;
+  vi.doMock("@/modules/cart", () => ({
+    getCart: () => Promise.resolve(cart),
+    countCartLines: () => Promise.resolve(lines ?? 0),
+  }));
   const { HeaderSession } = await import("@/components/shell/header-session");
   return HeaderSession;
 }

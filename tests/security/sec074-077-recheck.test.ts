@@ -60,6 +60,79 @@ function nextEnvDriverNames(fileName: string, text: string): string[] {
   }
 }
 
+/**
+ * Names playwright.config.ts adds to `webServer.env` next to `e2eServerEnvironment(...)`.
+ * `SIGN_UP_RATE_LIMIT` is refused by src/server/env.ts and getAuthRuntime when
+ * NODE_ENV=production (CR-S116-03); any new name needs a security review first.
+ */
+const REVIEWED_EXTRAS: readonly string[] = ["SIGN_UP_RATE_LIMIT"];
+
+/** Index just past the bracket that closes the one at `open`; throws when unbalanced. */
+function closeOf(text: string, open: number): number {
+  const pairs: Record<string, string> = { "(": ")", "{": "}", "[": "]" };
+  const stack: string[] = [];
+  for (let i = open; i < text.length; i++) {
+    const ch = text[i]!;
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const end = text.indexOf(ch, i + 1);
+      if (end < 0) throw new Error("unterminated string");
+      i = end;
+    } else if (pairs[ch]) {
+      stack.push(pairs[ch]);
+    } else if (ch === ")" || ch === "}" || ch === "]") {
+      if (stack.pop() !== ch) throw new Error("unbalanced brackets");
+      if (stack.length === 0) return i + 1;
+    }
+  }
+  throw new Error("unbalanced brackets");
+}
+
+/**
+ * The extra names in `webServer.env`. Fails the test unless the value is `e2eServerEnvironment(...)`
+ * or `{ ...e2eServerEnvironment(...), NAME, NAME: value }` with no second spread and the call first.
+ */
+function webServerEnvExtras(config: string): string[] {
+  const code = config.replace(/^\s*\/\/.*$/gm, "");
+  const webServer = code.indexOf("webServer: {");
+  expect(webServer).toBeGreaterThan(-1);
+  const block = code.slice(webServer, closeOf(code, webServer + "webServer: ".length));
+  const envAt = block.search(/\benv:\s*/);
+  expect(envAt).toBeGreaterThan(-1);
+  const value = block.slice(envAt).replace(/^env:\s*/, "");
+  if (value.startsWith("e2eServerEnvironment(")) return [];
+  expect(value.startsWith("{")).toBe(true);
+  const inner = value.slice(1, closeOf(value, 0) - 1).trim();
+  const call = "...e2eServerEnvironment(";
+  expect(inner.startsWith(call)).toBe(true);
+  const rest = inner.slice(closeOf(inner, call.length - 1));
+  const names: string[] = [];
+  let depth = 0;
+  let entry = "";
+  const flush = () => {
+    const text = entry.trim();
+    entry = "";
+    if (text === "") return;
+    const match = /^(?:([A-Za-z_$][\w$]*)|"([^"]+)"|'([^']+)')\s*(?::[\s\S]*)?$/.exec(text);
+    if (!match) throw new Error(`webServer.env entry not reviewed: ${text}`);
+    names.push(match[1] ?? match[2] ?? match[3]!);
+  };
+  for (let i = 0; i < rest.length; i++) {
+    const ch = rest[i]!;
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const end = rest.indexOf(ch, i + 1);
+      entry += rest.slice(i, end + 1);
+      i = end;
+      continue;
+    }
+    if ("({[".includes(ch)) depth++;
+    if (")}]".includes(ch)) depth--;
+    if (ch === "," && depth === 0) flush();
+    else entry += ch;
+  }
+  flush();
+  return names;
+}
+
 function scannerRefuses(text: string): boolean {
   try {
     assertNoDriverOverrideForE2e(scanEnvText(text), "the .env file");
@@ -173,9 +246,21 @@ describe("SEC-074 re-check: the empty driver values survive the launch chain", (
   it("playwright.config.ts starts the server with these values and a per-run secret", () => {
     const config = readFileSync(resolve(REPO_ROOT, "playwright.config.ts"), "utf8");
     expect(config).toContain("command: e2eServerCommand()");
-    expect(config).toContain("env: e2eServerEnvironment({");
     expect(config).toContain('authSecret: randomBytes(32).toString("hex")');
     expect(config).toContain("reuseExistingServer: false");
+
+    // webServer.env is either `e2eServerEnvironment({...})` itself, or an object literal whose
+    // first entry spreads it. In the second shape nothing after the spread may replace a name
+    // e2eServerEnvironment sets (NODE_ENV, PGOPTIONS, NODE_PG_FORCE_NATIVE, DATABASE_URL,
+    // UPLOAD_DIR, AUTH_SECRET, ...), and the only extra names are the reviewed e2e-only ones.
+    const extras = webServerEnvExtras(config);
+    const pinned = Object.keys(
+      e2eServerEnvironment({ databaseUrl: "d", origin: "o", uploadDir: "u", authSecret: "s" }),
+    );
+    for (const name of extras) expect(pinned).not.toContain(name);
+    expect(extras.every((name) => REVIEWED_EXTRAS.includes(name))).toBe(true);
+    // CR-S116-03: the e2e-only rate limit reaches the server only, never the runner process.
+    expect(config.replace(/^\s*\/\/.*$/gm, "")).not.toMatch(/process\.env\b/);
   });
 });
 
