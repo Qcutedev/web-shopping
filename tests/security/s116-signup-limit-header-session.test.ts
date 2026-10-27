@@ -6,8 +6,8 @@
  *   2bd6ded  The storefront header reads the session (account menu, real cart count).
  *
  * This file holds no character outside printable ASCII and no backslash-u escape (SEC-040).
- * Pure: no database, no network. The configuration is stubbed per case. No finding is open from
- * this review, so there is no `it.fails` here.
+ * Pure: no database, no network. The configuration is stubbed per case. The one open finding (SEC-093) is reproduced by `it.fails` in
+ * `s116-sign-up-limit.test.ts`; there is none here.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";

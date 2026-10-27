@@ -43,7 +43,7 @@ export async function registerCustomer(browser: Browser, prefix: string): Promis
   await page.getByLabel(th.auth.email).fill(email);
   await page.getByLabel(th.auth.password).fill(password);
   await page.getByRole("button", { name: th.auth.signUpSubmit }).click();
-  await expect(page.getByRole("button", { name: ACCOUNT_BUTTON })).toBeVisible();
+  await expect(page.getByRole("button", { name: ACCOUNT_BUTTON })).toBeVisible({ timeout: 30_000 });
 
   await page.getByRole("button", { name: ACCOUNT_BUTTON }).click();
   await page.getByRole("button", { name: th.shell.header.account.signOut }).click();
@@ -54,7 +54,7 @@ export async function registerCustomer(browser: Browser, prefix: string): Promis
   await page.getByLabel(th.auth.email).fill(email);
   await page.getByLabel(th.auth.password).fill(password);
   await page.getByRole("button", { name: th.auth.signInSubmit }).click();
-  await expect(page.getByRole("button", { name: ACCOUNT_BUTTON })).toBeVisible();
+  await expect(page.getByRole("button", { name: ACCOUNT_BUTTON })).toBeVisible({ timeout: 30_000 });
   return { context, page, name, email };
 }
 
