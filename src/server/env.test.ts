@@ -8,11 +8,13 @@ import {
   AUTH_SECRET_MIN_DISTINCT_CHARACTERS,
   AUTH_SECRET_MIN_LENGTH,
   DEFAULT_PAYMENT_TIMEOUT_MINUTES,
+  DEFAULT_SIGN_UP_RATE_LIMIT,
   ENV_RULES,
   type EnvIssue,
   type EnvSource,
   EnvValidationError,
   MAX_PAYMENT_TIMEOUT_MINUTES,
+  MAX_SIGN_UP_RATE_LIMIT,
   parseEnv,
   PAYMENT_SWEEP_INTERVAL_MS,
   readAuthSecret,
@@ -20,6 +22,7 @@ import {
 } from "./env";
 import { assertSameOrigin } from "./http";
 import { createLogger, DEFAULT_LOG_LEVEL, setLogLevel } from "./logger";
+import { MAX_SIGN_UP_LIMIT_OVERRIDE, RATE_LIMITS } from "./rate-limit";
 
 // Made-up values. Each is unmistakable, so a test can assert that none of it reaches a message.
 const DATABASE_URL = "postgresql://shop_app:Zq7canaryPw@db.example.test:5432/shop";
@@ -77,6 +80,7 @@ describe("parseEnv: a valid environment", () => {
       authSecret: AUTH_SECRET,
       trustedProxy: { trustedProxyHops: 0 },
       paymentTimeoutMinutes: 15,
+      signUpRateLimit: 5,
       logLevel: "info",
     });
     expect(DEFAULT_PAYMENT_TIMEOUT_MINUTES).toBe(15);
@@ -113,6 +117,7 @@ describe("parseEnv: a valid environment", () => {
       "logLevel",
       "nodeEnv",
       "paymentTimeoutMinutes",
+      "signUpRateLimit",
       "trustedProxy",
     ]);
     // SR-01: there is no boolean "trust proxy" switch; an unknown variable trusts nothing.
@@ -743,6 +748,52 @@ describe("parseEnv: the error", () => {
       "LOG_LEVEL",
       "UPLOAD_DIR",
     ]);
+  });
+});
+
+describe("parseEnv: SIGN_UP_RATE_LIMIT (e2e only)", () => {
+  it("defaults to 5, the production limit of RATE_LIMITS.SIGN_UP", () => {
+    expect(DEFAULT_SIGN_UP_RATE_LIMIT).toBe(5);
+    expect(DEFAULT_SIGN_UP_RATE_LIMIT).toBe(RATE_LIMITS.SIGN_UP.limit);
+    expect(MAX_SIGN_UP_RATE_LIMIT).toBe(MAX_SIGN_UP_LIMIT_OVERRIDE);
+    expect(parseEnv(source()).signUpRateLimit).toBe(5);
+    expect(parseEnv(source({ SIGN_UP_RATE_LIMIT: "" })).signUpRateLimit).toBe(5);
+  });
+
+  it.each([
+    ["development", "1000", 1000],
+    ["test", "50", 50],
+    ["development", "1", 1],
+  ])("accepts a higher or lower value in %s: %s", (nodeEnv, value, expected) => {
+    const env = parseEnv(source({ NODE_ENV: nodeEnv, SIGN_UP_RATE_LIMIT: value }));
+    expect(env.signUpRateLimit).toBe(expected);
+  });
+
+  it.each(["0", "1001", "-1", "5.0", " 5", "1e3", "many", "01"])(
+    "refuses %j with the range rule",
+    (value) => {
+      expect(issuesOf(source({ SIGN_UP_RATE_LIMIT: value }))).toEqual([
+        { variable: "SIGN_UP_RATE_LIMIT", rule: ENV_RULES.signUpRateLimit },
+      ]);
+    },
+  );
+
+  it.each(["5", "6", "1000"])("cannot be set to %s when NODE_ENV=production", (value) => {
+    const issues = issuesOf(production({ SIGN_UP_RATE_LIMIT: value }));
+    expect(issues).toContainEqual({
+      variable: "SIGN_UP_RATE_LIMIT",
+      rule: ENV_RULES.signUpRateLimitInProduction,
+    });
+  });
+
+  it("production without the variable is valid and uses 5", () => {
+    expect(parseEnv(production()).signUpRateLimit).toBe(5);
+  });
+
+  it("never puts the value in the failure", () => {
+    const error = failure(production({ SIGN_UP_RATE_LIMIT: "4321" }));
+    expect(error.message).toContain("- SIGN_UP_RATE_LIMIT must not be set");
+    expect(error.message).not.toContain("4321");
   });
 });
 

@@ -54,6 +54,8 @@ export interface Env {
   trustedProxy: ClientAddressConfig;
   /** `PAYMENT_TIMEOUT_MINUTES`: how long an order may await payment before it is failed (D-028). */
   paymentTimeoutMinutes: number;
+  /** `SIGN_UP_RATE_LIMIT`: 5 unless set; only the e2e server sets it, never production. */
+  signUpRateLimit: number;
   /** `LOG_LEVEL`. */
   logLevel: LogLevel;
   /**
@@ -67,6 +69,10 @@ export interface Env {
 /** The longest payment timeout accepted: one day. A bound against a typing error, not a product rule. */
 export const MAX_PAYMENT_TIMEOUT_MINUTES = 1_440;
 export const DEFAULT_PAYMENT_TIMEOUT_MINUTES = 15;
+/** The `sign-up` limit per address and hour. A test pins it to `RATE_LIMITS.SIGN_UP.limit`. */
+export const DEFAULT_SIGN_UP_RATE_LIMIT = 5;
+/** Highest `SIGN_UP_RATE_LIMIT`. Same value as `MAX_SIGN_UP_LIMIT_OVERRIDE` in rate-limit.ts. */
+export const MAX_SIGN_UP_RATE_LIMIT = 1_000;
 
 /**
  * How often the payment-timeout sweep runs: every minute. Decided by the owner (D-033 point 12)
@@ -170,6 +176,8 @@ export const ENV_RULES = {
   logLevel: "must be debug, info, warn, or error",
   uploadDir: "must be an absolute directory path",
   uploadDirRequired: "must be set when NODE_ENV=production",
+  signUpRateLimit: `must be an integer from 1 to ${MAX_SIGN_UP_RATE_LIMIT}`,
+  signUpRateLimitInProduction: "must not be set when NODE_ENV=production",
 } as const;
 
 const KNOWN_RULES: ReadonlySet<string> = new Set(Object.values(ENV_RULES));
@@ -250,6 +258,13 @@ const SCHEMAS = {
       error: ENV_RULES.paymentTimeoutMinutes,
     })
     .default(DEFAULT_PAYMENT_TIMEOUT_MINUTES),
+  // Raises the sign-up limit for the e2e suite only; refused when NODE_ENV=production (parseEnv).
+  SIGN_UP_RATE_LIMIT: z
+    .string()
+    .regex(/^[1-9][0-9]{0,3}$/, { error: ENV_RULES.signUpRateLimit })
+    .transform(Number)
+    .refine((value) => value <= MAX_SIGN_UP_RATE_LIMIT, { error: ENV_RULES.signUpRateLimit })
+    .default(DEFAULT_SIGN_UP_RATE_LIMIT),
   LOG_LEVEL: z
     .enum(["debug", "info", "warn", "error"], { error: ENV_RULES.logLevel })
     .default("info"),
@@ -541,6 +556,7 @@ export function parseEnv(source: EnvSource): Env {
   const trustedProxyHops = read(source, "TRUSTED_PROXY_HOPS", issues);
   const trustedClientIpHeader = read(source, "TRUSTED_CLIENT_IP_HEADER", issues);
   const paymentTimeoutMinutes = read(source, "PAYMENT_TIMEOUT_MINUTES", issues);
+  const signUpRateLimit = read(source, "SIGN_UP_RATE_LIMIT", issues);
   const logLevel = read(source, "LOG_LEVEL", issues);
   const uploadDir = read(source, "UPLOAD_DIR", issues);
   checkAuthLibraryVariables(source, issues);
@@ -561,6 +577,10 @@ export function parseEnv(source: EnvSource): Env {
     // SEC-009: nothing of the local set-up may reach a deployed environment.
     checkDatabaseUrlForProduction(source, databaseUrl, issues);
     checkAuthSecretForProduction(authSecret, issues);
+    // The production limit is the code default: the variable may not be set at all, not even to 5.
+    if (raw(source, "SIGN_UP_RATE_LIMIT") !== undefined) {
+      issues.push({ variable: "SIGN_UP_RATE_LIMIT", rule: ENV_RULES.signUpRateLimitInProduction });
+    }
     if (raw(source, "DATABASE_URL_TEST") !== undefined) {
       issues.push({ variable: "DATABASE_URL_TEST", rule: ENV_RULES.databaseUrlTestInProduction });
     }
@@ -582,6 +602,7 @@ export function parseEnv(source: EnvSource): Env {
     databaseUrl === undefined ||
     authSecret === undefined ||
     paymentTimeoutMinutes === undefined ||
+    signUpRateLimit === undefined ||
     logLevel === undefined
   ) {
     throw new EnvValidationError(issues);
@@ -598,6 +619,7 @@ export function parseEnv(source: EnvSource): Env {
       ...(trustedClientIpHeader === undefined ? {} : { trustedClientIpHeader }),
     }),
     paymentTimeoutMinutes,
+    signUpRateLimit,
     logLevel,
     ...(uploadDir === undefined ? {} : { uploadDir }),
   });

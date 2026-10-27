@@ -3,6 +3,11 @@ import { randomBytes } from "node:crypto";
 import { E2E_DATABASE_URL, E2E_ORIGIN, E2E_PORT, E2E_UPLOAD_DIR } from "./e2e/support/environment";
 import { e2eServerCommand, e2eServerEnvironment } from "./e2e/support/server-environment";
 
+// The suite registers many users from one address; the default limit is 5 sign-ups per hour.
+// Playwright merges process.env under webServer.env, so the e2e `next dev` server sees this.
+// src/server/env.ts refuses the variable when NODE_ENV=production, so it cannot reach production.
+process.env.SIGN_UP_RATE_LIMIT = "1000";
+
 /**
  * Playwright configuration (T-060, first part: the stacked Table check, CR-118).
  *

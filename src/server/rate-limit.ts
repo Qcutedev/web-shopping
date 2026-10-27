@@ -548,6 +548,44 @@ export const rateLimiter: RateLimiter = buildRateLimiter(
   () => processState().lastSaturationLogAt,
 );
 
+/** The largest `sign-up` limit `signUpRateLimiter` accepts. A bound against a typing error. */
+export const MAX_SIGN_UP_LIMIT_OVERRIDE = 1_000;
+
+let signUpOverride: { limit: number; limiter: RateLimiter } | undefined;
+
+/**
+ * The process-wide limiter with the `sign-up` limit set to `limit` (T-060: the e2e suite signs up
+ * more than 5 times an hour from one address). The default limit returns `rateLimiter` itself.
+ * Any other value is refused with a TypeError when `NODE_ENV=production`, whatever the caller
+ * checked before, and when it is not an integer from 1 to MAX_SIGN_UP_LIMIT_OVERRIDE. The table
+ * is the one of `rateLimiter`, so the other rules are shared. Returns the rule too, because a
+ * limiter accepts only a rule that equals its own.
+ */
+export function signUpRateLimiter(
+  limit: number,
+  nodeEnv: string | undefined = process.env.NODE_ENV,
+): { limiter: RateLimiter; rule: RateLimitRule } {
+  if (limit === RATE_LIMITS.SIGN_UP.limit)
+    return { limiter: rateLimiter, rule: RATE_LIMITS.SIGN_UP };
+  if (nodeEnv === "production") {
+    throw new TypeError("The sign-up rate limit cannot be changed when NODE_ENV=production.");
+  }
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_SIGN_UP_LIMIT_OVERRIDE) {
+    throw new TypeError(
+      `The sign-up rate limit must be an integer from 1 to ${MAX_SIGN_UP_LIMIT_OVERRIDE}.`,
+    );
+  }
+  const rule: RateLimitRule = { ...RATE_LIMITS.SIGN_UP, limit };
+  if (signUpOverride?.limit !== limit) {
+    const rules = Object.values(RATE_LIMITS).map((each) => (each.name === rule.name ? rule : each));
+    signUpOverride = {
+      limit,
+      limiter: buildRateLimiter({ rules }, processStore, () => processState().lastSaturationLogAt),
+    };
+  }
+  return { limiter: signUpOverride.limiter, rule };
+}
+
 function retryAfter(resetAt: number, now: number): number {
   const seconds = Math.ceil((resetAt - now) / 1000);
   return Number.isFinite(seconds) ? Math.max(1, seconds) : 1;

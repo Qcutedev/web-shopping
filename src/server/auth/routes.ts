@@ -50,7 +50,12 @@ import {
   readJsonBody,
 } from "../http";
 import { logger as defaultLogger, type StructuredLogger } from "../logger";
-import { RATE_LIMITS, type RateLimiter, rateLimiter, type RateLimitRule } from "../rate-limit";
+import {
+  RATE_LIMITS,
+  type RateLimiter,
+  type RateLimitRule,
+  signUpRateLimiter,
+} from "../rate-limit";
 import { resolveRequestId, trustsIncomingRequestId } from "../request-id";
 import { signInEmailChecks, signInRetryAfterSeconds } from "../sign-in-rate-limit";
 import type { Actor } from "./actor";
@@ -67,6 +72,8 @@ export interface AuthRuntime {
   appOrigin: string;
   trustedProxy: ClientAddressConfig;
   limiter: RateLimiter;
+  /** The `sign-up` rule `limiter` holds. Absent: `RATE_LIMITS.SIGN_UP` (production, and tests). */
+  signUpRule?: RateLimitRule;
   logger: StructuredLogger;
   /** SEC-035: the minimum time of a failed sign-in and of any sign-up answer. */
   responseFloor: ResponseFloor;
@@ -83,11 +90,14 @@ export type AuthRuntimeSource = AuthRuntime | (() => AuthRuntime);
 /** The runtime of a running server: the validated configuration and the process-wide limiter. */
 export function getAuthRuntime(): AuthRuntime {
   const env = getEnv();
+  // The default limit (5) returns the shared `rateLimiter`; env.ts refuses another in production.
+  const signUp = signUpRateLimiter(env.signUpRateLimit, env.nodeEnv);
   return {
     auth: getAuth(),
     appOrigin: env.appOrigin,
     trustedProxy: env.trustedProxy,
-    limiter: rateLimiter,
+    limiter: signUp.limiter,
+    signUpRule: signUp.rule,
     logger: defaultLogger,
     responseFloor: AUTH_RESPONSE_FLOOR,
   };
@@ -242,7 +252,7 @@ export async function handleSignUp(request: Request, source: AuthRuntimeSource):
     checkOrigin(request, runtime, scope);
     assertContentType(request, JSON_CONTENT_TYPE);
     scope.clientIp = getClientAddress(request, runtime.trustedProxy);
-    await consume(runtime, scope, scope.clientIp, RATE_LIMITS.SIGN_UP);
+    await consume(runtime, scope, scope.clientIp, runtime.signUpRule ?? RATE_LIMITS.SIGN_UP);
     const body = await readJsonBody(request);
     const input = parseInput(signUpBodySchema, body);
 
