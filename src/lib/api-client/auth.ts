@@ -37,6 +37,6 @@ export function readSession(fetchImpl?: Fetcher): Promise<ApiResult<SessionActor
 }
 
 /** Ends the session on the server and clears the cookie. `401` means there was no session. */
-export function signOut(fetchImpl?: Fetcher): Promise<ApiResult<{ signedOut: boolean }>> {
+export function signOut(fetchImpl?: Fetcher): Promise<ApiResult<{ signedOut: true }>> {
   return apiRequest("/api/v1/auth/sign-out", { method: "POST", fetchImpl });
 }

@@ -9,6 +9,8 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("next/headers", () => ({ headers: () => Promise.resolve(new Headers()) }));
 
+const warn = vi.fn();
+vi.mock("@/server/logger", () => ({ logger: { warn: (...args: unknown[]) => warn(...args) } }));
 const getActor = vi.fn();
 vi.mock("@/server/auth/session", () => ({ getActor: (...args: unknown[]) => getActor(...args) }));
 const getProfile = vi.fn();
@@ -31,6 +33,7 @@ beforeEach(() => {
   getActor.mockReset();
   getProfile.mockReset();
   getCart.mockReset();
+  warn.mockReset();
 });
 
 describe("HeaderSession", () => {
@@ -82,5 +85,30 @@ describe("HeaderSession", () => {
     getActor.mockRejectedValue(new Error("db"));
     await renderSession();
     expect(screen.getByRole("link", { name: th.shell.header.signIn })).toBeTruthy();
+  });
+
+  it("logs a fixed event and the error class only when the session read fails", async () => {
+    getActor.mockRejectedValue(new TypeError("secret@example.com"));
+    await renderSession();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith("header.session.read_failed", { errorClass: "TypeError" });
+  });
+
+  it("logs a fixed event and the error class only when the profile read fails", async () => {
+    getActor.mockResolvedValue(actor);
+    getProfile.mockRejectedValue(new RangeError("secret@example.com"));
+    getCart.mockResolvedValue(cartOf(1));
+    await renderSession();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith("header.profile.read_failed", { errorClass: "RangeError" });
+  });
+
+  it("logs a fixed event and the error class only when the cart read fails", async () => {
+    getActor.mockResolvedValue(actor);
+    getProfile.mockResolvedValue({ name: "สมชาย" });
+    getCart.mockRejectedValue("secret@example.com");
+    await renderSession();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith("header.cart.read_failed", { errorClass: "string" });
   });
 });

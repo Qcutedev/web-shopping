@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fill } from "@/i18n/fill";
@@ -112,6 +112,7 @@ describe("AccountMenu", () => {
     await user.click(pending);
     expect(signOut).toHaveBeenCalledTimes(1);
     finish({ ok: true, status: 200, data: { signedOut: true } });
+    await waitFor(() => expect(replace).toHaveBeenCalled());
   });
 
   it("shows Thai copy and allows a retry when sign-out fails", async () => {
@@ -128,5 +129,32 @@ describe("AccountMenu", () => {
     expect(replace).not.toHaveBeenCalled();
     const retry = screen.getByRole("button", { name: copy.signOut }) as HTMLButtonElement;
     expect(retry.disabled).toBe(false);
+  });
+
+  it("returns focus to the button on Escape", async () => {
+    const user = await openMenu();
+    const button = screen.getByRole("button", { name: fill(copy.buttonLabel, { name: NAME }) });
+    await user.click(screen.getByRole("link", { name: copy.profile }));
+    await user.click(button);
+    (screen.getByRole("link", { name: copy.orders }) as HTMLElement).focus();
+    await user.keyboard("{Escape}");
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(button);
+  });
+
+  it("clears the sign-out error when the menu closes", async () => {
+    signOut.mockResolvedValue({
+      ok: false,
+      status: 0,
+      code: "NETWORK_ERROR",
+      fields: [],
+      requestId: null,
+    });
+    const user = await openMenu();
+    await user.click(screen.getByRole("button", { name: copy.signOut }));
+    await screen.findByRole("alert");
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: fill(copy.buttonLabel, { name: NAME }) }));
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

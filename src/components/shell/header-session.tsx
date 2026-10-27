@@ -4,6 +4,7 @@ import { getCart } from "@/modules/cart";
 import { getProfile } from "@/modules/profile";
 import type { Actor } from "@/server/auth/actor";
 import { getActor } from "@/server/auth/session";
+import { logger } from "@/server/logger";
 import { AccountMenu } from "./account-menu";
 import { CartLink } from "./cart-link";
 import { SignedOutNav } from "./signed-out-nav";
@@ -25,6 +26,7 @@ export async function HeaderSession() {
     actor = await getActor(await headers());
   } catch (error) {
     unstable_rethrow(error);
+    logger.warn("header.session.read_failed", { errorClass: errorClass(error) });
     actor = null;
   }
   if (actor === null) return <SignedOutNav />;
@@ -38,12 +40,18 @@ export async function HeaderSession() {
   );
 }
 
+/** Error name only: never the message, which can carry user data or SQL. */
+function errorClass(error: unknown): string {
+  return error instanceof Error ? error.name : typeof error;
+}
+
 async function readName(actor: Actor): Promise<string | null> {
   try {
     const profile = await getProfile(actor);
     return profile.name.trim() === "" ? null : profile.name;
   } catch (error) {
     unstable_rethrow(error);
+    logger.warn("header.profile.read_failed", { errorClass: errorClass(error) });
     return null;
   }
 }
@@ -55,6 +63,7 @@ async function readCartCount(actor: Actor): Promise<number> {
     return cart.stores.reduce((sum, group) => sum + group.items.length, 0);
   } catch (error) {
     unstable_rethrow(error);
+    logger.warn("header.cart.read_failed", { errorClass: errorClass(error) });
     return 0;
   }
 }

@@ -26,18 +26,28 @@ export function AccountMenu({ name }: { name: string | null }) {
   const router = useRouter();
   const panelId = useId();
   const root = useRef<HTMLDivElement>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
 
+  /** Every way to close the menu goes through here so a stale sign-out error never reappears. */
+  function close() {
+    setOpen(false);
+    setFailed(false);
+  }
+
   useEffect(() => {
     if (!open) return;
     function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        close();
+        toggle.current?.focus();
+      }
     }
     function onPointer(event: PointerEvent) {
       if (root.current && event.target instanceof Node && !root.current.contains(event.target)) {
-        setOpen(false);
+        close();
       }
     }
     document.addEventListener("keydown", onKey);
@@ -71,11 +81,12 @@ export function AccountMenu({ name }: { name: string | null }) {
   return (
     <div ref={root} className="relative">
       <button
+        ref={toggle}
         type="button"
         aria-expanded={open}
         aria-controls={panelId}
         aria-label={label}
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => (open ? close() : setOpen(true))}
         className={cn(buttonVariants({ variant: "ghost" }), "max-w-40 sm:max-w-56")}
       >
         <span className={cn(USER_NAME_CONTAINER_CLASS, "truncate")}>
@@ -87,10 +98,10 @@ export function AccountMenu({ name }: { name: string | null }) {
         hidden={!open}
         className="border-border bg-surface absolute end-0 top-full z-40 mt-1 flex w-56 flex-col gap-1 rounded-md border p-2 shadow-md"
       >
-        <Link href={ROUTES.account} className={ITEM} onClick={() => setOpen(false)}>
+        <Link href={ROUTES.account} className={ITEM} onClick={close}>
           {th.shell.header.account.profile}
         </Link>
-        <Link href={ROUTES.orders} className={ITEM} onClick={() => setOpen(false)}>
+        <Link href={ROUTES.orders} className={ITEM} onClick={close}>
           {th.shell.header.account.orders}
         </Link>
         <button type="button" className={ITEM} disabled={pending} onClick={onSignOut}>
