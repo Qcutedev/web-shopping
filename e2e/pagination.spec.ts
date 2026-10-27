@@ -151,8 +151,9 @@ test("a page past the last one says so and links back to page 1", async ({ page 
 });
 
 test("a list that fits one page shows no pager", async ({ page }) => {
-  await page.goto(`/categories/${SEEDED.categoryTwo.slug}`);
-  expect((await titlesOnPage(page)).length).toBe(2);
+  // Other specs add products to the seeded categories, so a search that finds one product is used.
+  await page.goto("/search?q=กระเป๋า");
+  await expect.poll(() => titlesOnPage(page)).toEqual([SEEDED.productTwoB.title]);
   await expect(page.getByRole("navigation", { name: pagerName })).toHaveCount(0);
 });
 

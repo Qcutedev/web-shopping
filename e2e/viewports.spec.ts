@@ -87,9 +87,10 @@ for (const width of [360, 768]) {
 
       await page.goto(`/categories/${SEEDED.categoryTwo.slug}`);
       await expect(page.getByRole("heading", { level: 1 })).toContainText(SEEDED.categoryTwo.name);
-      expect([...(await titlesOnPage(page))].sort()).toEqual(
-        [SEEDED.productTwoA.title, SEEDED.productTwoB.title].sort(),
-      );
+      // Earlier specs add products to this category, so the two seeded ones are looked for, not counted.
+      const categoryTitles = await titlesOnPage(page);
+      expect(categoryTitles).toContain(SEEDED.productTwoA.title);
+      expect(categoryTitles).toContain(SEEDED.productTwoB.title);
       await expectNoSideScroll(page, width);
 
       // Sort links are reachable and reorder the list.
@@ -100,9 +101,15 @@ for (const width of [360, 768]) {
       );
       await priceDesc.click();
       await expect(page).toHaveURL(/sort=price_desc/);
+      // 999.00 comes before 250.00 in descending order.
       await expect
-        .poll(() => titlesOnPage(page))
-        .toEqual([SEEDED.productTwoB.title, SEEDED.productTwoA.title]);
+        .poll(async () => {
+          const titles = await titlesOnPage(page);
+          const bag = titles.indexOf(SEEDED.productTwoB.title);
+          const shirt = titles.indexOf(SEEDED.productTwoA.title);
+          return bag >= 0 && shirt >= 0 && bag < shirt;
+        })
+        .toBe(true);
       await expectNoSideScroll(page, width);
 
       // Search by title.
@@ -123,14 +130,16 @@ for (const width of [360, 768]) {
 
       // The filter form narrows by category and price.
       await page.goto("/search");
-      await expect.poll(async () => (await titlesOnPage(page)).length).toBe(5);
+      await expect.poll(async () => (await titlesOnPage(page)).length).toBeGreaterThanOrEqual(5);
       const category = await reach(page.getByLabel(th.catalog.filter.category), width);
       await category.selectOption(SEEDED.categoryTwo.slug);
       const minPrice = await reach(page.getByLabel(th.catalog.filter.minPrice), width);
       await minPrice.fill("500");
       const apply = await reach(page.getByRole("button", { name: th.catalog.filter.apply }), width);
       await apply.click();
-      await expect.poll(() => titlesOnPage(page)).toEqual([SEEDED.productTwoB.title]);
+      // 500 baht keeps the 999.00 bag and drops the 250.00 shirt.
+      await expect.poll(() => titlesOnPage(page)).toContain(SEEDED.productTwoB.title);
+      expect(await titlesOnPage(page)).not.toContain(SEEDED.productTwoA.title);
       await expectNoSideScroll(page, width);
     });
 

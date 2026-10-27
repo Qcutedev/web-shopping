@@ -3,8 +3,8 @@
  * the price and category filter form, sort links, and the product page. Signed out, as a visitor.
  *
  * The data is the e2e seed: store one has three products in category one; store two has two
- * products in category two (tests/e2e-support/database.ts and seed-extra.ts). Pagination is not
- * covered: five products never fill a page (see docs/TEST_STRATEGY.md).
+ * products in category two (tests/e2e-support/database.ts and seed-extra.ts). Pagination is in
+ * pagination.spec.ts: five products never fill a page.
  */
 import { expect, test, type Page } from "@playwright/test";
 import { th } from "@/i18n/th";
