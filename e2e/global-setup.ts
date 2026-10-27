@@ -20,20 +20,17 @@
  * child processes (see tests/e2e-support/database.ts for why). Their environment has no PG*
  * variable and no DATABASE_URL_TEST, from the process or from `.env` (CR-41).
  */
-import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import { dirname, join, resolve } from "node:path";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { request } from "@playwright/test";
 
-import { redactConnectionSecrets } from "../tests/helpers/migrate-output";
-import { inheritedDatabaseVariableNames } from "../tests/helpers/test-database-url";
 import {
   ADMIN,
   ADMIN_STORAGE_STATE,
   SELLER_TWO,
   SELLER_TWO_STORAGE_STATE,
 } from "./support/accounts";
+import { PRISMA_CLI, TSX_CLI, childEnvironment, run } from "./support/child-steps";
 import { assertServerShowsCanary, newCanarySlug } from "./support/server-identity";
 import {
   E2E_BASE_DATABASE,
@@ -43,69 +40,8 @@ import {
   REPO_ROOT,
   SELLER,
   SELLER_STORAGE_STATE,
-  readEnvFile,
 } from "./support/environment";
 
-/** Longest time one child step may take. `prisma migrate deploy` on an empty database takes seconds. */
-const STEP_TIMEOUT_MS = 120_000;
-
-const SECRET_URLS = [E2E_BASE_DATABASE.baseUrl, E2E_DATABASE_URL];
-
-function childEnvironment(databaseUrl: string): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  for (const name of inheritedDatabaseVariableNames(env)) {
-    delete env[name];
-  }
-  // prisma7.config.ts loads `.env` without overriding a variable that is already set, so the
-  // names the file holds (PG* and DATABASE_URL_TEST) are set to empty for the child, as the
-  // integration setup does.
-  for (const name of inheritedDatabaseVariableNames(readEnvFile())) {
-    env[name] = "";
-  }
-  env["DATABASE_URL"] = databaseUrl;
-  return env;
-}
-
-/** Runs `node <script> <args>` without a shell; failure text has the URLs' secrets removed (CR-29). */
-function run(label: string, script: string, args: string[], env: NodeJS.ProcessEnv) {
-  const result = spawnSync(process.execPath, [resolve(script), ...args], {
-    env,
-    cwd: REPO_ROOT,
-    encoding: "utf8",
-    timeout: STEP_TIMEOUT_MS,
-    killSignal: "SIGKILL",
-    windowsHide: true,
-  });
-  if (result.status === 0 && result.error === undefined && result.signal === null) return;
-  const facts = [
-    result.status === null ? "no exit status" : `exit ${result.status}`,
-    ...(result.signal !== null ? [`signal ${result.signal}`] : []),
-    ...(result.error !== undefined ? [`error: ${result.error.message}`] : []),
-  ].join("; ");
-  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
-  throw new Error(
-    redactConnectionSecrets(
-      `e2e setup: ${label} failed (${facts}).${output === "" ? "" : `\n${output}`}`,
-      SECRET_URLS,
-    ),
-  );
-}
-
-const requireFromRepo = createRequire(join(REPO_ROOT, "package.json"));
-
-/** Absolute path of a package's command-line entry, as its own `bin` field names it (CR-148). */
-function binPath(packageName: string, binName: string): string {
-  const manifestPath = requireFromRepo.resolve(`${packageName}/package.json`);
-  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
-    bin?: string | Record<string, string>;
-  };
-  const relative = typeof manifest.bin === "string" ? manifest.bin : manifest.bin?.[binName];
-  if (relative === undefined) throw new Error(`e2e setup: ${packageName} has no bin ${binName}`);
-  return resolve(dirname(manifestPath), relative);
-}
-
-const PRISMA_CLI = binPath("prisma", "prisma");
-const TSX_CLI = binPath("tsx", "tsx");
 const DATABASE_STEPS = resolve(REPO_ROOT, "tests/e2e-support/database.ts");
 const EXTRA_SEED_STEP = resolve(REPO_ROOT, "tests/e2e-support/seed-extra.ts");
 

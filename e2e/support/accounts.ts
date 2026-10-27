@@ -38,6 +38,17 @@ export const SEEDED = {
   productTwoB: { slug: "e2e-b-2", title: "กระเป๋าทดสอบ E2E", priceSatang: 99_900 },
 } as const;
 
+/** The temporary catalogue of e2e/pagination.spec.ts (tests/e2e-support/seed-pagination.ts). */
+export const PAGING = {
+  storeName: "ร้านทดสอบแบ่งหน้า",
+  storeSlug: "e2e-paging-store",
+  categoryName: "หมวดทดสอบแบ่งหน้า",
+  categorySlug: "e2e-paging-category",
+  productCount: 45,
+  /** Zero-padded, so a text search for the prefix finds all of them and sorts by number. */
+  title: (n: number): string => `สินค้าแบ่งหน้า ${String(n).padStart(2, "0")}`,
+} as const;
+
 /** An email no other run or spec uses, for an account a spec registers itself. */
 export function uniqueEmail(prefix: string): string {
   const stamp = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
