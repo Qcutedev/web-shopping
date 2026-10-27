@@ -45,6 +45,7 @@ import { buildCart, type CartLineInput, priceLine, resolveWriteQuantity } from "
 import {
   type CartLineRow,
   countCartLinesUpTo,
+  countUserCartLines,
   deleteLineInCart,
   findCartLines,
   findFirstImageKey,
@@ -105,6 +106,16 @@ export async function getCart(actor: Actor): Promise<CartDto> {
     rows.map((row) => toLineInput(row, visibleIds)),
     fee,
   );
+}
+
+/**
+ * The number of lines of the actor's cart, for the header badge (CR-S116-02). The same lines as
+ * `getCart` returns, every state included (a hidden or sold-out line is still a line the user
+ * sees and can remove), counted by one query instead of reading and pricing the cart. Not the sum
+ * of quantities. Scoped by `actor.userId` only; writes nothing.
+ */
+export async function countCartLines(actor: Actor): Promise<number> {
+  return countUserCartLines(actor.userId);
 }
 
 // ---------------------------------------------------------------------------------------------

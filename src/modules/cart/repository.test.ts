@@ -7,11 +7,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { type DbTransaction, Prisma } from "@/server/db";
 
-import { countCartLinesUpTo, findFirstImageKey, insertLine, setLineQuantity } from "./repository";
+import {
+  countCartLinesUpTo,
+  countUserCartLines,
+  findFirstImageKey,
+  insertLine,
+  setLineQuantity,
+} from "./repository";
 
+const dbCount = vi.fn();
 vi.mock("@/server/db", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/server/db")>();
-  return { ...original, db: {} };
+  return {
+    ...original,
+    db: { cartItem: { count: (...args: unknown[]) => dbCount(...args) as unknown } },
+  };
 });
 
 const tx = {
@@ -70,6 +80,15 @@ describe("countCartLinesUpTo (SEC-053)", () => {
   it("never reports more than the limit", async () => {
     tx.cartItem.findMany.mockResolvedValue([{ id: "a" }, { id: "b" }, { id: "c" }]);
     await expect(countCartLinesUpTo(TX, "cart_me", 2)).resolves.toBe(2);
+  });
+});
+
+describe("countUserCartLines (CR-S116-02)", () => {
+  it("is one COUNT of the lines whose cart belongs to this user, with no other condition", async () => {
+    dbCount.mockResolvedValue(4);
+    await expect(countUserCartLines("user_me")).resolves.toBe(4);
+    expect(dbCount).toHaveBeenCalledTimes(1);
+    expect(dbCount).toHaveBeenCalledWith({ where: { cart: { userId: "user_me" } } });
   });
 });
 

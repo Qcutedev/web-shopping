@@ -1,6 +1,6 @@
 import { headers } from "next/headers";
 import { unstable_rethrow } from "next/navigation";
-import { getCart } from "@/modules/cart";
+import { countCartLines } from "@/modules/cart";
 import { getProfile } from "@/modules/profile";
 import type { Actor } from "@/server/auth/actor";
 import { getActor } from "@/server/auth/session";
@@ -56,11 +56,13 @@ async function readName(actor: Actor): Promise<string | null> {
   }
 }
 
-/** Number of cart lines (the "รายการ" of the label), not the sum of quantities. */
+/**
+ * Number of cart lines (the "รายการ" of the label), not the sum of quantities. One COUNT through
+ * `countCartLines`, not the priced cart: the header renders on every route group (CR-S116-02).
+ */
 async function readCartCount(actor: Actor): Promise<number> {
   try {
-    const cart = await getCart(actor);
-    return cart.stores.reduce((sum, group) => sum + group.items.length, 0);
+    return await countCartLines(actor);
   } catch (error) {
     unstable_rethrow(error);
     logger.warn("header.cart.read_failed", { errorClass: errorClass(error) });

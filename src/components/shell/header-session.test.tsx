@@ -15,15 +15,14 @@ const getActor = vi.fn();
 vi.mock("@/server/auth/session", () => ({ getActor: (...args: unknown[]) => getActor(...args) }));
 const getProfile = vi.fn();
 vi.mock("@/modules/profile", () => ({ getProfile: (...args: unknown[]) => getProfile(...args) }));
-const getCart = vi.fn();
-vi.mock("@/modules/cart", () => ({ getCart: (...args: unknown[]) => getCart(...args) }));
+const countCartLines = vi.fn();
+vi.mock("@/modules/cart", () => ({
+  countCartLines: (...args: unknown[]) => countCartLines(...args),
+}));
 
 import { HeaderSession } from "./header-session";
 
 const actor = { userId: "u1", role: "CUSTOMER", storeId: null, storeStatus: null };
-const cartOf = (...counts: number[]) => ({
-  stores: counts.map((n) => ({ items: Array.from({ length: n }, (_, i) => ({ id: `l${i}` })) })),
-});
 
 async function renderSession() {
   return render(await HeaderSession());
@@ -32,7 +31,7 @@ async function renderSession() {
 beforeEach(() => {
   getActor.mockReset();
   getProfile.mockReset();
-  getCart.mockReset();
+  countCartLines.mockReset();
   warn.mockReset();
 });
 
@@ -48,16 +47,16 @@ describe("HeaderSession", () => {
     );
     expect(screen.getByRole("link", { name: th.shell.header.cart.label })).toBeTruthy();
     expect(getProfile).not.toHaveBeenCalled();
-    expect(getCart).not.toHaveBeenCalled();
+    expect(countCartLines).not.toHaveBeenCalled();
   });
 
   it("shows the menu and the real line count for a signed-in user, read for the session actor", async () => {
     getActor.mockResolvedValue(actor);
     getProfile.mockResolvedValue({ name: "สมชาย" });
-    getCart.mockResolvedValue(cartOf(2, 1));
+    countCartLines.mockResolvedValue(3);
     await renderSession();
     expect(getProfile).toHaveBeenCalledWith(actor);
-    expect(getCart).toHaveBeenCalledWith(actor);
+    expect(countCartLines).toHaveBeenCalledWith(actor);
     expect(screen.getByRole("button", { name: /สมชาย/ })).toBeTruthy();
     expect(screen.getByRole("link", { name: "ตะกร้าสินค้า 3 รายการ" }).textContent).toBe("3");
     expect(screen.queryByRole("link", { name: th.shell.header.signIn })).toBeNull();
@@ -67,7 +66,7 @@ describe("HeaderSession", () => {
   it("hides the badge for an empty cart", async () => {
     getActor.mockResolvedValue(actor);
     getProfile.mockResolvedValue({ name: "สมชาย" });
-    getCart.mockResolvedValue({ stores: [] });
+    countCartLines.mockResolvedValue(0);
     await renderSession();
     expect(screen.getByRole("link", { name: th.shell.header.cart.label }).textContent).toBe("");
   });
@@ -75,7 +74,7 @@ describe("HeaderSession", () => {
   it("degrades to the fallback name and no badge when the reads fail", async () => {
     getActor.mockResolvedValue(actor);
     getProfile.mockRejectedValue(new Error("db"));
-    getCart.mockRejectedValue(new Error("db"));
+    countCartLines.mockRejectedValue(new Error("db"));
     await renderSession();
     expect(screen.getByRole("button", { name: th.shell.header.account.fallbackName })).toBeTruthy();
     expect(screen.getByRole("link", { name: th.shell.header.cart.label }).textContent).toBe("");
@@ -97,7 +96,7 @@ describe("HeaderSession", () => {
   it("logs a fixed event and the error class only when the profile read fails", async () => {
     getActor.mockResolvedValue(actor);
     getProfile.mockRejectedValue(new RangeError("secret@example.com"));
-    getCart.mockResolvedValue(cartOf(1));
+    countCartLines.mockResolvedValue(1);
     await renderSession();
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith("header.profile.read_failed", { errorClass: "RangeError" });
@@ -106,7 +105,7 @@ describe("HeaderSession", () => {
   it("logs a fixed event and the error class only when the cart read fails", async () => {
     getActor.mockResolvedValue(actor);
     getProfile.mockResolvedValue({ name: "สมชาย" });
-    getCart.mockRejectedValue("secret@example.com");
+    countCartLines.mockRejectedValue("secret@example.com");
     await renderSession();
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith("header.cart.read_failed", { errorClass: "string" });

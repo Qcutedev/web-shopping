@@ -11,10 +11,18 @@ import { AppError } from "@/server/errors";
 
 import * as repository from "./repository";
 import { CART_LINE_LIMIT_REASON, MAX_CART_LINES } from "./schema";
-import { addCartItem, deleteCartItem, getCart, isOwnStore, updateCartItem } from "./service";
+import {
+  addCartItem,
+  countCartLines,
+  deleteCartItem,
+  getCart,
+  isOwnStore,
+  updateCartItem,
+} from "./service";
 
 vi.mock("./repository", () => ({
   countCartLinesUpTo: vi.fn(),
+  countUserCartLines: vi.fn(),
   findCartLines: vi.fn(),
   findVisibleProductIds: vi.fn(),
   readFlatShippingFee: vi.fn(),
@@ -158,6 +166,36 @@ describe("getCart", () => {
     expect(repo.inCartTransaction).not.toHaveBeenCalled();
     expect(repo.insertLine).not.toHaveBeenCalled();
     expect(repo.setLineQuantity).not.toHaveBeenCalled();
+  });
+});
+
+describe("countCartLines (CR-S116-02)", () => {
+  it("counts the actor's own lines with one query scoped by the actor's user id", async () => {
+    repo.countUserCartLines.mockResolvedValue(3);
+    await expect(countCartLines(CUSTOMER)).resolves.toBe(3);
+    expect(repo.countUserCartLines).toHaveBeenCalledTimes(1);
+    expect(repo.countUserCartLines).toHaveBeenCalledWith(CUSTOMER.userId);
+  });
+
+  it("is open to every role, like getCart: a seller is counted by its own user id", async () => {
+    repo.countUserCartLines.mockResolvedValue(0);
+    await expect(countCartLines(SELLER)).resolves.toBe(0);
+    expect(repo.countUserCartLines).toHaveBeenCalledWith(SELLER.userId);
+  });
+
+  it("reads no line, product, or fee, and opens no transaction", async () => {
+    repo.countUserCartLines.mockResolvedValue(1);
+    await countCartLines(CUSTOMER);
+    expect(repo.findCartLines).not.toHaveBeenCalled();
+    expect(repo.findVisibleProductIds).not.toHaveBeenCalled();
+    expect(repo.readFlatShippingFee).not.toHaveBeenCalled();
+    expect(repo.inCartTransaction).not.toHaveBeenCalled();
+  });
+
+  it("passes a failed read on to the caller", async () => {
+    const failure = new Error("connection lost");
+    repo.countUserCartLines.mockRejectedValue(failure);
+    await expect(countCartLines(CUSTOMER)).rejects.toBe(failure);
   });
 });
 

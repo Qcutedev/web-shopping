@@ -71,6 +71,15 @@ export async function findCartLines(userId: string): Promise<CartLineRow[]> {
   });
 }
 
+/**
+ * How many lines the user's cart holds, in one `COUNT` statement (CR-S116-02). Every line counts,
+ * whatever its product's state (hidden, sold out, own store), exactly the lines `findCartLines`
+ * returns. 0 when the user has no cart.
+ */
+export async function countUserCartLines(userId: string): Promise<number> {
+  return db.cartItem.count({ where: { cart: { userId } } });
+}
+
 /** Which of these products are visible now (section 3.4), by the one query form of the rule. */
 export async function findVisibleProductIds(productIds: readonly string[]): Promise<Set<string>> {
   if (productIds.length === 0) return new Set();
