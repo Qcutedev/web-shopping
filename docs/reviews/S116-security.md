@@ -51,7 +51,7 @@ A clean scanner run shows only that the scanner found nothing. Passing tests sho
 
 ### SEC-093 The second production refusal of SIGN_UP_RATE_LIMIT reads the runtime NODE_ENV, not the build-time one
 
-Severity: Low. Status: FIXED, pending security re-check. Full entry in [../SECURITY.md](../SECURITY.md#sec-093-the-second-production-refusal-of-sign_up_rate_limit-reads-the-runtime-node_env-not-the-build-time-one).
+Severity: Low. Status: FIXED (re-checked 2026-10-27, session 119; see "CR-S116-14 and SEC-093 re-check" below). Full entry in [../SECURITY.md](../SECURITY.md#sec-093-the-second-production-refusal-of-sign_up_rate_limit-reads-the-runtime-node_env-not-the-build-time-one).
 
 Remediation in short: at `src/server/auth/routes.ts:94`, refuse when either the inlined `process.env.NODE_ENV` or `env.nodeEnv` is `production`. Then flip the `it.fails` in `tests/security/s116-sign-up-limit.test.ts`. The owner decides on the wider fix: refuse to start when the build-time and runtime `NODE_ENV` disagree.
 
@@ -64,9 +64,32 @@ Remediation in short: at `src/server/auth/routes.ts:94`, refuse when either the 
 - Secret pattern search: `git show 949285f 2bd6ded` filtered for AWS, private-key, GitHub, Slack, Stripe, Google, JWT shapes, URL credentials, and `password/secret/token/api_key = <12+ chars>`. 1 match, the invented canary `postgresql://shop_app:Zq7canaryPw@db.example.test` in `src/server/env.test.ts`. `gitleaks` is not installed (`Get-Command gitleaks` empty), and a pattern search is weaker than a scanner.
 - Inspected `.next/server/chunks/*.js` of the 2026-10-26 build for how `NODE_ENV` reads compile.
 
+## CR-S116-14 and SEC-093 re-check (session 119, 2026-10-27)
+
+Reviewer: security agent. Tree: `690d812` (includes `039613d`). Question from [S116-code-review.md](S116-code-review.md) CR-S116-14: env.ts refuses `SIGN_UP_RATE_LIMIT` only when the runtime `NODE_ENV` is `production`; can a preview or staging environment with another `NODE_ENV` set it?
+
+**Decision: closed for every `next build` output. No change to `src` is needed.** SEC-093 is re-checked and FIXED.
+
+| Path an operator could take | Result | Evidence |
+| --- | --- | --- |
+| `NODE_ENV=staging`, `preview`, `prod`, `Production`, ` production`, `stage` | Server does not start: the schema accepts only `development`, `test`, `production` (`src/server/env.ts:218-220`). | `cr-s116-14-sign-up-limit-node-env.test.ts`, 7 cases |
+| Production build, runtime `NODE_ENV=development` or `test`, `SIGN_UP_RATE_LIMIT=1000` | env.ts accepts it, but `getAuthRuntime` now calls `signUpRateLimiter(env.signUpRateLimit)` with one argument, and the default `process.env.NODE_ENV` is inlined as `"production"`, so it throws. The handler builds the runtime inside its `try`, so every auth route answers 500: fails closed, the limit is never raised. | Fresh `next build` (below): compiled `function(e,i="production"){...if("production"===i)throw TypeError("The sign-up rate limit cannot be changed...` and `t=(0,p.A)(e.signUpRateLimit)` (one argument). Runtime simulation in the new test file and in `s116-sign-up-limit.test.ts` |
+| Next.js upgrade changes how `NODE_ENV` is inlined | Pinned. `node_modules/next/dist/build/define-env.js:76` sets it from the `dev` flag or `experimental.allowDevelopmentBuild`, never from the runtime value. A static case fails if that line changes; `next.config.ts` does not set `allowDevelopmentBuild` (static case). | New test file |
+| Docker image | `ENV NODE_ENV=production`, `CMD [... "next", "start"]`, no `next dev`. Refused at env.ts and again at the limiter. | Static case |
+| A server started with `next dev` (inlined `"development"`) and `NODE_ENV` development or test | **Override accepted.** This is how the e2e suite runs, on purpose. `next dev` is not a deployment mode, and such a server also lacks every other production check (SEC-009, `Secure` cookie, HSTS). Residual, listed in SECURITY.md. | Code read; `e2e/support/server-environment.ts` |
+
+On the suggested "explicit e2e marker" (allow the override only when, for example, `E2E=1` is set): not recommended as a security control. The marker comes through the same channel (process environment) and the same operator as `SIGN_UP_RATE_LIMIT`, so it adds no independent layer; the only case it would still cover is the `next dev` residual, where the larger exposure is the dev server itself. The build-time refusal is the independent layer, and it now holds. The owner may still add a marker as a guard against a copied `.env` on a developer machine; that is hygiene, not a finding.
+
+### Commands run (session 119)
+
+- `$env:NEXT_DIST_DIR = ".next-sec119"; pnpm exec next build` -> exit 0. Separate dist dir so the shared `.next` and e2e were not touched. Grep of `.next-sec119/server/chunks/*.js` gave the two compiled lines quoted above. The dir was then deleted; the build had also rewritten `tsconfig.json` (its own include lines and formatting), restored with `git restore --source=HEAD -- tsconfig.json`.
+- `pnpm exec vitest run --project security tests/security/cr-s116-14-sign-up-limit-node-env.test.ts tests/security/s116-sign-up-limit.test.ts` -> 2 files, 31 passed.
+- `pnpm exec prettier --check` and `pnpm exec eslint` on the new file -> clean, exit 0.
+- `next start` with the override was not run against the build; the 500 behaviour rests on the compiled code and the unit-level simulation.
+
 ## Not covered
 
-- `pnpm build` and `next start`: not run. `.next` is shared with `next dev`, and e2e may run in parallel. The inlining claim rests on a build that predates `949285f` (same mechanism, other function).
+- `pnpm build` and `next start`: not run in session 116 (session 119 ran `next build` into a separate dir, see above; `next start` still not run). `.next` is shared with `next dev`, and e2e may run in parallel. The inlining claim rests on a build that predates `949285f` (same mechanism, other function).
 - The RSC payload of a real page, and a browser run of the account menu and sign-out.
 - `f475211` (e2e specs): not in this review's scope.
 - Better Auth's own handler: not mounted (routes.ts header). Not re-checked here.
