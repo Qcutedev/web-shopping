@@ -12,7 +12,7 @@ Not started: checkout UI (T-034), reviews, seller onboarding and seller products
 
 ## Resume here
 
-Session 116 started. Done, IMPLEMENTED not VERIFIED: (1) frontend `2bd6ded` header sign-up link, account menu, real cart count (new `th.shell.header.*` keys await owner; no browser check; badge stale after add-to-cart until navigation; no seller link). (2) devops `949285f` `SIGN_UP_RATE_LIMIT` (e2e only, refused in production; set in `playwright.config.ts`). Running: (3) qa rewrites e2e specs to register and sign in through the UI (`e2e/**`, `tests/e2e*`). If no commit follows, inspect `git status` first.
+Session 116 started. Done, IMPLEMENTED not VERIFIED: (1) frontend `2bd6ded` header sign-up link, account menu, real cart count (new `th.shell.header.*` keys await owner; no browser check; badge stale after add-to-cart until navigation; no seller link). (2) devops `949285f` `SIGN_UP_RATE_LIMIT` (e2e only, refused in production; set in `playwright.config.ts`). (3) qa `f475211`: e2e customer specs register, sign in and add to cart through the UI; `pnpm test:e2e` 35 passed, 0 failed (not `pnpm verify`). Not covered: sign-up/sign-in negative paths, add-to-cart error states, journeys 12-16, a11y. No agent running. Owner questions: seller "ร้านค้าของฉัน" header link? add `router.refresh()` in `add-to-cart.tsx` for stale badge? approve `th.shell.header.*` (8 keys); DESIGN_SYSTEM.md header line needs update.
 
 Session 115 finished. Local commits, not pushed. No agent running. (1) T-035 CR-T035-01..04 FIXED `bb9ba6e` (reviews unit 87, integration 41 passed); owner still approves Thai review copy. (2) documentation `e14f5a1`: TEST_STRATEGY e2e lines aligned; DEPLOYMENT already correct. (3) frontend `d3e3d4d`, `fe750e9`: /sign-in, /sign-up, add-to-cart on product page; `pnpm test` 5830 passed, typecheck, lint, format ok; no build, no browser check, no e2e. BOM stripped from 3 e2e specs (orchestrator, uncommitted fix of SEC-043 test). Owner approves new Thai keys `th.auth.*`, `th.cart.add.*`. Open: unknown slug stays 200 (D-039; owner reverses to get 404); header has no sign-up link or signed-in state; cart badge static; sign-up rate limit 5/hour vs e2e (owner/devops); e2e specs can now register through UI but are not yet rewritten; journeys 12-16 and a11y missing. Commit trailer on `bb9ba6e` says Opus 5.5.
 
@@ -120,7 +120,7 @@ Notes marked "stale?" were written while Docker was down; later sessions ran the
 | T-050 | Admin module | IMPLEMENTED | Commits `e57e3c7` to `2a87136`; code and security review done; integration 36 admin tests passed; SEC-088, SEC-089, CR-T050-05/08 open |
 | T-051 | Admin UI | IMPLEMENTED | Commits `854fd13`, `89f9957`; component tests pass; security review `4c02b2f`: SEC-090 FIXED `1b6ca5c`, SEC-089 fixed, re-check pending; copy review `c635580` awaits owner; no browser check |
 | T-052 | Admin permission tests | VERIFIED | `af041eb`; 17 tests passed, admin folder 53 passed |
-| T-060 | E2E suite | IMPLEMENTED | Partial: 35 e2e passed (`3ac15fc`..`1faf422`); sign-in and add-to-cart UI now exist (`d3e3d4d`, `fe750e9`) but specs not rewritten to use them; journeys 12-16 and a11y not written; not VERIFIED |
+| T-060 | E2E suite | IMPLEMENTED | Partial: 35 e2e passed (`3ac15fc`..`1faf422`); customer specs use sign-in and add-to-cart UI (`f475211`, 35 passed); journeys 12-16 and a11y not written; not VERIFIED |
 | T-061 | Code review | NOT STARTED | |
 | T-062 | Security review | NOT STARTED | |
 | T-063 | Fixes, regression | NOT STARTED | |
