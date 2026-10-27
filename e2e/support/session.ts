@@ -24,8 +24,6 @@ export async function openAs(browser: Browser, storageState: string): Promise<Pe
   return { context, page: await context.newPage(), name: "", email: "" };
 }
 
-const ACCOUNT_BUTTON = new RegExp(th.shell.header.account.buttonLabel.replace("{name}", ".+"));
-
 /**
  * Registers a new customer through the real /sign-up page, signs out through the header account
  * menu, and signs in again through the real /sign-in page. The session cookie lands in the
@@ -36,6 +34,8 @@ export async function registerCustomer(browser: Browser, prefix: string): Promis
   const name = `E2E ${prefix}`;
   const email = uniqueEmail(prefix);
   const password = "e2e-Customer-pass-1234";
+  // The accessible name is matched exactly: the name is plain text, never a pattern.
+  const ACCOUNT_BUTTON = th.shell.header.account.buttonLabel.replace("{name}", name);
   const context = await browser.newContext({ baseURL: E2E_ORIGIN });
   const page = await context.newPage();
 
