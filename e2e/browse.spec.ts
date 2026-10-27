@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Journey 2 (discovery), as far as the storefront has the controls: home, category page, search,
  * the price and category filter form, sort links, and the product page. Signed out, as a visitor.
  *

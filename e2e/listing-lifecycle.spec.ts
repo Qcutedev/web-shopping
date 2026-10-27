@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Journeys 7 and 9 as one chain, because each step needs the one before it: a seller creates a
  * product and sets its stock; it is invisible to shoppers while it is a draft and while it waits
  * for approval; an admin approves it and it appears on the storefront at the price the seller

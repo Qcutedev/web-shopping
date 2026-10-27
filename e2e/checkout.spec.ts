@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Journeys 3, 4, 5 and 8: a cart with products from two stores, a mock checkout that fails and
  * then one that succeeds, the order in the customer's history with the persisted amounts, stock
  * taken from the products, and a seller moving their part of the order through fulfilment while
