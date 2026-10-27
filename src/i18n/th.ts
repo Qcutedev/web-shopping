@@ -97,6 +97,59 @@ export const th = {
     grandTotal: "ยอดรวมทั้งหมด",
     totalsNote: "ยอดทั้งหมดคำนวณโดยระบบจากราคาปัจจุบัน",
     checkout: "ไปชำระเงิน",
+    // Proposals (add-to-cart control on the product page): not yet approved by the owner.
+    add: {
+      submit: "เพิ่มลงตะกร้า",
+      quantity: "จำนวน",
+      stockNote: "มีสินค้า {stock} ชิ้น",
+      success: "เพิ่มสินค้าลงตะกร้าแล้ว",
+      viewCart: "ดูตะกร้าสินค้า",
+      ownStore: "ไม่สามารถซื้อสินค้าของร้านตัวเองได้",
+      tooMany: "จำนวนในตะกร้าของสินค้านี้รวมกันแล้วเกิน 99 ชิ้น กรุณาปรับจำนวนในตะกร้า",
+      notAvailable: "สินค้านี้ไม่พร้อมจำหน่ายแล้ว",
+    },
+  },
+  // Proposals (sign-in and sign-up pages): wording written by the frontend agent, not yet approved
+  // by the owner.
+  auth: {
+    signInTitle: "เข้าสู่ระบบ",
+    signInDescription: "เข้าสู่ระบบด้วยอีเมลและรหัสผ่านของคุณ",
+    signUpTitle: "สมัครสมาชิก",
+    signUpDescription: "สร้างบัญชีผู้ซื้อด้วยอีเมลของคุณ",
+    name: "ชื่อ",
+    email: "อีเมล",
+    password: "รหัสผ่าน",
+    passwordHelper: "อย่างน้อย 8 ตัวอักษร",
+    signInSubmit: "เข้าสู่ระบบ",
+    signUpSubmit: "สมัครสมาชิก",
+    signedIn: "เข้าสู่ระบบแล้ว กำลังพาไปยังหน้าถัดไป",
+    signedUp: "สมัครสมาชิกแล้ว กำลังพาไปยังหน้าถัดไป",
+    // Generic on purpose: it does not say whether the email has an account (REQ-C-01, REQ-C-02).
+    invalidCredentials: "อีเมลหรือรหัสผ่านไม่ถูกต้อง",
+    signUpNotCompleted:
+      "ไม่สามารถสมัครสมาชิกด้วยข้อมูลนี้ได้ หากเคยสมัครแล้วให้เข้าสู่ระบบ หรือลองใช้อีเมลอื่น",
+    formInvalid: "ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบช่องที่มีข้อความแจ้งแล้วลองอีกครั้ง",
+    haveAccount: "มีบัญชีอยู่แล้ว?",
+    noAccount: "ยังไม่มีบัญชี?",
+    pageLoading: "กำลังโหลดแบบฟอร์ม",
+    fieldErrors: {
+      name: {
+        required: "กรุณากรอกชื่อ",
+        tooLong: "ชื่อต้องไม่เกิน 100 ตัวอักษร",
+        invalid: "ชื่อมีอักขระที่ใช้ไม่ได้",
+      },
+      email: {
+        required: "กรุณากรอกอีเมล",
+        tooLong: "อีเมลต้องไม่เกิน 254 ตัวอักษร",
+        invalid: "รูปแบบอีเมลไม่ถูกต้อง",
+      },
+      password: {
+        required: "กรุณากรอกรหัสผ่าน",
+        tooShort: "รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร",
+        tooLong: "รหัสผ่านต้องไม่เกิน 128 ตัวอักษร",
+        invalid: "รหัสผ่านไม่ถูกต้อง",
+      },
+    },
   },
   // Proposals (T-034 checkout): wording written by the frontend agent, not yet approved.
   checkout: {

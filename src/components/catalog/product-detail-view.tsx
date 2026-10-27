@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ProductImage } from "@/components/catalog/product-image";
+import { AddToCart } from "@/components/cart/add-to-cart";
 import { Badge } from "@/components/ui/badge";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { NoticeLabel } from "@/components/ui/notice-label";
@@ -18,8 +19,7 @@ const PDI = String.fromCodePoint(0x2069);
 
 /**
  * Product page content from a loaded product. Price, stock state, and sold-out mark are what the
- * server sent; nothing is computed here. The purchase control (quantity, add to cart) belongs to
- * the cart task and is not on this page yet.
+ * server sent; nothing is computed here. `AddToCart` sends a quantity; the server decides the rest.
  */
 export function ProductDetailView({ product }: { product: ProductDetailDto }) {
   const { images, title } = product;
@@ -103,6 +103,12 @@ export function ProductDetailView({ product }: { product: ProductDetailDto }) {
               </Link>
             </dd>
           </dl>
+          <AddToCart
+            productId={product.id}
+            slug={product.slug}
+            stock={product.stock}
+            soldOut={product.soldOut}
+          />
           <section aria-labelledby="product-description" className="flex flex-col gap-2">
             <h2 id="product-description" className="type-section-title">
               {th.catalog.product.description}

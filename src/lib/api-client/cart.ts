@@ -12,6 +12,19 @@ export function readCart(fetchImpl?: Fetcher): Promise<ApiResult<CartDto>> {
   return apiRequest<CartDto>("/api/v1/cart", { method: "GET", fetchImpl });
 }
 
+/** Adds `quantity` to the line for the product, or creates it. The server decides the outcome. */
+export function addCartItem(
+  productId: string,
+  quantity: number,
+  fetchImpl?: Fetcher,
+): Promise<ApiResult<CartWriteLineDto>> {
+  return apiRequest<CartWriteLineDto>("/api/v1/cart/items", {
+    method: "POST",
+    body: { productId, quantity },
+    fetchImpl,
+  });
+}
+
 export function setCartItemQuantity(
   itemId: string,
   quantity: number,
