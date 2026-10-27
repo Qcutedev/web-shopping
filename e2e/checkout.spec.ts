@@ -1,4 +1,6 @@
 /**
+ * addToCartOnPage and registerCustomer drive the real pages (see support/session.ts).
+ *
  * Journeys 3, 4, 5 and 8: a cart with products from two stores, a mock checkout that fails and
  * then one that succeeds, the order in the customer's history with the persisted amounts, stock
  * taken from the products, and a seller moving their part of the order through fulfilment while
@@ -16,7 +18,6 @@
  *   items 496.90, shipping 80.00, total 576.90
  */
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
-// addToCartOnPage and registerCustomer drive the real pages (see support/session.ts).
 import { th } from "@/i18n/th";
 import { SEEDED, SELLER_TWO_STORAGE_STATE } from "./support/accounts";
 import { E2E_ORIGIN } from "./support/constants";
@@ -62,6 +63,13 @@ test.beforeAll(async ({ browser }) => {
   // The cart is filled through the add-to-cart control of two product pages (two stores).
   await addToCartOnPage(customer.page, SEEDED.productOne.slug, 2);
   await addToCartOnPage(customer.page, SEEDED.productTwoA.slug, 1);
+  // The header badge is stale until navigation; after a load it shows the 2 cart lines.
+  await customer.page.goto("/");
+  await expect(
+    customer.page.getByRole("link", {
+      name: th.shell.header.cart.labelWithCount.replace("{count}", "2"),
+    }),
+  ).toBeVisible();
 });
 
 test.afterAll(async () => {
