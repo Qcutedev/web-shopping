@@ -350,6 +350,25 @@ describe("OrderStatusPanel", () => {
     expect(await screen.findByText(th.seller.orders.actions.cancelled)).toBeTruthy();
   });
 
+  it("maps 409 CONFLICT DELIVERY_TOO_EARLY to the 24 hour copy and keeps the control", async () => {
+    const user = userEvent.setup();
+    changeOrderStatus.mockResolvedValue({
+      ...failure("CONFLICT", 409),
+      reason: "DELIVERY_TOO_EARLY",
+    });
+    render(<OrderStatusPanel orderId="so1" status="SHIPPED" />);
+    await user.click(screen.getByRole("button", { name: th.seller.orders.actions.deliver }));
+    expect(changeOrderStatus).toHaveBeenCalledWith("so1", { to: "DELIVERED" });
+    expect(await screen.findByText(th.seller.errors.reasons.DELIVERY_TOO_EARLY)).toBeTruthy();
+    expect(
+      (
+        screen.getByRole("button", {
+          name: th.seller.orders.actions.deliver,
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+  });
+
   it("shows Thai copy for a refused move and refreshes to the stored state", async () => {
     const user = userEvent.setup();
     changeOrderStatus.mockResolvedValue(failure("INVALID_STATE_TRANSITION", 409));

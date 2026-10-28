@@ -653,6 +653,9 @@ export const th = {
       payloadTooLarge: "ข้อมูลหรือไฟล์ใหญ่เกินกำหนด",
       unsupportedMedia: "ไฟล์ไม่ใช่รูปภาพที่รองรับ (JPEG, PNG หรือ WebP)",
       reasons: {
+        // Proposal (SEC-072): the seller may set DELIVERED only 24 h after shippedAt.
+        DELIVERY_TOO_EARLY:
+          "ยังทำเครื่องหมายว่าจัดส่งสำเร็จไม่ได้ ต้องรออย่างน้อย 24 ชั่วโมงหลังจัดส่ง",
         OPEN_APPLICATION: "คุณมีใบสมัครที่รอการตรวจสอบอยู่แล้ว",
         STORE_NAME_TAKEN: "มีร้านค้าใช้ชื่อนี้แล้ว กรุณาเลือกชื่ออื่น",
         STORE_NAME_RESERVED: "ชื่อนี้ถูกสงวนไว้ กรุณาเลือกชื่ออื่น",
