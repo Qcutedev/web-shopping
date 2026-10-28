@@ -4,7 +4,7 @@ node_modules/
 
 # Next.js and build output
 .next/
-.next-e2e/
+.next-*/
 out/
 dist/
 build/
