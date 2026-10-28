@@ -197,6 +197,9 @@ const REVIEWED_PAGES = [
   "src/app/admin/products/[id]/page.tsx",
   "src/app/admin/products/page.tsx",
   "src/app/admin/reports/page.tsx",
+  // SEC-092 admin review moderation page (fbddcd3), reviewed 2026-10-29 in
+  // docs/reviews/SEC-092-SEC-072-recheck.md.
+  "src/app/admin/reviews/page.tsx",
   "src/app/admin/settings/page.tsx",
   "src/app/admin/stores/page.tsx",
   "src/app/admin/users/page.tsx",
@@ -436,6 +439,8 @@ describe("T-051: the admin client components reach no server code", () => {
       "src/components/admin/categories-panel.tsx",
       "src/components/admin/orders-table.tsx",
       "src/components/admin/products-table.tsx",
+      // SEC-092 (fbddcd3): renders customer text as React text through UserName.
+      "src/components/admin/reviews-table.tsx",
       "src/components/admin/settings-form.tsx",
       "src/components/admin/stores-table.tsx",
       "src/components/admin/users-table.tsx",
@@ -752,9 +757,16 @@ describe("T-051: admin mutations go to /api/v1/admin as same-origin JSON", () =>
     await adminApi.deleteCategory(id, stub);
     await adminApi.changeSellerOrderStatus(id, { to: "CANCELLED" }, stub);
     await adminApi.updateSettings({ commissionRateBps: 500 }, stub);
-    expect(calls).toHaveLength(14);
+    // SEC-092 (fbddcd3).
+    await adminApi.hideReview(id, { reason: "r" }, stub);
+    await adminApi.unhideReview(id, {}, stub);
+    expect(calls).toHaveLength(16);
     const exported = Object.entries(adminApi).filter(([, value]) => typeof value === "function");
-    expect(exported).toHaveLength(14);
+    expect(exported).toHaveLength(16);
+    expect(calls.slice(-2).map((call) => call.url)).toEqual([
+      "/api/v1/admin/reviews/a%2Fb%3Fc%23d/hide",
+      "/api/v1/admin/reviews/a%2Fb%3Fc%23d/unhide",
+    ]);
     for (const { url, init } of calls) {
       expect(url.startsWith("/api/v1/admin/")).toBe(true);
       expect(url).not.toContain("a/b");
