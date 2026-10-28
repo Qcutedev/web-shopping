@@ -156,10 +156,31 @@ describe("POST /api/v1/seller/application", () => {
       description: "ขายของ",
       contactPhone: "0812345678",
     });
-    expect(consumeSpy).toHaveBeenCalledWith(
-      "user_me",
-      expect.objectContaining({ name: "seller-application" }),
-    );
+    // SEC-052: the client address first (no trusted proxy here: SR-01 `unknown`), then the user.
+    expect(consumeSpy.mock.calls).toEqual([
+      ["unknown", expect.objectContaining({ name: "signed-in-address", limit: 60 })],
+      ["user_me", expect.objectContaining({ name: "seller-application" })],
+    ]);
+  });
+
+  it("5: signed-in-address refusing is 429 before the body is read, and seller-application is not consumed (SEC-052)", async () => {
+    consumeSpy.mockResolvedValueOnce({
+      allowed: false,
+      limit: 60,
+      remaining: 0,
+      resetAt: 0,
+      retryAfterSeconds: 45,
+      saturated: false,
+    });
+    const request = post({ rawBody: "{bad" });
+    const response = await POST(request);
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("45");
+    expect(request.bodyUsed).toBe(false);
+    expect(consumeSpy.mock.calls).toEqual([
+      ["unknown", expect.objectContaining({ name: "signed-in-address" })],
+    ]);
+    expect(submitMock).not.toHaveBeenCalled();
   });
 
   it("1, 2: origin and content type come before the session", async () => {

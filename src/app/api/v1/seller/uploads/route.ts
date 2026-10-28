@@ -6,8 +6,8 @@
  *
  * Order of checks (section 1.8): 1 `Origin` (403), 2 `Content-Type` `multipart/form-data` (415),
  * 3 the session (401), 4 the role `SELLER` and an `APPROVED` store (403 FORBIDDEN, or
- * 403 SELLER_NOT_APPROVED for a suspended store; D-032 point 1), 5 the `uploads` rate limit
- * (429), 5b the store's cap of unattached uploads (409 CONFLICT `UPLOAD_LIMIT`, SEC-065), and
+ * 403 SELLER_NOT_APPROVED for a suspended store; D-032 point 1), 5 the `signed-in-address` rate
+ * limit on the client address, then the `uploads` rate limit on the user (429; SEC-052), 5b the store's cap of unattached uploads (409 CONFLICT `UPLOAD_LIMIT`, SEC-065), and
  * only then 6 and 7, the body (reader.ts: 413, 400, 415), then the service (403
  * SELLER_NOT_APPROVED again under the store row's lock, and the cap again under the store's upload
  * lock). Nothing of the body is read, held, or stored for a request refused at steps 1 to 5b
@@ -44,15 +44,21 @@ export async function POST(request: Request): Promise<Response> {
     requireApprovedSeller(actor);
     // A missing UPLOAD_DIR is a 500 before any allowance is used or any byte is read.
     const storage = getUploadStorage();
-    const limit = await rateLimiter.consume(actor.userId, RATE_LIMITS.UPLOADS);
+    // SEC-052: the client address first; the user's rule only when the address rule allowed it.
+    const clientIp = getClientAddress(request, env.trustedProxy);
+    const byAddress = await rateLimiter.consume(clientIp, RATE_LIMITS.SIGNED_IN_ADDRESS);
+    const rule = byAddress.allowed ? RATE_LIMITS.UPLOADS : RATE_LIMITS.SIGNED_IN_ADDRESS;
+    const limit = byAddress.allowed
+      ? await rateLimiter.consume(actor.userId, RATE_LIMITS.UPLOADS)
+      : byAddress;
     if (!limit.allowed) {
       // SR-04: a rate-limit refusal is a security event (throttled, ids and outcome only).
       recordSecurityEvent(logger.child({ requestId }), "rate-limited", {
         outcome: "refused",
         route: "seller-uploads",
-        clientIp: getClientAddress(request, env.trustedProxy),
+        clientIp,
         userAgent: request.headers.get("user-agent"),
-        rule: RATE_LIMITS.UPLOADS.name,
+        rule: rule.name,
         saturated: limit.saturated,
       });
       throw rateLimited(limit.retryAfterSeconds);

@@ -5,7 +5,8 @@
  * order; the body is the order whatever its payment status. **Mock payment: no money moves.**
  *
  * Order of checks (section 1.8): 1 `Origin` (403), 2 `Content-Type` (415), 3 the session (401),
- * 5 the `checkout` rate limit (429, before the body is read; section 6), 6 the body (413), 7 the
+ * 5 the `signed-in-address` rate limit on the client address, then the `checkout` rate limit on
+ * the session's user id (429, before the body is read; section 6; SEC-052), 6 the body (413), 7 the
  * `Idempotency-Key` header, then the body's schema (400), then the service (404, 409, 422).
  */
 import {
@@ -38,15 +39,21 @@ export async function POST(request: Request): Promise<Response> {
     assertSameOrigin(request, env.appOrigin);
     assertContentType(request, JSON_CONTENT_TYPE);
     const actor = await requireActor(request);
-    const limit = await rateLimiter.consume(actor.userId, RATE_LIMITS.CHECKOUT);
+    // SEC-052: the client address first; the user's rule only when the address rule allowed it.
+    const clientIp = getClientAddress(request, env.trustedProxy);
+    const byAddress = await rateLimiter.consume(clientIp, RATE_LIMITS.SIGNED_IN_ADDRESS);
+    const rule = byAddress.allowed ? RATE_LIMITS.CHECKOUT : RATE_LIMITS.SIGNED_IN_ADDRESS;
+    const limit = byAddress.allowed
+      ? await rateLimiter.consume(actor.userId, RATE_LIMITS.CHECKOUT)
+      : byAddress;
     if (!limit.allowed) {
       // SR-04: a rate-limit refusal is a security event (throttled, ids and outcome only).
       recordSecurityEvent(logger.child({ requestId }), "rate-limited", {
         outcome: "refused",
         route: "checkout",
-        clientIp: getClientAddress(request, env.trustedProxy),
+        clientIp,
         userAgent: request.headers.get("user-agent"),
-        rule: RATE_LIMITS.CHECKOUT.name,
+        rule: rule.name,
         saturated: limit.saturated,
       });
       throw rateLimited(limit.retryAfterSeconds);

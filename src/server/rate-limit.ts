@@ -20,7 +20,8 @@
  *
  * Subjects (SR-01) are built only from `getClientAddress` in src/server/client-address.ts,
  * `actor.userId`, or a normalised email (trimmed, lower-cased, Unicode NFKC). A per-email
- * subject is consumed only after the per-address check has allowed the request. This module
+ * subject is consumed only after the per-address check has allowed the request, and so is the
+ * per-user subject of a signed-in rule (`signed-in-address` first, SEC-052). This module
  * knows nothing about requests, users, or addresses, and it never logs a key or a subject.
  *
  * The default store is in-process, so limits hold for a single long-running instance only. A
@@ -164,13 +165,29 @@ export const RATE_LIMITS = {
    */
   SIGN_IN_ACCOUNT: { name: "sign-in-account", limit: 60, windowMs: 300_000, maxKeys: 50_000 },
   SIGN_UP: { name: "sign-up", limit: 5, windowMs: 3_600_000, maxKeys: 40_000 },
+  /**
+   * Subject the client address (SR-01), over the four signed-in rules below together (SEC-052,
+   * owner ruling option (a)). Every handler of `checkout`, `uploads`, `seller-application`, and
+   * `review-create` consumes it at step 5, after the access level and before its per-user rule,
+   * and consumes the per-user rule only when this one allowed the request. Without it one client
+   * could renew the windows of 10,000 cheap accounts and keep a per-user rule full; now one
+   * address adds at most 60 per-user windows a minute, so keeping `checkout` full (10,000 windows
+   * of 60 s) takes about 167 distinct networks at the full rate.
+   *
+   * Capacity 5,000, taken from `uploads` (10,000 to 5,000). Keeping this rule full takes 5,000
+   * new addresses a minute (about 83 a second), each with a signed-in request; a full rule
+   * refuses new addresses at all four endpoints. The total is unchanged.
+   */
+  SIGNED_IN_ADDRESS: { name: "signed-in-address", limit: 60, windowMs: 60_000, maxKeys: 5_000 },
   /*
-   * The signed-in rules hold 10,000 windows each (20,000 before SEC-050). Their subject is the
-   * user id, so only 10,000 distinct accounts active inside one window can fill one of them, and
-   * accounts are themselves limited by `sign-up`. Each user's own limit is unchanged.
+   * The per-user signed-in rules hold 10,000 windows each (20,000 before SEC-050), except
+   * `uploads`, 5,000 since SEC-052: its subjects are approved sellers, which an admin approves one
+   * by one. Their subject is the user id, so only that many distinct accounts active inside one
+   * window can fill one of them; accounts are limited by `sign-up`, and since SEC-052 the requests
+   * of one client address by `signed-in-address`. Each user's own limit is unchanged.
    */
   CHECKOUT: { name: "checkout", limit: 10, windowMs: 60_000, maxKeys: 10_000 },
-  UPLOADS: { name: "uploads", limit: 30, windowMs: 3_600_000, maxKeys: 10_000 },
+  UPLOADS: { name: "uploads", limit: 30, windowMs: 3_600_000, maxKeys: 5_000 },
   SELLER_APPLICATION: {
     name: "seller-application",
     limit: 3,

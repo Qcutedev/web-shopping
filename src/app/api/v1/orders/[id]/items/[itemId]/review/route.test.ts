@@ -125,11 +125,34 @@ describe("POST /api/v1/orders/{id}/items/{itemId}/review", () => {
     }
   });
 
-  it("consumes the review-create rule on the session's user id", async () => {
+  it("consumes signed-in-address on the client address, then the review-create rule on the session's user id (SEC-052)", async () => {
     await POST(post(), context());
+    expect(consumeSpy).toHaveBeenCalledTimes(2);
+    // No trusted proxy here, so SR-01 gives the shared subject `unknown`.
+    expect(consumeSpy.mock.calls[0]?.[0]).toBe("unknown");
+    expect(consumeSpy.mock.calls[0]?.[1]).toMatchObject({ name: "signed-in-address", limit: 60 });
+    expect(consumeSpy.mock.calls[1]?.[0]).toBe("user_me");
+    expect(consumeSpy.mock.calls[1]?.[1]).toMatchObject({ name: "review-create", limit: 10 });
+  });
+
+  it("is 429 when signed-in-address refuses, without consuming review-create or reading the body (SEC-052)", async () => {
+    consumeSpy.mockResolvedValueOnce({
+      allowed: false,
+      limit: 60,
+      remaining: 0,
+      resetAt: 0,
+      retryAfterSeconds: 30,
+      saturated: false,
+    });
+    const sent = post({ rawBody: "{not json" });
+    const response = await POST(sent, context());
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("30");
+    expect(await codeOf(response)).toBe("RATE_LIMITED");
+    expect(sent.bodyUsed).toBe(false);
     expect(consumeSpy).toHaveBeenCalledTimes(1);
-    expect(consumeSpy.mock.calls[0]?.[0]).toBe("user_me");
-    expect(consumeSpy.mock.calls[0]?.[1]).toMatchObject({ name: "review-create", limit: 10 });
+    expect(consumeSpy.mock.calls[0]?.[1]).toMatchObject({ name: "signed-in-address" });
+    expect(createMock).not.toHaveBeenCalled();
   });
 
   it("is 403 for a foreign Origin before anything else", async () => {

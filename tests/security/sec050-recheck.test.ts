@@ -8,10 +8,12 @@
  * `handleSignIn` itself with a stub auth library (401 = reached the password check, 429 = refused
  * by a limit). No database.
  *
- * Part 2 (SEC-052, new): the signed-in rules now hold 10,000 windows each. Their subjects are user
- * ids, which cost one sign-up allowance each and nothing else (no email verification, D-037). The
- * cases show that 10,000 accounts keep a signed-in rule refusing every other user for as long as
- * they renew their windows. These cases pass while SEC-052 is open: they document the behaviour.
+ * Part 2 (SEC-052): the signed-in rules hold 10,000 windows each (`uploads` 5,000 since SEC-052).
+ * Their subjects are user ids, which cost one sign-up allowance each and nothing else (no email
+ * verification, D-037). The cases first documented that 10,000 accounts renewed by one client keep
+ * a signed-in rule refusing every other user. Since the SEC-052 fix (owner option (a)) the handlers
+ * consume `signed-in-address` on the client address before the per-user rule, and the cases assert
+ * that control, its thresholds, and the residual of the 24 h rule.
  */
 import { APIError } from "better-auth/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -150,6 +152,8 @@ describe("SEC-050 re-check: the cost of keeping sign-in-account full", () => {
       ["sign-in-email", 5, 60_000],
       ["sign-in-account", 60, 300_000],
       ["sign-up", 5, 3_600_000],
+      // Added for SEC-052 (option (a)); its capacity came from `uploads`, not from these rules.
+      ["signed-in-address", 60, 60_000],
       ["checkout", 10, 60_000],
       ["uploads", 30, 3_600_000],
       ["seller-application", 3, 86_400_000],
@@ -218,71 +222,187 @@ describe("SEC-050 re-check: the cost of keeping sign-in-account full", () => {
   }, 60_000);
 });
 
-describe("SEC-052: 10,000 accounts keep a signed-in rule refusing every other user", () => {
-  const signedIn = [
-    RATE_LIMITS.CHECKOUT,
-    RATE_LIMITS.UPLOADS,
-    RATE_LIMITS.SELLER_APPLICATION,
-    RATE_LIMITS.REVIEW_CREATE,
-  ];
+/**
+ * SEC-052 (fixed with owner option (a)): every handler of a signed-in rule consumes
+ * `signed-in-address` on the SR-01 client address first, and its per-user rule only when the
+ * address rule allowed the request. This is that order, as the four route handlers run it
+ * (`src/app/api/v1/{checkout,seller/application,seller/uploads,orders/[id]/items/[itemId]/review}`).
+ *
+ * Until the fix, the cases of this block documented the open behaviour: 10,000 accounts renewed by
+ * one client kept `checkout` refusing every new customer each minute, and `seller-application`
+ * refusing a new user for two days. They are replaced by the cases below, which assert the new
+ * control with the same attacker (10,000 accounts, one client) and give the new thresholds.
+ */
+async function signedInRequest(
+  limiter: RateLimiter,
+  address: string,
+  userId: string,
+  rule: RateLimitRule,
+) {
+  const byAddress = await limiter.consume(address, RATE_LIMITS.SIGNED_IN_ADDRESS);
+  return byAddress.allowed ? limiter.consume(userId, rule) : byAddress;
+}
 
-  it("arithmetic: requests a second to keep each signed-in rule full, and the sign-up cost of the accounts", () => {
-    for (const rule of signedIn) expect(rule.maxKeys).toBe(10_000);
-    expect(perSecond(RATE_LIMITS.CHECKOUT)).toBeCloseTo(166.67, 1);
-    expect(perSecond(RATE_LIMITS.UPLOADS)).toBeCloseTo(2.78, 2);
-    expect(perSecond(RATE_LIMITS.REVIEW_CREATE)).toBeCloseTo(2.78, 2);
-    expect(perSecond(RATE_LIMITS.SELLER_APPLICATION)).toBeCloseTo(0.116, 3);
-    // 10,000 accounts at 5 sign-ups per network per hour: 2,000 network-hours, so one /48 in one
-    // hour, or 100 IPv4 addresses in 20 hours. Before D-038 the rules needed 20,000 accounts.
-    expect(10_000 / RATE_LIMITS.SIGN_UP.limit).toBe(2_000);
+function limiterWithClock() {
+  const clock = { now: START };
+  const store = new MemoryRateLimitStore();
+  const limiter = createRateLimiter({ store, now: () => clock.now, logger: { warn: () => {} } });
+  return { clock, store, limiter };
+}
+
+/** IPv4 subject of attacker network `i` (one address per network, as SR-01 counts IPv4). */
+function attackerAddress(i: number): string {
+  return `203.0.${String(Math.floor(i / 256))}.${String(i % 256)}`;
+}
+
+const CUSTOMER_ADDRESS = "198.51.100.200";
+
+describe("SEC-052: one client can no longer renew 10,000 per-user windows (signed-in-address)", () => {
+  it("the rule: 60 requests a minute per client address, 5,000 windows taken from uploads; the total is unchanged", () => {
+    expect(RATE_LIMITS.SIGNED_IN_ADDRESS).toEqual({
+      name: "signed-in-address",
+      limit: 60,
+      windowMs: 60_000,
+      maxKeys: 5_000,
+    });
+    expect(RATE_LIMITS.UPLOADS.maxKeys).toBe(5_000);
+    for (const rule of [
+      RATE_LIMITS.CHECKOUT,
+      RATE_LIMITS.SELLER_APPLICATION,
+      RATE_LIMITS.REVIEW_CREATE,
+    ]) {
+      expect(rule.maxKeys).toBe(10_000);
+    }
+    const total = Object.values(RATE_LIMITS).reduce((sum, rule) => sum + rule.maxKeys, 0);
+    expect(total).toBe(MAX_TOTAL_WINDOWS);
   });
 
-  it("10,000 accounts, one request each per day, keep seller-application refusing a new user for two days", async () => {
-    const clock = { now: START };
-    const limiter = createRateLimiter({
-      store: new MemoryRateLimitStore(),
-      now: () => clock.now,
-      logger: { warn: () => {} },
+  it("arithmetic: distinct networks at the full per-address rate needed to keep each per-user rule full", () => {
+    const address = RATE_LIMITS.SIGNED_IN_ADDRESS;
+    /** Per-user windows one network can add inside one window of `rule`. */
+    const perNetwork = (rule: RateLimitRule): number =>
+      address.limit * (rule.windowMs / address.windowMs);
+    const networksFor = (rule: RateLimitRule): number => Math.ceil(rule.maxKeys / perNetwork(rule));
+    expect({
+      checkout: networksFor(RATE_LIMITS.CHECKOUT),
+      "review-create": networksFor(RATE_LIMITS.REVIEW_CREATE),
+      uploads: networksFor(RATE_LIMITS.UPLOADS),
+      "seller-application": networksFor(RATE_LIMITS.SELLER_APPLICATION),
+      // Filling signed-in-address itself: one window per network per minute.
+      "signed-in-address": address.maxKeys,
+    }).toEqual({
+      checkout: 167,
+      "review-create": 3,
+      uploads: 2,
+      "seller-application": 1,
+      "signed-in-address": 5_000,
     });
-    const rule = RATE_LIMITS.SELLER_APPLICATION;
-    const renew = async (): Promise<void> => {
-      for (let i = 0; i < 10_000; i += 1) await limiter.consume(`bot-${String(i)}`, rule);
-    };
-    await renew();
-    for (const at of [60_000, 3_600_000, 86_399_000]) {
-      clock.now = START + at;
-      const r = await limiter.consume("real-user", rule);
-      expect(r).toMatchObject({ allowed: false, saturated: true });
-      expect(r.retryAfterSeconds).toBeLessThanOrEqual(60);
-    }
-    // The windows end; the attacker renews first, and the real user is refused for another day.
-    clock.now = START + 86_400_000;
-    await renew();
-    for (const at of [86_401_000, 2 * 86_400_000 - 1_000]) {
-      clock.now = START + at;
-      expect(await limiter.consume("real-user", rule)).toMatchObject({
-        allowed: false,
-        saturated: true,
-      });
-    }
+    // Before the fix every per-user rule needed one client (no per-address limit).
+    // Residual for the owner (recorded in API_CONTRACTS section 6): a one-minute address rule
+    // bounds a one-minute per-user rule well, but not the 1 h and 24 h ones. `review-create` needs
+    // 3 networks and `seller-application` 1 network, only more time (10,000 / 60 = 167 minutes).
+    expect(RATE_LIMITS.SELLER_APPLICATION.maxKeys / address.limit).toBeCloseTo(166.67, 1);
+    // `uploads` still needs 5,000 approved sellers, each approved by an admin.
   });
 
-  it("10,000 accounts renewing once a minute keep checkout refusing every customer without a live window", async () => {
-    const clock = { now: START };
-    const limiter = createRateLimiter({
-      store: new MemoryRateLimitStore(),
-      now: () => clock.now,
-      logger: { warn: () => {} },
-    });
+  it("one client renewing 10,000 accounts once a minute no longer keeps checkout refusing a new customer", async () => {
+    // The attacker of the replaced case: 10,000 accounts, every one renewed each minute, one client.
+    const { clock, store, limiter } = limiterWithClock();
     const rule = RATE_LIMITS.CHECKOUT;
     for (let minute = 0; minute < 3; minute += 1) {
       clock.now = START + minute * 60_000;
-      for (let i = 0; i < 10_000; i += 1) await limiter.consume(`bot-${String(i)}`, rule);
+      let refusedByAddress = 0;
+      for (let i = 0; i < 10_000; i += 1) {
+        const r = await signedInRequest(limiter, attackerAddress(0), `bot-${String(i)}`, rule);
+        if (!r.allowed) refusedByAddress += 1;
+      }
+      // 60 pass the address rule; every other request is refused before the per-user rule.
+      expect(refusedByAddress).toBe(10_000 - 60);
+      expect(store.sizeOf(rule.name)).toBeLessThanOrEqual(60 * (minute + 1));
       clock.now += 30_000;
-      expect(await limiter.consume(`customer-${String(minute)}`, rule)).toMatchObject({
-        allowed: false,
-        saturated: true,
-      });
+      expect(
+        await signedInRequest(limiter, CUSTOMER_ADDRESS, `customer-${String(minute)}`, rule),
+      ).toMatchObject({ allowed: true, saturated: false });
     }
+  });
+
+  it("166 networks at the full rate leave room in checkout; 167 fill it (the new threshold)", async () => {
+    const rule = RATE_LIMITS.CHECKOUT;
+    const attack = async (networks: number) => {
+      const { clock, store, limiter } = limiterWithClock();
+      let bot = 0;
+      for (let n = 0; n < networks; n += 1) {
+        for (let k = 0; k < RATE_LIMITS.SIGNED_IN_ADDRESS.limit; k += 1) {
+          bot += 1;
+          await signedInRequest(limiter, attackerAddress(n), `bot-${String(bot)}`, rule);
+        }
+      }
+      const size = store.sizeOf(rule.name);
+      clock.now += 30_000;
+      const customer = await signedInRequest(limiter, CUSTOMER_ADDRESS, "customer", rule);
+      return { size, customer };
+    };
+    const below = await attack(166);
+    expect(below.size).toBe(9_960);
+    expect(below.customer).toMatchObject({ allowed: true, saturated: false });
+    const at = await attack(167);
+    expect(at.size).toBe(10_000);
+    expect(at.customer).toMatchObject({ allowed: false, saturated: true });
+    expect(at.customer.retryAfterSeconds).toBeLessThanOrEqual(60);
+  });
+
+  it("one client with 10,000 accounts no longer fills seller-application at once: a new user is served at 1 minute and at 1 hour", async () => {
+    // The attacker of the replaced case sent one request per account at the start; from one client
+    // only 60 a minute pass now.
+    const { clock, store, limiter } = limiterWithClock();
+    const rule = RATE_LIMITS.SELLER_APPLICATION;
+    let bot = 0;
+    const minuteOfAttack = async (): Promise<void> => {
+      for (let k = 0; k < 61 && bot < 10_000; k += 1) {
+        const r = await signedInRequest(limiter, attackerAddress(0), `bot-${String(bot)}`, rule);
+        if (r.allowed) bot += 1;
+      }
+    };
+    for (let minute = 0; minute < 60; minute += 1) {
+      clock.now = START + minute * 60_000;
+      await minuteOfAttack();
+      if (minute === 0) {
+        expect(store.sizeOf(rule.name)).toBe(60);
+        clock.now += 30_000;
+        expect(await signedInRequest(limiter, CUSTOMER_ADDRESS, "real-user-1", rule)).toMatchObject(
+          { allowed: true, saturated: false },
+        );
+      }
+    }
+    expect(store.sizeOf(rule.name)).toBe(3_601);
+    clock.now = START + 3_600_000;
+    expect(await signedInRequest(limiter, CUSTOMER_ADDRESS, "real-user-2", rule)).toMatchObject({
+      allowed: true,
+      saturated: false,
+    });
+  });
+
+  it("residual (owner): one client still fills seller-application after about 167 minutes, because its window is 24 h", async () => {
+    // Recorded, not accepted here: option (a) as ruled does not bound the 24 h rule. API_CONTRACTS
+    // section 6 lists the residual; options (b) or (d) of SEC-052 would close it.
+    const { clock, store, limiter } = limiterWithClock();
+    const rule = RATE_LIMITS.SELLER_APPLICATION;
+    let bot = 0;
+    let minute = 0;
+    while (bot < 10_000) {
+      clock.now = START + minute * 60_000;
+      for (let k = 0; k < 60 && bot < 10_000; k += 1) {
+        const r = await signedInRequest(limiter, attackerAddress(0), `bot-${String(bot)}`, rule);
+        expect(r.allowed).toBe(true);
+        bot += 1;
+      }
+      minute += 1;
+    }
+    expect(minute).toBe(167);
+    expect(store.sizeOf(rule.name)).toBe(10_000);
+    expect(await signedInRequest(limiter, CUSTOMER_ADDRESS, "real-user", rule)).toMatchObject({
+      allowed: false,
+      saturated: true,
+    });
   });
 });

@@ -151,7 +151,11 @@ describe("POST /api/v1/checkout", () => {
       { addressId: "addr_1", paymentMethod: "MOCK", mockOutcome: "SUCCESS" },
       expect.objectContaining({ log: expect.anything() }),
     );
-    expect(consumeMock).toHaveBeenCalledWith("user_me", RATE_LIMITS.CHECKOUT);
+    // SEC-052: the client address first (SR-01 subject; no trusted proxy here), then the user.
+    expect(consumeMock.mock.calls).toEqual([
+      ["unknown", RATE_LIMITS.SIGNED_IN_ADDRESS],
+      ["user_me", RATE_LIMITS.CHECKOUT],
+    ]);
   });
 
   it("answers 200 when the key matched an existing order", async () => {
@@ -208,8 +212,8 @@ describe("POST /api/v1/checkout", () => {
     expect(checkoutMock).not.toHaveBeenCalled();
   });
 
-  it("429 with Retry-After before the body is read, logged as a security event", async () => {
-    consumeMock.mockResolvedValue(allowed(false));
+  it("429 with Retry-After before the body is read when the user's checkout rule refuses, logged as a security event", async () => {
+    consumeMock.mockResolvedValueOnce(allowed()).mockResolvedValueOnce(allowed(false));
     const sent = request(undefined, { raw: "{broken", key: null });
     const response = await POST(sent);
     expect(response.status).toBe(429);
@@ -223,9 +227,31 @@ describe("POST /api/v1/checkout", () => {
     );
   });
 
-  it("a request that reaches the limit uses an allowance even when it is then refused", async () => {
+  it("SEC-052: 429 when signed-in-address refuses; the user's checkout rule is not consumed and no body is read", async () => {
+    consumeMock.mockResolvedValueOnce({ ...allowed(false), saturated: true });
+    const sent = request(undefined, { raw: "{broken", key: null });
+    const response = await POST(sent);
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("42");
+    expect(sent.bodyUsed).toBe(false);
+    expect(consumeMock.mock.calls).toEqual([["unknown", RATE_LIMITS.SIGNED_IN_ADDRESS]]);
+    expect(checkoutMock).not.toHaveBeenCalled();
+    expect(eventMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "rate-limited",
+      expect.objectContaining({
+        outcome: "refused",
+        route: "checkout",
+        rule: "signed-in-address",
+        clientIp: "unknown",
+        saturated: true,
+      }),
+    );
+  });
+
+  it("a request that reaches the limit uses an allowance of both rules even when it is then refused", async () => {
     await POST(request({ ...BODY, priceSatang: 1 }));
-    expect(consumeMock).toHaveBeenCalledTimes(1);
+    expect(consumeMock).toHaveBeenCalledTimes(2);
   });
 
   it("maps the service's outcomes: 404 address, 409 CART_EMPTY, 409 with items, 422", async () => {

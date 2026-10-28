@@ -178,7 +178,7 @@ describe("the rule is part of the key (SEC-005)", () => {
     await limiter.consume("user:u1", RATE_LIMITS.UPLOADS);
     expect(calls).toEqual([
       { rule: "checkout", subject: "user:u1", windowMs: 60_000, maxKeys: 10_000, now: START },
-      { rule: "uploads", subject: "user:u1", windowMs: 3_600_000, maxKeys: 10_000, now: START },
+      { rule: "uploads", subject: "user:u1", windowMs: 3_600_000, maxKeys: 5_000, now: START },
     ]);
   });
 
@@ -486,7 +486,7 @@ describe("isolated capacity per rule (SEC-004)", () => {
     expect(total).toBeLessThanOrEqual(MAX_TOTAL_WINDOWS);
   });
 
-  it("the capacity split is the SEC-050 split of D-038 (option (a))", () => {
+  it("the capacity split is the SEC-050 split of D-038 (option (a)) with SEC-052's signed-in-address taken from uploads", () => {
     const split = Object.fromEntries(
       Object.values(RATE_LIMITS).map((rule) => [rule.name, rule.maxKeys]),
     );
@@ -495,8 +495,9 @@ describe("isolated capacity per rule (SEC-004)", () => {
       "sign-in-email": 30_000,
       "sign-in-account": 50_000,
       "sign-up": 40_000,
+      "signed-in-address": 5_000,
       checkout: 10_000,
-      uploads: 10_000,
+      uploads: 5_000,
       "seller-application": 10_000,
       "review-create": 10_000,
     });
@@ -538,13 +539,14 @@ describe("isolated capacity per rule (SEC-004)", () => {
     expect((await limiter.consume("owner@example.test", rule)).allowed).toBe(false);
   });
 
-  it("SEC-050: each signed-in rule still holds its own per-user limit and 10,000 users", async () => {
-    for (const rule of [
-      RATE_LIMITS.CHECKOUT,
-      RATE_LIMITS.UPLOADS,
-      RATE_LIMITS.SELLER_APPLICATION,
-      RATE_LIMITS.REVIEW_CREATE,
-    ]) {
+  it("SEC-050: each signed-in rule still holds its own per-user limit and its users (10,000; uploads 5,000 since SEC-052)", async () => {
+    for (const [rule, capacity] of [
+      [RATE_LIMITS.CHECKOUT, 10_000],
+      [RATE_LIMITS.UPLOADS, 5_000],
+      [RATE_LIMITS.SELLER_APPLICATION, 10_000],
+      [RATE_LIMITS.REVIEW_CREATE, 10_000],
+    ] as const) {
+      expect(rule.maxKeys).toBe(capacity);
       const { limiter, store } = setup({}, BUILT_IN);
       for (let i = 0; i < rule.limit; i += 1) {
         expect((await limiter.consume("user:u1", rule)).allowed).toBe(true);
@@ -553,11 +555,58 @@ describe("isolated capacity per rule (SEC-004)", () => {
         allowed: false,
         saturated: false,
       });
-      for (let i = 1; i < 10_000; i += 1) await limiter.consume(`user:${String(i)}x`, rule);
-      expect(store.sizeOf(rule.name)).toBe(10_000);
+      for (let i = 1; i < capacity; i += 1) await limiter.consume(`user:${String(i)}x`, rule);
+      expect(store.sizeOf(rule.name)).toBe(capacity);
       expect((await limiter.consume("user:new", rule)).saturated).toBe(true);
       // A full rule never resets the user who is over the limit.
       expect((await limiter.consume("user:u1", rule)).allowed).toBe(false);
+    }
+  });
+
+  it("SEC-052: signed-in-address allows 60 requests a minute per address, holds 5,000 addresses, then refuses new ones and keeps live counters", async () => {
+    const rule = RATE_LIMITS.SIGNED_IN_ADDRESS;
+    expect(rule).toEqual({
+      name: "signed-in-address",
+      limit: 60,
+      windowMs: 60_000,
+      maxKeys: 5_000,
+    });
+    const { limiter, store, advance } = setup({}, BUILT_IN);
+    for (let i = 0; i < 60; i += 1) {
+      expect((await limiter.consume("203.0.113.5", rule)).allowed).toBe(true);
+    }
+    const over = await limiter.consume("203.0.113.5", rule);
+    expect(over).toMatchObject({ allowed: false, saturated: false });
+    expect(over.retryAfterSeconds).toBeLessThanOrEqual(60);
+    // Its own counter: the per-user rules of the same request are not touched.
+    expect(store.sizeOf(RATE_LIMITS.CHECKOUT.name)).toBe(0);
+
+    for (let i = 1; i < rule.maxKeys; i += 1) {
+      await limiter.consume(`2001:db8:${i.toString(16)}::/64`, rule);
+    }
+    expect(store.sizeOf(rule.name)).toBe(5_000);
+    expect(await limiter.consume("198.51.100.1", rule)).toMatchObject({
+      allowed: false,
+      saturated: true,
+    });
+    // A full rule never resets the address that is over its limit.
+    expect((await limiter.consume("203.0.113.5", rule)).allowed).toBe(false);
+    // The per-user rules keep their own capacity while signed-in-address is full.
+    expect((await limiter.consume("user:u1", RATE_LIMITS.CHECKOUT)).allowed).toBe(true);
+    // One-minute windows: a minute later the address starts again.
+    advance(60_000);
+    expect((await limiter.consume("203.0.113.5", rule)).allowed).toBe(true);
+  });
+
+  it("SEC-052: with signed-in-address consumed first, one address adds at most 60 checkout windows a minute", async () => {
+    const { limiter, store, advance } = setup({}, BUILT_IN);
+    for (let minute = 0; minute < 3; minute += 1) {
+      for (let i = 0; i < 10_000; i += 1) {
+        const byAddress = await limiter.consume("203.0.113.66", RATE_LIMITS.SIGNED_IN_ADDRESS);
+        if (byAddress.allowed) await limiter.consume(`bot-${String(i)}`, RATE_LIMITS.CHECKOUT);
+      }
+      expect(store.sizeOf(RATE_LIMITS.CHECKOUT.name)).toBeLessThanOrEqual(60 * (minute + 1));
+      advance(60_000);
     }
   });
 
@@ -743,6 +792,7 @@ describe("contract", () => {
       SIGN_IN_EMAIL: { limit: 5, windowMs: 60 * 1000 },
       SIGN_IN_ACCOUNT: { limit: 60, windowMs: 5 * 60 * 1000 },
       SIGN_UP: { limit: 5, windowMs: 60 * 60 * 1000 },
+      SIGNED_IN_ADDRESS: { limit: 60, windowMs: 60 * 1000 },
       CHECKOUT: { limit: 10, windowMs: 60 * 1000 },
       UPLOADS: { limit: 30, windowMs: 60 * 60 * 1000 },
       SELLER_APPLICATION: { limit: 3, windowMs: 24 * 60 * 60 * 1000 },
