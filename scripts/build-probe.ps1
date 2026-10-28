@@ -1,4 +1,4 @@
-﻿# Runs `next build` with NEXT_DIST_DIR set, so the build does not touch the shared `.next/`
+# Runs `next build` with NEXT_DIST_DIR set, so the build does not touch the shared `.next/`
 # or the e2e server's `.next-e2e/`. Next rewrites tsconfig.json on such a build (adds include
 # entries for the dist dir). This script reports that change, restores tsconfig.json to its
 # pre-build content, and removes the dist dir. Local use. Deploys nothing.
@@ -30,6 +30,10 @@ if (Test-Path -LiteralPath $DistDir) {
 $tsconfig = Join-Path $root "tsconfig.json"
 $original = [IO.File]::ReadAllBytes($tsconfig)
 $originalText = [Text.Encoding]::UTF8.GetString($original)
+# next-env.d.ts is git-ignored and Next rewrites it on build; snapshot it too (null = absent).
+$nextEnv = Join-Path $root "next-env.d.ts"
+$nextEnvOriginal = $null
+if (Test-Path -LiteralPath $nextEnv) { $nextEnvOriginal = [IO.File]::ReadAllBytes($nextEnv) }
 $exit = 0
 $prevDist = $env:NEXT_DIST_DIR
 
@@ -80,6 +84,13 @@ try {
 finally {
   [IO.File]::WriteAllBytes($tsconfig, $original)
   Write-Host "== restored tsconfig.json to its content at script start"
+  if ($null -ne $nextEnvOriginal) {
+    [IO.File]::WriteAllBytes($nextEnv, $nextEnvOriginal)
+    Write-Host "== restored next-env.d.ts to its content at script start"
+  } elseif (Test-Path -LiteralPath $nextEnv) {
+    Remove-Item -LiteralPath $nextEnv -Force
+    Write-Host "== removed next-env.d.ts (absent at script start)"
+  }
   if ($null -eq $prevDist) { Remove-Item Env:NEXT_DIST_DIR -ErrorAction SilentlyContinue } else { $env:NEXT_DIST_DIR = $prevDist }
   if (-not $KeepDist -and (Test-Path -LiteralPath $DistDir)) {
     Remove-Item -LiteralPath $DistDir -Recurse -Force
