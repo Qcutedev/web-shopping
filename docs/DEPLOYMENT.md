@@ -157,6 +157,10 @@ A change of the major version (for example 18 to 19) is not an image update: Pos
 ## Runtime requirements (Planned)
 
 - One long-running Node.js server process (`next start` or a container). Not serverless for the MVP, because rate limiting is in-process and uploads go to local disk.
+- **Run exactly one application instance (CR-T061-03).** Two pieces of state live in the process, not in the database:
+  - The rate limiter counters (`src/server/rate-limit.ts`) are held in the memory of one process, on `globalThis`. Each instance counts for itself, so with N instances every limit is multiplied by up to N (sign-in, sign-up, checkout, uploads, and the others in SR-02), and the capacity bound of SR-02 holds per instance, not per site. The limiter has a `RateLimitStore` interface for a shared store, but no shared store is built. **Post-MVP.**
+  - The payment timeout sweep schedule (`src/modules/orders/timeout-sweep.ts`) is one timer per process, kept on `globalThis`. With N instances N timers run. The sweep is safe to run twice at once (it fails an order only through the guarded transaction), so this costs extra queries, not wrong data. The session purge and the upload orphan cleanup follow the same pattern.
+  - Do not scale out, run a second replica, or use rolling deploys that overlap two instances for long, until a shared rate-limit store exists. The rate-limit counters also reset on every restart. See `docs/KNOWN_LIMITATIONS.md`.
 - PostgreSQL, a current supported major version.
 - A persistent volume for uploads until object storage is integrated.
 - HTTPS terminated by the host or a reverse proxy.

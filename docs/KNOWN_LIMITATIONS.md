@@ -40,7 +40,7 @@ As of 2026-10-28 the application exists and runs locally (`pnpm dev` with Docker
 
 | Limit | Consequence | Path forward |
 | --- | --- | --- |
-| In-process rate limiter (`src/server/rate-limit.ts`) | Only correct on a single instance | Shared store such as Redis |
+| In-process rate limiter (`src/server/rate-limit.ts`) | Only correct on a single instance. With N instances every limit is multiplied by up to N; counters reset on restart. The payment timeout sweep schedule is also per process (safe to run twice, but N timers). The app must run as one instance; see `docs/DEPLOYMENT.md`, "Runtime requirements" (CR-T061-03) | Shared store such as Redis (post-MVP) |
 | Local-disk uploads | Needs a persistent volume; no serverless or multi-instance | S3-compatible adapter behind the existing interface |
 | Search by case-insensitive substring match (Prisma `contains`) | Slow on large catalogs; no relevance ranking; no Thai word segmentation; no typo tolerance | Trigram index, then a search service |
 | Money in 32-bit satang | A single order is capped at 2,000,000,000 satang (20,000,000 THB, `MAX_ORDER_TOTAL_SATANG`) | Move totals to `BigInt` |
