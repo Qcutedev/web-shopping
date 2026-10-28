@@ -245,7 +245,7 @@ describe("users", () => {
     });
   });
 
-  it("the last active admin cannot be deactivated (service, under the admin row locks)", async () => {
+  it("a deactivated acting admin cannot deactivate the last active admin (SEC-088: 401, nothing changes)", async () => {
     // Every active admin but one is switched off; the acting admin is the deactivated one, so
     // only the service can be called (a deactivated user has no session). Since SEC-088 (D-024)
     // the acting admin must itself be among the active admin rows the deactivation locks, so this
