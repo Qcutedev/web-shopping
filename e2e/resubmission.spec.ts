@@ -29,7 +29,12 @@ test("a rejected product is corrected, returns to the queue by itself, and is ap
 
   const admin = await openAs(browser, ADMIN_STORAGE_STATE);
   try {
-    // The admin finds it in the queue and rejects it; a reason is required.
+    // Positive control: the product is in the admin's queue before the rejection, so its absence
+    // afterwards means something.
+    await admin.page.goto("/admin/products");
+    await expect(admin.page.getByRole("link", { name: product.title })).toBeVisible();
+
+    // The admin rejects it; a reason is required.
     await admin.page.goto(`/admin/products/${product.id}`);
     await admin.page.getByRole("button", { name: th.admin.products.reject, exact: true }).click();
     const dialog = admin.page.getByRole("alertdialog");
@@ -41,12 +46,8 @@ test("a rejected product is corrected, returns to the queue by itself, and is ap
     await dialog.getByRole("button", { name: th.admin.products.rejectConfirmAction }).click();
     await expect(admin.page.getByText(th.admin.products.rejected)).toBeVisible();
 
-    // Rejected: not on the storefront; the queue no longer lists it.
-    await page.goto(`/search?q=${encodeURIComponent(product.title)}`);
-    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-    await expect(
-      page.locator('a[href^="/products/"]').filter({ hasText: product.title }),
-    ).toHaveCount(0);
+    // Rejected: the queue no longer lists it. (It was never approved, so it was never on the
+    // storefront; the storefront is checked after approval below.)
     await admin.page.goto("/admin/products");
     await expect(admin.page.getByRole("link", { name: product.title })).toHaveCount(0);
 
@@ -77,11 +78,14 @@ test("a rejected product is corrected, returns to the queue by itself, and is ap
       .click();
     await expect(admin.page.getByText(th.admin.products.approved)).toBeVisible();
     await expect
-      .poll(async () => {
-        await page.goto(`/search?q=${encodeURIComponent(corrected)}`);
-        await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-        return page.locator('a[href^="/products/"]').filter({ hasText: corrected }).count();
-      })
+      .poll(
+        async () => {
+          await page.goto(`/search?q=${encodeURIComponent(corrected)}`);
+          await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+          return page.locator('a[href^="/products/"]').filter({ hasText: corrected }).count();
+        },
+        { timeout: 30_000 },
+      )
       .toBeGreaterThan(0);
   } finally {
     await admin.context.close();

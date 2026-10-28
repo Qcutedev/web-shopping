@@ -107,16 +107,25 @@ test("a suspended store leaves the storefront but its seller can still finish an
     expect(((await patch.json()) as { error: { code: string } }).error.code).toBe(
       "SELLER_NOT_APPROVED",
     );
+    const readStock = async (): Promise<number> => {
+      const response = await owner.context.request.get(`/api/v1/seller/products/${product.id}`);
+      return ((await response.json()) as { data: { stock: number } }).data.stock;
+    };
+    const stockBefore = await readStock();
     const stock = await owner.context.request.patch(`/api/v1/seller/products/${product.id}/stock`, {
       headers: ORIGIN_HEADERS,
       data: { set: 50 },
     });
     expect(stock.status()).toBe(403);
-    // The price did not change.
-    const read = await owner.context.request.get(`/api/v1/seller/products/${product.id}`);
-    expect(((await read.json()) as { data: { priceSatang: number } }).data.priceSatang).toBe(
-      10_000,
+    expect(((await stock.json()) as { error: { code: string } }).error.code).toBe(
+      "SELLER_NOT_APPROVED",
     );
+    // Neither the price nor the stock changed.
+    const read = await owner.context.request.get(`/api/v1/seller/products/${product.id}`);
+    const priceAfter = ((await read.json()) as { data: { priceSatang: number } }).data.priceSatang;
+    expect(priceAfter).toBe(10_000);
+    expect(await readStock()).toBe(stockBefore);
+    expect(stockBefore).not.toBe(50);
   } finally {
     await owner.context.close();
     await customer.context.close();

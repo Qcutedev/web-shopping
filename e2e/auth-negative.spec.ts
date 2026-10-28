@@ -29,25 +29,29 @@ async function hydrated(page: Page): Promise<void> {
   });
 }
 
-// The dev server compiles a route on first use and may reload the page once it has. Compile the
-// form routes before any test clicks, so a reload cannot land between hydration and a submit.
+// The routes are compiled without a browser in global-setup (warmRoutes). This hook then opens each
+// form once in a browser, with no retry. If a navigation still fails, the frame navigations and
+// console messages seen so far are added to the error, to show what aborted it (CR-S119-01).
 test.beforeAll(async ({ browser }) => {
   const page = await browser.newPage({ baseURL: E2E_ORIGIN });
-  for (const path of ["/sign-in", "/sign-up"]) {
-    // The reload the dev server does after compiling can abort the navigation that triggered it
-    // (net::ERR_ABORTED); the route is compiled by then, so a second attempt succeeds. This is
-    // the warm-up only: no test assertion is retried.
-    for (let attempt = 1; ; attempt += 1) {
-      try {
-        await page.goto(path, { timeout: 170_000 });
-        break;
-      } catch (error) {
-        if (attempt >= 3 || !String(error).includes("ERR_ABORTED")) throw error;
-      }
+  const seen: string[] = [];
+  page.on("framenavigated", (frame) => {
+    if (frame === page.mainFrame()) seen.push(`navigated: ${frame.url()}`);
+  });
+  page.on("console", (message) => seen.push(`console ${message.type()}: ${message.text()}`));
+  try {
+    for (const path of ["/sign-in", "/sign-up"]) {
+      seen.push(`goto: ${path}`);
+      await page.goto(path, { timeout: 170_000 });
+      await hydrated(page);
     }
-    await hydrated(page);
+  } catch (error) {
+    throw new Error(`warm-up failed: ${String(error)}\nevents:\n${seen.join("\n")}`, {
+      cause: error,
+    });
+  } finally {
+    await page.close();
   }
-  await page.close();
 });
 
 async function fillSignIn(page: Page, email: string, password: string): Promise<void> {

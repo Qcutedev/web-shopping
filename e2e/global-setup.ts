@@ -90,11 +90,59 @@ export default async function globalSetup(): Promise<void> {
   } finally {
     await api.dispose();
   }
+  await warmRoutes();
   // Roles are read from the database on each request, but a fresh sign-in per account keeps the
   // saved state free of cookies from the sign-up calls above.
   await saveSignedInState(SELLER, SELLER_STORAGE_STATE);
   await saveSignedInState(ADMIN, ADMIN_STORAGE_STATE);
   await saveSignedInState(SELLER_TWO, SELLER_TWO_STORAGE_STATE);
+}
+
+/**
+ * Compiles the routes the specs open first, without a browser (CR-S119-02). `next dev` compiles a
+ * route on its first request; a plain HTTP request triggers that and cannot be aborted by a page
+ * navigation. A browser that meets an uncompiled route first sometimes fails with
+ * `net::ERR_ABORTED` (hypothesis, not proven: see TEST_STRATEGY). Every spec shares this warm-up,
+ * so a single spec run (`pnpm test:e2e e2e/review.spec.ts`) is protected the same way as a full run.
+ */
+const WARM_PATHS = [
+  "/",
+  "/sign-in",
+  "/sign-up",
+  "/search?q=x",
+  "/cart",
+  "/checkout",
+  "/orders",
+  "/products/e2e-warm-up-unknown",
+  "/orders/e2e-warm-up",
+  "/api/v1/cart",
+  "/api/v1/orders/e2e-warm-up",
+];
+
+// Mutating endpoints a journey submits through a page: the first request compiles the handler,
+// which can take longer than an assertion waits for the redirect that follows it.
+const WARM_POSTS = [
+  "/api/v1/checkout",
+  "/api/v1/cart/items",
+  "/api/v1/orders/e2e-warm-up/items/e2e-warm-up/review",
+];
+
+async function warmRoutes(): Promise<void> {
+  const api = await request.newContext({
+    baseURL: E2E_ORIGIN,
+    extraHTTPHeaders: { Origin: E2E_ORIGIN },
+  });
+  try {
+    for (const path of WARM_PATHS) {
+      // Only the compile matters; the status (a redirect, a not-found page) does not.
+      await api.get(path, { timeout: 170_000 });
+    }
+    for (const path of WARM_POSTS) {
+      await api.post(path, { data: {}, timeout: 170_000 });
+    }
+  } finally {
+    await api.dispose();
+  }
 }
 
 async function saveSignedInState(

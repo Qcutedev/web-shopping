@@ -7,7 +7,7 @@
  * the customer is registered through the real forms and buys through the real pages. The seller
  * moves the order to delivered through the API (setup; journey 8 drives that through the UI).
  */
-import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { expect, test, type APIResponse, type BrowserContext, type Page } from "@playwright/test";
 import { th } from "@/i18n/th";
 import { createDraft, openSeller, publishAndApprove } from "./support/catalog";
 import { ORIGIN_HEADERS, addToCartOnPage, registerCustomer } from "./support/session";
@@ -28,9 +28,16 @@ test.afterAll(async () => {
   await seller.close();
 });
 
+/** `error.details.reason` of a 409 answer (API_CONTRACTS 5.6). */
+async function conflictReason(response: APIResponse): Promise<string | undefined> {
+  const body = (await response.json()) as { error: { details?: { reason?: string } } };
+  return body.error.details?.reason;
+}
+
 async function expectLiteral(scope: ReturnType<Page["locator"]>, page: Page): Promise<void> {
   await expect(scope.getByText(MARKUP, { exact: false })).toBeVisible();
-  // No element was made from the text, and nothing ran.
+  // The element count is the decisive check: no element was made from the text. The `__xss` probe
+  // below is weaker (the CSP may block scripts, and an onerror handler runs later).
   await expect(scope.locator("img, script, b")).toHaveCount(0);
   expect(
     await page.evaluate(() => (window as unknown as { __xss?: number }).__xss),
@@ -64,6 +71,7 @@ test("a delivered item is reviewed once, the review shows as plain text on the p
       { headers: ORIGIN_HEADERS, data: { rating: 5 } },
     );
     expect(early.status()).toBe(409);
+    expect(await conflictReason(early)).toBe("NOT_DELIVERED");
 
     await moveSellerOrder(seller.request, sellerOrder.id, ["PROCESSING", "SHIPPED", "DELIVERED"]);
 
@@ -104,6 +112,7 @@ test("a delivered item is reviewed once, the review shows as plain text on the p
       { headers: ORIGIN_HEADERS, data: { rating: 1, comment: "ซ้ำ" } },
     );
     expect(again.status()).toBe(409);
+    expect(await conflictReason(again)).toBe("DUPLICATE_REVIEW");
 
     expect(dialogs).toEqual([]);
   } finally {

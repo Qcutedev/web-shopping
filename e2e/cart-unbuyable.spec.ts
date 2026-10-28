@@ -92,13 +92,16 @@ test("a line whose product was taken down is marked and excluded, and blocks che
     const summary = page.getByRole("region", { name: th.cart.summaryTitle });
     const goneLine = page.getByRole("listitem").filter({ hasText: gone.title });
     const keptLine = page.getByRole("listitem").filter({ hasText: kept.title });
-    // Marked: the line has no quantity control and a danger mark; the other line has both
-    // controls and no mark. The wording of the mark is not asserted (O1).
+    // Marked: the line has no quantity control, carries the "not available" mark and a note
+    // (role "note", no class name involved); the other line has the control and neither. The
+    // texts come from the i18n keys, so a rewording (open question O1) does not break this.
     await expect(goneLine).toHaveCount(1);
     await expect(goneLine.getByRole("spinbutton")).toHaveCount(0);
-    await expect(goneLine.locator('[class*="danger"]')).not.toHaveCount(0);
+    await expect(goneLine.getByText(th.cart.notAvailable, { exact: true })).toBeVisible();
+    await expect(goneLine.getByRole("note")).toHaveText(th.cart.notAvailableNote);
     await expect(keptLine.getByRole("spinbutton")).toHaveCount(1);
-    await expect(keptLine.locator('[class*="danger"]')).toHaveCount(0);
+    await expect(keptLine.getByText(th.cart.notAvailable, { exact: true })).toHaveCount(0);
+    await expect(keptLine.getByRole("note")).toHaveCount(0);
     // Left out of the total: 100.00 + 40.00 shipping, not 200.00 + 40.00.
     await expect(summary).toContainText("฿140.00");
     await expect(summary).not.toContainText("฿240.00");
