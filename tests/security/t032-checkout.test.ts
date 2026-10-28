@@ -122,7 +122,8 @@ describe("T-032 review: the route files are thin", () => {
     expect(service).toBeGreaterThan(schema);
     expect(body.split("requireActor(").length - 1).toBe(1);
     expect(body.split("readJsonBody(").length - 1).toBe(1);
-    // The client address goes only into the security event, never into a decision.
+    // The client address is read once; since SEC-052 it is the subject of the signed-in-address
+    // rate-limit rule and goes into the security event.
     expect(body.split("getClientAddress(").length - 1).toBe(1);
   });
 

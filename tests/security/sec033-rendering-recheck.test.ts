@@ -478,6 +478,15 @@ function isValueReference(id: ts.Identifier): boolean {
  * a copy into a local (`const t = x.title`), so an alias cannot carry a title past the scan.
  */
 function unsafeTitleReads(fileName: string, source: string): string[] {
+  const { file, nodes } = unsafeTitleReadNodes(fileName, source);
+  return nodes.map((node) => node.getText(file));
+}
+
+/** The nodes behind `unsafeTitleReads`, with their parsed file. */
+function unsafeTitleReadNodes(
+  fileName: string,
+  source: string,
+): { file: ts.SourceFile; nodes: ts.Node[] } {
   const file = ts.createSourceFile(
     fileName,
     source,
@@ -533,11 +542,33 @@ function unsafeTitleReads(fileName: string, source: string): string[] {
     references(file);
   }
 
-  return reads
-    .sort((a, b) => a.getStart(file) - b.getStart(file))
-    .filter((node) => !isSoleUserNameChild(node))
-    .filter((node) => !(isolateConstants && isStrippedIsolateWrap(node)))
-    .map((node) => node.getText(file));
+  return {
+    file,
+    nodes: reads
+      .sort((a, b) => a.getStart(file) - b.getStart(file))
+      .filter((node) => !isSoleUserNameChild(node))
+      .filter((node) => !(isolateConstants && isStrippedIsolateWrap(node))),
+  };
+}
+
+/**
+ * True when a title read can only decide which branch renders and is never rendered itself: the
+ * condition of `a ? b : c`, or an operand of `=== null` / `!== null` (a boolean). Used for the
+ * SEC-054 null checks, so a pinned read that later moves into rendered output fails the scan even
+ * when its source text stays the same.
+ */
+function isConditionOnlyRead(node: ts.Node): boolean {
+  const parent = node.parent;
+  if (ts.isConditionalExpression(parent) && parent.condition === node) return true;
+  if (ts.isBinaryExpression(parent)) {
+    const operator = parent.operatorToken.kind;
+    const equality =
+      operator === ts.SyntaxKind.EqualsEqualsEqualsToken ||
+      operator === ts.SyntaxKind.ExclamationEqualsEqualsToken;
+    const other = parent.left === node ? parent.right : parent.left;
+    return equality && other.kind === ts.SyntaxKind.NullKeyword;
+  }
+  return false;
 }
 
 /**
@@ -564,6 +595,20 @@ const TITLE_READ_EXCLUSIONS: Record<string, { reads: string[]; reason: string }>
       "The empty-list heading from the `empty` prop; all four callers build it from th.ts " +
       "(page.tsx, search/page.tsx, categories/[slug]/page.tsx, store-section.tsx).",
   },
+  "src/components/cart/cart-view.tsx": {
+    reads: ["line.title"],
+    reason:
+      "SEC-054 (70eee49): `line.title !== null` only chooses between the linked title, rendered " +
+      "as the sole child of <UserName>, and the fixed label th.cart.unavailableLine for a hidden " +
+      "line. The read is checked to stay condition-only (CONDITION_ONLY_TITLE_READS).",
+  },
+  "src/components/checkout/checkout-view.tsx": {
+    reads: ["item.line?.title", "line.title"],
+    reason:
+      "SEC-054 (959a968): both reads are the condition of `? :` choosing between <UserName> " +
+      "around the title and th.cart.unavailableLine for a hidden line. Checked to stay " +
+      "condition-only (CONDITION_ONLY_TITLE_READS).",
+  },
   "src/components/seller/product-form.tsx": {
     reads: ["values.title", "errors.title"],
     reason:
@@ -584,6 +629,12 @@ const TITLE_READ_EXCLUSIONS: Record<string, { reads: string[]; reason: string }>
       "into the request body, and compares them for the edit diff (CR-107).",
   },
 };
+
+/** Pinned files whose title reads must stay condition-only (`isConditionOnlyRead`; SEC-054). */
+const CONDITION_ONLY_TITLE_READS = [
+  "src/components/cart/cart-view.tsx",
+  "src/components/checkout/checkout-view.tsx",
+];
 
 describe("SEC-057 re-check: product titles in attributes and new places", () => {
   it("every gallery image alt wraps the title, and the isolate closes before the shop's words", () => {
@@ -629,6 +680,43 @@ describe("SEC-057 re-check: product titles in attributes and new places", () => 
       Object.entries(TITLE_READ_EXCLUSIONS).map(([path, entry]) => [path, entry.reads]),
     );
     expect(found).toEqual(pinned);
+  });
+
+  it("the SEC-054 pinned title reads only choose a branch and are never rendered", () => {
+    for (const path of CONDITION_ONLY_TITLE_READS) {
+      const { file, nodes } = unsafeTitleReadNodes(path, readFileSync(join(ROOT, path), "utf8"));
+      expect(nodes.length, path).toBe(TITLE_READ_EXCLUSIONS[path]?.reads.length);
+      for (const node of nodes) {
+        expect(isConditionOnlyRead(node), `${path}: ${node.getText(file)}`).toBe(true);
+      }
+    }
+  });
+
+  it("the condition-only check refuses a rendered read (scanner self-test)", () => {
+    const sample = (body: string) =>
+      unsafeTitleReadNodes("x.tsx", `import { UserName } from "@/components/user-name";\n${body}`);
+    const accepted = [
+      "const A = (l) => (l.title !== null ? <UserName>{l.title}</UserName> : null);",
+      "const B = (l) => (l?.title ? <UserName>{l.title}</UserName> : null);",
+      "const C = (l) => (null === l.title ? null : <UserName>{l.title}</UserName>);",
+    ];
+    for (const body of accepted) {
+      const { nodes } = sample(body);
+      expect(nodes.length, body).toBe(1);
+      expect(nodes.every(isConditionOnlyRead), body).toBe(true);
+    }
+    const refused = [
+      "const D = (l) => <p>{l.title}</p>;",
+      "const E = (l) => <p>{l.title !== null ? l.title : ''}</p>;",
+      "const F = (l) => <p>{l.title ?? 'x'}</p>;",
+      "const G = (l) => <p>{l.title && <b />}</p>;",
+      "const H = (l) => <p>{l.title !== undefined}</p>;",
+    ];
+    for (const body of refused) {
+      const { nodes } = sample(body);
+      expect(nodes.length, body).toBeGreaterThan(0);
+      expect(nodes.every(isConditionOnlyRead), body).toBe(false);
+    }
   });
 
   it("every pinned exclusion is a file that renders nothing or a static or form-field use", () => {
