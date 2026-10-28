@@ -13,6 +13,7 @@ import { createDraft, publishAndApprove } from "./support/catalog";
 import { ORIGIN_HEADERS, addToCartOnPage, openAs, registerCustomer } from "./support/session";
 import {
   addAddress,
+  ageShipment,
   categoryTwoId,
   checkoutOnPage,
   readOrder,
@@ -87,6 +88,8 @@ test("a suspended store leaves the storefront but its seller can still finish an
     await seller.getByLabel(th.seller.orders.actions.trackingNumber).fill("MOCK-SUSP-1");
     await seller.getByRole("button", { name: th.seller.orders.actions.ship, exact: true }).click();
     await expect(seller.getByText(th.seller.orders.actions.shipped)).toBeVisible();
+    // SEC-072: delivery is allowed 24 hours after shipping; the shipment is aged in the database.
+    ageShipment(new URL(seller.url()).pathname.split("/").pop() ?? "");
     await seller
       .getByRole("button", { name: th.seller.orders.actions.deliver, exact: true })
       .click();

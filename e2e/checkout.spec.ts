@@ -21,6 +21,7 @@ import { expect, test, type APIRequestContext, type Page } from "@playwright/tes
 import { th } from "@/i18n/th";
 import { SEEDED, SELLER_TWO_STORAGE_STATE } from "./support/accounts";
 import { E2E_ORIGIN } from "./support/constants";
+import { ageShipment } from "./support/shop";
 import {
   ORIGIN_HEADERS,
   addToCartOnPage,
@@ -215,6 +216,8 @@ test("a seller moves their part through fulfilment and the customer sees each st
     await expect(customerPage.getByText("MOCK123456")).toBeVisible();
     await expect(customerPage.getByText(th.orders.detail.shipmentSimulated).first()).toBeVisible();
 
+    // SEC-072: delivery is allowed 24 hours after shipping; the shipment is aged in the database.
+    ageShipment(new URL(seller.page.url()).pathname.split("/").pop() ?? "");
     await seller.page
       .getByRole("button", { name: th.seller.orders.actions.deliver, exact: true })
       .click();

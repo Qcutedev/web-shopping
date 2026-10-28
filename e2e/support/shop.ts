@@ -5,6 +5,7 @@
 import { expect, type APIRequestContext, type Browser, type Page } from "@playwright/test";
 import { th } from "@/i18n/th";
 import { ADMIN_STORAGE_STATE, SEEDED } from "./accounts";
+import { runE2eScript } from "./child-steps";
 import { E2E_ORIGIN } from "./constants";
 import { ORIGIN_HEADERS, registerCustomer, type Person } from "./session";
 
@@ -57,13 +58,26 @@ export async function readOrder(api: APIRequestContext, orderId: string): Promis
   return (await body<{ data: OrderView }>(await api.get(`/api/v1/orders/${orderId}`))).data;
 }
 
-/** Moves a seller order through the seller's status endpoint (setup of a delivered order). */
+/**
+ * SEC-072: a seller may set DELIVERED only 24 hours after shipping, by the database clock. Moves
+ * the seller order's `shippedAt` back by that much in the e2e database (setup; the server's check
+ * is unchanged).
+ */
+export function ageShipment(sellerOrderId: string): void {
+  runE2eScript("age shipment (SEC-072)", "age-shipment.ts", [sellerOrderId]);
+}
+
+/**
+ * Moves a seller order through the seller's status endpoint (setup of a delivered order). Before
+ * `DELIVERED` the shipment is aged in the database (SEC-072, `ageShipment`).
+ */
 export async function moveSellerOrder(
   seller: APIRequestContext,
   sellerOrderId: string,
   steps: readonly ("PROCESSING" | "SHIPPED" | "DELIVERED")[],
 ): Promise<void> {
   for (const to of steps) {
+    if (to === "DELIVERED") ageShipment(sellerOrderId);
     const response = await seller.post(`/api/v1/seller/orders/${sellerOrderId}/status`, {
       headers: ORIGIN_HEADERS,
       data:
