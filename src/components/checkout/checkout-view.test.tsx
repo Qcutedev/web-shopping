@@ -292,6 +292,33 @@ describe("CheckoutView submit", () => {
     expect(alert.textContent).not.toContain(th.checkout.refusedSoldOut);
   });
 
+  it("names a hidden line (null title) with the unavailable label in the refusal list", async () => {
+    checkoutApi.placeOrder.mockResolvedValueOnce(
+      failed(409, "INSUFFICIENT_STOCK", {
+        details: {
+          items: [
+            {
+              cartItemId: "l1",
+              productId: "p1",
+              reason: "NOT_AVAILABLE",
+              requestedQuantity: 3,
+              availableStock: null,
+            },
+          ],
+        },
+      }),
+    );
+    render(
+      <CheckoutView
+        cart={cartOf([line({ slug: null, title: null, image: null })])}
+        addresses={[address({ isDefault: true })]}
+      />,
+    );
+    await userEvent.click(submitButton());
+    const list = await screen.findByRole("list", { name: th.checkout.refusedListLabel });
+    expect(list.textContent).toBe(`${th.cart.unavailableLine}: ${th.checkout.refusedNotAvailable}`);
+  });
+
   it("does not resend when the cart changed after an unknown outcome", async () => {
     checkoutApi.placeOrder.mockResolvedValue(failed(500, "INTERNAL_ERROR"));
     render(<CheckoutView cart={cartOf()} addresses={[address({ isDefault: true })]} />);

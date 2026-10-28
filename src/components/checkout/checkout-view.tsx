@@ -232,8 +232,11 @@ export function CheckoutView({
               const item = refusalLine(cart, entry);
               return (
                 <li key={item.key} className={USER_NAME_CONTAINER_CLASS}>
-                  {item.line ? (
+                  {item.line?.title ? (
                     <UserName>{item.line.title}</UserName>
+                  ) : item.line ? (
+                    // A hidden line has no title (SEC-054): a fixed label instead.
+                    th.cart.unavailableLine
                   ) : (
                     th.checkout.refusedUnknownItem
                   )}
@@ -383,7 +386,8 @@ export function CheckoutView({
                 .map((line) => (
                   <li key={line.id} className="flex justify-between gap-3">
                     <span className={`type-body ${USER_NAME_CONTAINER_CLASS}`}>
-                      <UserName>{line.title}</UserName> {th.seller.common.timesSign} {line.quantity}
+                      {line.title ? <UserName>{line.title}</UserName> : th.cart.unavailableLine}{" "}
+                      {th.seller.common.timesSign} {line.quantity}
                     </span>
                     <Price satang={line.lineTotalSatang ?? 0} />
                   </li>
