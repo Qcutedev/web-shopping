@@ -43,12 +43,17 @@
  *     the body, and nothing before the service may look up the resource an id names.
  *   - Step 2 is called by the handler itself, although `readJsonBody` checks the content type
  *     again: a wrong content type is 415 for everyone, also for a caller without a session.
- *   - Steps 3 and 4 belong to auth (`src/server/auth/**`, T-015; no guard exists yet).
- *     `requireActor` is its name in the documents; `assertRole` and `assertStoreApproved` stand
- *     here for the role helper (role only) and the second pure helper that judges the store
- *     status, whose names auth chooses. The role is judged first. An endpoint of access
- *     `seller (any store status)` calls the role helper alone; a `public` endpoint skips steps 3
- *     and 4.
+ *   - Steps 3 and 4 belong to auth (`src/server/auth/**`, T-015). `requireActor` is in
+ *     `src/server/auth/session.ts`. `assertRole` and `assertStoreApproved` stand here for the
+ *     pure helpers of `src/server/auth/actor.ts`: `requireRole(actor, ...roles)` (role only) and
+ *     `requireApprovedSeller(actor)` (role `SELLER` first, then store `APPROVED`; it includes the
+ *     role check, so an endpoint of access `seller` calls it alone). The role is judged first. An
+ *     endpoint of access `seller (any store status)` calls `requireRole(actor, "SELLER")` alone;
+ *     a `public` endpoint skips steps 3 and 4.
+ *   - A 401 UNAUTHENTICATED can also come after the guard, from the service: a user deactivated
+ *     between step 3 and the service's query (docs/API_CONTRACTS.md, `GET /me`), and an admin
+ *     write whose acting admin is no longer an active `ADMIN` when its transaction runs
+ *     (SECURITY.md SEC-088, D-024). That refusal rolls the transaction back.
  *   - Step 5 only on an endpoint that has a limit (docs/SECURITY.md, SR-02). The subject is
  *     `actor.userId` and nothing else; on a `public` endpoint that takes a body (sign-up,
  *     sign-in) it is the client address, still before the body is read. A request that reaches
