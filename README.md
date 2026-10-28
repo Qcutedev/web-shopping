@@ -94,7 +94,7 @@ pnpm admin:bootstrap
 Remove-Item Env:ADMIN_BOOTSTRAP_EMAIL, Env:ADMIN_BOOTSTRAP_PASSWORD
 ```
 
-The password must be 8 to 128 characters. An optional `ADMIN_BOOTSTRAP_NAME` sets the display name (default `Admin`). These variables are deliberately not in `.env.example`; never put them in `.env`. Exit codes and behaviour are in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) ("First administrator"). Then sign in at <http://localhost:3000/sign-in> and open `/admin`.
+The password must be 8 to 128 characters. An optional `ADMIN_BOOTSTRAP_NAME` sets the display name (default `Admin`). `.env.example` lists these variables as commented placeholders so they are discoverable; leave them commented out and never put a real password in `.env`, because `.env` stays on disk. Use the session-only `$env:` steps above instead. Exit codes and behaviour are in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) ("First administrator"). Then sign in at <http://localhost:3000/sign-in> and open `/admin`.
 
 ## Sample accounts (local only)
 
