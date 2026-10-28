@@ -275,14 +275,16 @@ Where each validated variable is read (checked against `src` on 2026-10-13):
 - `DATABASE_URL`: the database layer (`src/server/db/client.ts`) takes it from `readDatabaseUrl()` of `src/server/env.ts` on first use, so the production refusals apply there too (CR-23, SEC-029). Importing the module still reads nothing (D-033 point 1).
 - `AUTH_SECRET`: read through `readAuthSecret()` by the auth layer on first use, and by `getEnv()` at start.
 
-### Variables not validated yet (Planned)
+### Variables read outside `src/server/env.ts`
 
-Not read by `src/server/env.ts` (`AUTH_SECRET` is, since CR-66: see the table above). Each is added to it, and to `.env.example`, by the task that introduces its reader.
+Read by code that is not the server start-up validation. All are deliberately absent from `.env.example` (checked against `src`, `scripts`, `prisma`, and `next.config.ts` on 2026-10-28).
 
 | Variable | Purpose | Secret |
 | --- | --- | --- |
-| `ADMIN_BOOTSTRAP_EMAIL`, `ADMIN_BOOTSTRAP_PASSWORD` | Read once by the bootstrap script (T-016); do not leave set | yes |
+| `ADMIN_BOOTSTRAP_EMAIL`, `ADMIN_BOOTSTRAP_PASSWORD` | Read once by `pnpm admin:bootstrap` (T-016, implemented); set for one invocation only and remove afterwards; never write them in `.env` | yes |
 | `ADMIN_BOOTSTRAP_NAME` | Optional display name of the admin the bootstrap script creates; default `Admin` | no |
+| `NEXT_DIST_DIR` | Build output directory read by `next.config.ts`. Set by `playwright.config.ts` (`.next-e2e`) and `scripts/build-probe.ps1`; leave unset everywhere else, so production uses `.next` | no |
+| `NEXT_RUNTIME`, `NEXT_PHASE` | Set by the framework; read by `src/instrumentation.ts`. Never write them (see "What `LOG_LEVEL` reaches") | no |
 
 ### Uploaded files
 
@@ -389,7 +391,7 @@ Whichever option is chosen must be able to meet the owner's rules. None of the o
 
 | Job | Steps | Notes |
 | --- | --- | --- |
-| `verify` | `pnpm install --frozen-lockfile`, then `pnpm verify` (format check, lint, type check, unit tests, build) | The build runs with `NODE_ENV=production`, so it gets per-run random `AUTH_SECRET` and `DATABASE_URL` (port 5432, nothing listens; the build does not connect) and no `DATABASE_URL_TEST` (SEC-009) |
+| `verify` | `pnpm install --frozen-lockfile`, then `pnpm verify` (format check, lint, type check, unit tests, build) | The build runs with `NODE_ENV=production`, so the job sets `APP_URL=http://localhost:3000`, `TRUSTED_PROXY_HOPS=0`, a per-run random `AUTH_SECRET`, and a per-run `DATABASE_URL` (port 5432, nothing listens; the build does not connect) and no `DATABASE_URL_TEST` (SEC-009) |
 | `integration` | `docker compose up -d --wait db-test`, then `pnpm test:integration` | Same digest-pinned image as local. The password is generated per run and handed to Compose as `POSTGRES_TEST_PASSWORD`; `DATABASE_URL_TEST` is `127.0.0.1:5433`, `DATABASE_URL` is another server (`127.0.0.1:5432`, nothing listening), as `tests/helpers/test-database-url.ts` requires. Migrations are applied by the suite's global setup |
 | `e2e` | `pnpm exec playwright install --with-deps chromium`, `docker compose up -d --wait db-test`, then `pnpm test:e2e --reporter=list,html` | Same database setup as `integration`. The suite starts its own `next dev` on 127.0.0.1:3100 and uses database `marketplace_e2e`, created by `e2e/global-setup.ts` on the `db-test` server; one worker, one run per ref at a time. `playwright-report/` and `test-results/` are uploaded as an artifact (7 days) only on failure |
 | `audit` | `pnpm audit --prod` | Unfiltered, no exception list (D-034). Needs registry network access; an outage fails the job |
@@ -430,21 +432,21 @@ In the commands below `$baseUrl` is the origin of the environment being released
 
 | # | Step | Check |
 | --- | --- | --- |
-| 1 | All checks pass on the commit to release | `pnpm verify`, then `pnpm test:integration` (exists since T-023) and `pnpm test:e2e` (exists; the suite is still small, see STATUS.md for T-060). Each must exit 0. The `.github/workflows/ci.yml` jobs `verify`, `integration`, and `e2e` run the same commands; once that workflow has run on GitHub (it has not yet, see "CI pipeline"), the CI run on that commit replaces the local run |
+| 1 | All checks pass on the commit to release | `pnpm verify`, then `pnpm test:integration` (exists since T-023) and `pnpm test:e2e` (exists; what it covers and what it does not is in TEST_STRATEGY.md). Each must exit 0. The `.github/workflows/ci.yml` jobs `verify`, `integration`, and `e2e` run the same commands; once that workflow has run on GitHub (it has not yet, see "CI pipeline"), the CI run on that commit replaces the local run |
 | 2 | No open Critical or High security finding | **Manual**: read the findings register in [SECURITY.md](SECURITY.md) |
 | 3 | Back up the target database and confirm the backup is restorable | **Planned**: the commands depend on the hosting provider, which is not chosen. See "Database backups". The pre-release backup is a database backup like any other: it is stored in the same place, readable by the same people, and deleted automatically after 30 days |
-| 4 | Apply migrations | `pnpm db:migrate:deploy`, which runs `prisma migrate deploy`, with `DATABASE_URL` set to the target database for that command. Must exit 0. **Planned** (T-071): the script exists since T-013, but where it runs in a deployment is not built; see "Build and migration image" below. On production this is a production migration and needs explicit human approval recorded in DECISIONS.md (CLAUDE.md, "Needs human approval") |
+| 4 | Apply migrations | `pnpm db:migrate:deploy`, which runs `prisma migrate deploy`, with `DATABASE_URL` set to the target database for that command. Must exit 0. In a container deployment the same command runs from the `migrate` image of the `Dockerfile` ([RUNBOOK-STAGING.md](RUNBOOK-STAGING.md), step 4), which was run locally against an empty database only; where it runs on a real host is **Planned**, because no host exists. On production this is a production migration and needs explicit human approval recorded in DECISIONS.md (CLAUDE.md, "Needs human approval") |
 | 5 | Deploy the new application version | **Planned**: depends on the hosting provider |
 | 6 | Health endpoint answers | `curl.exe --silent --show-error --output NUL --write-out "%{http_code}" "$baseUrl/api/health"` must print `200`. The endpoint exists since T-011 and was exercised locally ("Health endpoint"); against a deployed environment the step is **Planned**, because none exists |
-| 7 | One read path works | `curl.exe --silent --show-error --output NUL --write-out "%{http_code}" "$baseUrl/"` must print `200` (**Planned**: the homepage lands with T-021) |
-| 8 | Log in and view one product | **Manual** in a browser, until the end-to-end suite can be pointed at a deployed environment (T-060) |
+| 7 | One read path works | `curl.exe --silent --show-error --output NUL --write-out "%{http_code}" "$baseUrl/"` must print `200`. The homepage exists (T-021) and `GET /` returned `200` in the local container run (2026-10-26, [RUNBOOK-STAGING.md](RUNBOOK-STAGING.md)); against a deployed environment the step is **Planned** |
+| 8 | Log in and view one product | **Manual** in a browser, because the end-to-end suite starts its own local `next dev` server and cannot be pointed at a deployed environment |
 | 9 | Watch logs and error rate for 30 minutes | **Manual**, by a person who is allowed to read server logs ("Log retention and access"); the tool depends on the hosting provider |
 | 10 | Scheduled work is running after the release | **Wired in code, not yet run on a deployment** (`src/instrumentation.ts` starts the session purge, T-015, and the payment timeout sweep, T-032): each job writes one run line at start ("Expired sessions removed", "Payment timeout sweep ran"; there is no separate registration line) and then one per interval, and the two check queries in "Scheduled work" return 0. **Manual**: not yet done on any host |
 | 11 | Record the release in the release log below | **Manual** |
 
 About step 4: `pnpm db:migrate` runs `prisma migrate dev`, which is for local development only. It can reset a database and must never be pointed at staging or production. The command for a deployed database is `prisma migrate deploy`, which only applies migrations that are already committed; the `package.json` script for it is `db:migrate:deploy`. The Prisma CLI reads its configuration from `prisma7.config.ts` at the repository root (DATA_MODEL.md section 21.1): that file names the schema file and the migrations folder and takes the database address from `DATABASE_URL`. It loads a `.env` file only when one exists, and a variable already set in the environment wins. A deployed host has no `.env` file: `DATABASE_URL` comes from the host's secret configuration and is set for the command.
 
-### Build and migration image (Planned, T-070 and T-071; code-review finding CR-16)
+### Build and migration image (Implemented locally, T-071; code-review finding CR-16)
 
 **Built in T-071 on 2026-10-26 (`Dockerfile`, local only, nothing deployed).** The image, its two targets, and the local run are described in [RUNBOOK-STAGING.md](RUNBOOK-STAGING.md). One deviation from point 2 below: the runtime image is a production-only install (`--ignore-scripts`) plus the generated client from the build stage, not the standalone output, because `next.config.ts` does not set `output: "standalone"`. Points 1, 3, 4, 5 and 6 and the three checks at the end of this section were met in the local run (`scripts/container-smoke.ps1`); the CI task (T-070) has not run them. The text below is the original design.
 
@@ -456,11 +458,11 @@ Requirements that follow:
 2. **The runtime image ships the Next.js standalone output of that build**, not a second install. `next.config.ts` does not set the standalone output today; it is an orchestrator-owned file, and the setting is requested for T-071. T-071 checks that the standalone output contains everything the server needs at run time, the generated client and the database driver included.
 3. **`--ignore-scripts` alone is not a fix.** It makes the production-only install succeed, but `prisma generate` then never runs and the generated client is missing.
 4. **`prisma migrate deploy` does not run from the runtime image.** It needs four things that the standalone output does not carry: the `prisma` package, `prisma7.config.ts`, the schema and migration files under `prisma/`, and the schema engine. The install scripts of `prisma` and `@prisma/engines` are refused in `pnpm-workspace.yaml`, so the engine is not part of an install: the CLI downloads it the first time a command needs it, unless it was fetched in advance (DATA_MODEL.md section 21.1).
-5. **Migrations therefore run from the build image or from a dedicated migration image, with the schema engine already fetched** when the image is built. A migration step that downloads the engine at release time depends on network access from inside the deployment and on a download at the moment of a release; that is not accepted. How the engine is fetched in advance with the pinned Prisma version is established in T-071; no command for it is written here because none has been tried.
+5. **Migrations therefore run from the build image or from a dedicated migration image, with the schema engine already fetched** when the image is built. A migration step that downloads the engine at release time depends on network access from inside the deployment and on a download at the moment of a release; that is not accepted. The `Dockerfile` fetches the engine at build time with `pnpm exec prisma --version` in the `migrate` target; the offline migration run passed locally on 2026-10-26.
 6. The image that runs migrations holds development dependencies and the full source. It is run for the migration step only, receives `DATABASE_URL` and no other secret, and is not what serves requests.
 7. Production migrations still need explicit human approval recorded in DECISIONS.md (CLAUDE.md, "Needs human approval"). Nothing in this design applies a migration automatically on production; staging goes first with the same image.
 
-Checks for T-071 (**Planned**; none runnable today, because no Dockerfile exists):
+Checks for T-071 (runnable with `scripts/container-smoke.ps1`, which passed locally on 2026-10-26; CI does not run them, and the image has never been built on a host):
 
 - The image builds from a clean checkout, and no step of the build runs a production-only install.
 - The migration image applies the committed migrations to an empty PostgreSQL database with network access switched off, and `prisma migrate status` then reports no pending migration.
@@ -468,7 +470,7 @@ Checks for T-071 (**Planned**; none runnable today, because no Dockerfile exists
 
 ## First administrator (T-016)
 
-There is no default admin and no web endpoint that grants admin; in the MVP admins are created only by `pnpm admin:bootstrap` (`scripts/bootstrap-admin.ts`; owner answers OQ-13, OQ-37; BR-26). **Not runnable yet:** the script entry uses `tsx`, which is not installed (`'tsx' is not recognized`); devops adds and pins the runner. The logic (`src/modules/auth/bootstrap-admin.ts`) is tested against the test database.
+There is no default admin and no web endpoint that grants admin; in the MVP admins are created only by `pnpm admin:bootstrap` (`scripts/bootstrap-admin.ts`; owner answers OQ-13, OQ-37; BR-26). `tsx` is a pinned development dependency, so the script is runnable. The logic (`src/modules/auth/bootstrap-admin.ts`) is tested against the test database. Running it in a container (from the `migrate` image) has not been done.
 
 Input is read from the environment only, never from command-line arguments, so the password stays out of shell history and the process list. Supply the variables for one invocation and remove them afterwards. The form below runs in Windows PowerShell 5.1, the project shell, and in PowerShell 7. `Read-Host -AsSecureString` keeps the typed password off the screen and out of history; the conversion back to text is needed because an environment variable holds text. (`Read-Host -MaskInput` is not used: it exists only from PowerShell 7.1.)
 
@@ -830,14 +832,14 @@ For the production readiness checklist, all **Manual** until a provider is chose
 
 Nothing below is done. Each item states how it is checked.
 
-- [ ] Build and full test suite pass on the release commit. Check: `pnpm verify`, `pnpm test:integration` (exists since T-023), `pnpm test:e2e` (exists; suite still small, see STATUS.md for T-060), each exit 0
+- [ ] Build and full test suite pass on the release commit. Check: `pnpm verify`, `pnpm test:integration` (exists since T-023), `pnpm test:e2e` (exists; coverage and gaps are in TEST_STRATEGY.md), each exit 0
 - [ ] No open Critical or High security finding. **Manual**: findings register in SECURITY.md
 - [ ] Environment variables set and validated, values not exposed. Check: the application starts and release procedure step 6 passes (since T-011 an invalid variable ends the server at start with exit code 1 and names the variable); **Manual**: no secret is visible in logs or the hosting console's public settings
 - [ ] `AUTH_SECRET` unique to the environment. **Manual**
 - [ ] Database backup taken and restore rehearsed on staging, with every session deleted and the restrictions re-applied before the application starts ("Restore procedure" steps 3, 6, and 7; D-032 point 3). **Planned** (T-071): commands depend on the hosting provider
 - [ ] Backups deleted automatically after 30 days in every copy, and reachable only by the named people (OQ-50). **Manual** ("Database backups")
 - [ ] Backups encrypted where they are stored and on the way there, and stored apart from the database host (SR-07; D-032 point 3). **Manual** ("Database backups")
-- [ ] The runtime image is built without a production-only install and holds no `prisma` package; migrations run from the build image or a migration image with the schema engine already fetched (CR-16). **Planned** (T-071): the checks in "Build and migration image"
+- [ ] The runtime image is built without a production-only install of the build stage and holds no `prisma` package; migrations run from the `migrate` image with the schema engine already fetched (CR-16). Check: the three checks in "Build and migration image" (`scripts/container-smoke.ps1`, passed locally on 2026-10-26; **Manual** on the real host, where it has not been done)
 - [ ] Migrations applied on staging first. Check: `pnpm exec prisma migrate status` with `DATABASE_URL` set to the staging database reports no pending migration (**Planned**, T-071: no staging database exists)
 - [ ] Health check and logs verified on staging. Check: release procedure step 6; **Manual** for logs
 - [ ] No copy of the logs kept longer than 90 days, the platform's router or proxy log and log backups included, with automatic deletion (OQ-21, OQ-48). **Manual** ("Log retention and access", "Checks")
@@ -846,7 +848,7 @@ Nothing below is done. Each item states how it is checked.
 - [ ] Session purge and payment timeout sweep run with no visitor present (OQ-49, D-028). Check: the two check queries in "Scheduled work" return 0 (jobs wired in `src/instrumentation.ts`, T-015 and T-032; not yet run on a deployment); **Manual**: run lines of both jobs on a staging day without visitors
 - [ ] The open questions below that bind a production release are answered. **Manual**
 - [ ] Reverse proxy variables set and the hop count confirmed on staging (SR-01). **Manual**
-- [ ] HTTPS and domain configured; HSTS enabled. Check: `curl.exe --silent --show-error --head "$baseUrl/"` shows a `strict-transport-security` header (**Planned**, T-072)
+- [ ] HTTPS and domain configured; HSTS enabled. Check: `curl.exe --silent --show-error --head "$baseUrl/"` shows a `strict-transport-security` header (T-072 is implemented in `next.config.ts` and the header was present in the local container run of 2026-10-26; the check against a real domain is **Planned**, none exists)
 - [ ] Admin bootstrapped; bootstrap variables removed. **Manual**
 - [ ] Seed data absent from production. **Manual**
 - [ ] Mock payment disabled or clearly labelled, by explicit decision. **Manual**
@@ -874,7 +876,7 @@ Points the decisions do not cover. Nothing in this document treats a recommendat
 | DEP-Q10 | Which mechanism runs the two jobs? | auth with devops, T-015 (D-029) | Candidate A, the in-process timer, if the host keeps the process running with no traffic | "Scheduled work" |
 | DEP-Q11 | Is the upload volume backed up, and under which retention? | devops, T-071; owner if it costs money | Not formed yet | "Database backups" |
 | DEP-Q12 | How are restrictions listed and re-applied at a restore? SR-07 "Restore" item 2 names the two sources (the database being replaced when it can be read, otherwise the admin-action lines of the server log) and leaves the rest to T-071: the queries that produce the list, its form and place, the mechanism that re-applies a restriction while the application is stopped, which actor the audit log entry names, and how log lines become a list | devops and security, T-071; backend-api if a service function or script is needed | Not formed yet. A script that calls the same service functions as the admin actions would keep the audit log entry in one place; no such function exists | "Restore procedure" |
-| DEP-Q13 | How is the schema engine fetched in advance into the image that runs migrations, and is that image the build image or a dedicated one (CR-16)? | devops, T-071 and T-070 | A dedicated migration image, so that the build image is not kept and run in a deployment; to be tried in T-071 | "Build and migration image" |
+| DEP-Q13 | **ANSWERED in code (T-071).** Was: how is the schema engine fetched in advance into the image that runs migrations, and is that image the build image or a dedicated one (CR-16)? Built: the `migrate` target of the `Dockerfile` fetches it at build time; run locally only | devops | None: built | | "Build and migration image" |
 
 ## Release log
 
