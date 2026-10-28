@@ -1,6 +1,6 @@
 /**
- * The 31 named CHECK constraints of schema v1 (DATA_MODEL.md section 21.3; migration
- * 20261011121529_init_schema_v1).
+ * The 33 named CHECK constraints of the schema (DATA_MODEL.md sections 21.3 and 21.8; migrations
+ * 20261011121529_init_schema_v1 and 20261028163543_review_admin_hide).
  *
  * For each constraint: writes that it must reject, each matched on the PostgreSQL code 23514
  * and on the constraint's name, and writes at its edges that it must accept, so that a
@@ -17,6 +17,7 @@ import { db } from "@/server/db";
 import { captureViolation, PG_CHECK_VIOLATION } from "../../helpers/database-error";
 import {
   createAddress,
+  createAdmin,
   createCartItem,
   createOrderItemRow,
   createOrderRow,
@@ -510,6 +511,78 @@ const CHECK_CONSTRAINTS: Record<string, Cases> = {
     },
   },
 
+  // DATA_MODEL.md 6.15 and 21.8 (migration 20261028163543_review_admin_hide). Rejected rows
+  // satisfy the reason-length check, so that only the pair check can refuse them.
+  Review_hidden_pair_check: {
+    rejects: {
+      "hiddenAt without hiddenByUserId": () => createReview({ hiddenAt: new Date() }),
+      "hiddenByUserId without hiddenAt": async () =>
+        createReview({ hiddenByUserId: (await createAdmin()).id }),
+      "a reason on a public row": () => createReview({ hiddenReason: "spam" }),
+      "a reason and hiddenAt but no hiddenByUserId": () =>
+        createReview({ hiddenAt: new Date(), hiddenReason: "spam" }),
+      "an update that hides with hiddenAt only": async () => {
+        const review = await createReview();
+        return db.review.update({ where: { id: review.id }, data: { hiddenAt: new Date() } });
+      },
+    },
+    accepts: {
+      "all three hide columns null": () => createReview(),
+      "hiddenAt and hiddenByUserId with no reason": async () =>
+        createReview({ hiddenAt: new Date(), hiddenByUserId: (await createAdmin()).id }),
+      "hiddenAt, hiddenByUserId, and a reason": async () =>
+        createReview({
+          hiddenAt: new Date(),
+          hiddenByUserId: (await createAdmin()).id,
+          hiddenReason: "spam",
+        }),
+      "an update that hides with all columns set": async () => {
+        const review = await createReview();
+        return db.review.update({
+          where: { id: review.id },
+          data: {
+            hiddenAt: new Date(),
+            hiddenByUserId: (await createAdmin()).id,
+            hiddenReason: "spam",
+          },
+        });
+      },
+    },
+  },
+
+  // Rejected rows are otherwise well-formed hides, so that only the length check can refuse them.
+  Review_hiddenReason_check: {
+    rejects: {
+      "an empty reason": async () =>
+        createReview({
+          hiddenAt: new Date(),
+          hiddenByUserId: (await createAdmin()).id,
+          hiddenReason: "",
+        }),
+      "501 Thai characters": async () =>
+        createReview({
+          hiddenAt: new Date(),
+          hiddenByUserId: (await createAdmin()).id,
+          hiddenReason: "ก".repeat(501),
+        }),
+    },
+    accepts: {
+      "one character": async () =>
+        createReview({
+          hiddenAt: new Date(),
+          hiddenByUserId: (await createAdmin()).id,
+          hiddenReason: "x",
+        }),
+      // 500 characters, 1,500 bytes: the database counts characters, not bytes.
+      "500 Thai characters": async () =>
+        createReview({
+          hiddenAt: new Date(),
+          hiddenByUserId: (await createAdmin()).id,
+          hiddenReason: "ก".repeat(500),
+        }),
+    },
+  },
+
   MarketplaceSettings_id_check: {
     rejects: {
       "a second row with id 2": () =>
@@ -655,7 +728,7 @@ describe("every CHECK constraint of the database has cases in this file", () => 
       ORDER BY c.conname`;
     const inDatabase = rows.map((row) => row.name).sort();
 
-    expect(inDatabase).toHaveLength(31);
+    expect(inDatabase).toHaveLength(33);
     expect(Object.keys(CHECK_CONSTRAINTS).sort()).toEqual(inDatabase);
   });
 

@@ -1,5 +1,5 @@
 /**
- * The 28 foreign keys of schema v1 (DATA_MODEL.md sections 14 and 21.4).
+ * The 29 foreign keys of the schema (DATA_MODEL.md sections 14, 21.4 and 21.8).
  *
  * For each key, two tests:
  * - a child row that points at a parent that does not exist is rejected, matched on the
@@ -441,6 +441,22 @@ const FOREIGN_KEYS: Record<string, ForeignKeyCase> = {
     },
   },
 
+  // The admin who hid the review (migration 20261028163543_review_admin_hide). Nullable, so the
+  // missing-parent case sets a hide with an id that is not a user.
+  Review_hiddenByUserId_fkey: {
+    onDelete: "RESTRICT",
+    missingParent: () => createReview({ hiddenAt: new Date(), hiddenByUserId: MISSING_ID }),
+    parentWithChild: async () => {
+      const admin = await createAdmin();
+      const review = await createReview({ hiddenAt: new Date(), hiddenByUserId: admin.id });
+      return {
+        deleteParent: deleteUser(admin.id),
+        parentExists: userExists(admin.id),
+        childExists: () => exists(db.review.count({ where: { id: review.id } })),
+      };
+    },
+  },
+
   MarketplaceSettings_updatedById_fkey: {
     onDelete: "RESTRICT",
     missingParent: () =>
@@ -563,7 +579,7 @@ describe("every foreign key of the database has cases in this file", () => {
       Object.entries(FOREIGN_KEYS).map(([name, cases]) => [name, cases.onDelete]),
     );
 
-    expect(rows).toHaveLength(28);
+    expect(rows).toHaveLength(29);
     expect(inThisFile).toEqual(inDatabase);
   });
 });
