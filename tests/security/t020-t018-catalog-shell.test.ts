@@ -344,6 +344,10 @@ const FORBIDDEN_SELECT_KEYS = new Set([
   "email",
   "passwordHash",
   "storeId",
+  // SEC-092: who hid a review and why is admin-only.
+  "hiddenByUserId",
+  "hiddenBy",
+  "hiddenReason",
 ]);
 
 function forbiddenSelectKeys(select: unknown, path = "select"): string[] {
@@ -408,8 +412,10 @@ describe("T-020 review: every catalog read asks for visible rows only and hands 
         } else if (model === "category") {
           expect(where.isActive).toBe(true);
         } else if (model === "review") {
-          // Only the id that the visible-product lookup returned.
-          expect(where).toEqual({ productId: "prod-1" });
+          // Only the id that the visible-product lookup returned, and only public reviews: a
+          // review an admin hid is in neither the list, its total, nor the rating aggregate
+          // (SEC-092, re-checked 2026-10-29, docs/reviews/SEC-092-SEC-072-recheck.md).
+          expect(where).toEqual({ productId: "prod-1", hiddenAt: null });
         } else {
           throw new Error(`unexpected model ${model}`);
         }
@@ -725,9 +731,10 @@ describe("T-020 review: the catalog route files are thin", () => {
     "src/app/api/v1/seller/orders/[id]/status/route.ts",
     "src/app/api/v1/seller/orders/route.ts",
     "src/app/api/v1/seller/summary/route.ts",
-    // T-050 admin routes (23 files, 26 handlers); each guard read and checked in
+    // T-050 admin routes (26 files, 29 handlers); each guard read and checked in
     // tests/security/t050-admin.test.ts and tests/security/t050-admin.itest.ts
-    // (docs/reviews/T-050-security.md).
+    // (docs/reviews/T-050-security.md). The three reviews/ routes are SEC-092 step 2, reviewed
+    // in docs/reviews/SEC-092-SEC-072-recheck.md.
     "src/app/api/v1/admin/applications/[id]/approve/route.ts",
     "src/app/api/v1/admin/applications/[id]/reject/route.ts",
     "src/app/api/v1/admin/applications/route.ts",
@@ -742,6 +749,9 @@ describe("T-020 review: the catalog route files are thin", () => {
     "src/app/api/v1/admin/products/[id]/takedown/route.ts",
     "src/app/api/v1/admin/products/route.ts",
     "src/app/api/v1/admin/reports/route.ts",
+    "src/app/api/v1/admin/reviews/[id]/hide/route.ts",
+    "src/app/api/v1/admin/reviews/[id]/unhide/route.ts",
+    "src/app/api/v1/admin/reviews/route.ts",
     "src/app/api/v1/admin/seller-orders/[id]/status/route.ts",
     "src/app/api/v1/admin/settings/route.ts",
     "src/app/api/v1/admin/stores/[id]/reinstate/route.ts",

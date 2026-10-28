@@ -5,8 +5,12 @@
  * This file holds no character outside printable ASCII and no backslash-u escape (SEC-040):
  * special characters are built with String.fromCodePoint.
  *
+ * Extended 2026-10-29 for SEC-092 step 2 (commit e6701e3): the three review moderation routes,
+ * listReviews, hideReview, unhideReview, and moveReviewVisibility
+ * (docs/reviews/SEC-092-SEC-072-recheck.md).
+ *
  * No database. These cases:
- *   - read the 23 route files as text (order of the guards, role ADMIN before any input, CSRF
+ *   - read the 26 route files as text (order of the guards, role ADMIN before any input, CSRF
  *     helpers on every mutation, no database import, the actor passed to the service);
  *   - call every exported admin service function with a customer and a seller actor, with the
  *     admin repository and the database replaced by traps, and expect 403 FORBIDDEN before any
@@ -113,7 +117,7 @@ function handlerBodies(source: string): Record<string, string> {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The 23 route files and their 26 handlers
+// The 26 route files and their 29 handlers
 // ---------------------------------------------------------------------------------------------
 
 type Kind = "read" | "read-noinput" | "write-body" | "write-nobody";
@@ -194,6 +198,18 @@ const ROUTE_FILES: { path: string; handlers: Record<string, Kind>; service: stri
   { path: "summary/route.ts", handlers: { GET: "read-noinput" }, service: ["getSummary"] },
   { path: "reports/route.ts", handlers: { GET: "read" }, service: ["getReport"] },
   { path: "audit-logs/route.ts", handlers: { GET: "read" }, service: ["listAuditLogs"] },
+  // SEC-092 step 2 (e6701e3).
+  { path: "reviews/route.ts", handlers: { GET: "read" }, service: ["listReviews"] },
+  {
+    path: "reviews/[id]/hide/route.ts",
+    handlers: { POST: "write-body" },
+    service: ["hideReview"],
+  },
+  {
+    path: "reviews/[id]/unhide/route.ts",
+    handlers: { POST: "write-body" },
+    service: ["unhideReview"],
+  },
 ];
 
 function firstIndex(body: string, needles: string[]): number {
@@ -202,14 +218,14 @@ function firstIndex(body: string, needles: string[]): number {
 }
 
 describe("T-050 review: the admin route files", () => {
-  it("there are exactly the 23 reviewed route files and 26 handlers under /api/v1/admin", () => {
+  it("there are exactly the 26 reviewed route files and 29 handlers under /api/v1/admin", () => {
     const onDisk = filesUnder(API)
       .filter((path) => path.endsWith(`${sep}route.ts`))
       .map((path) => posix(path).replace("src/app/api/v1/admin/", ""))
       .sort();
     expect(onDisk).toEqual(ROUTE_FILES.map((file) => file.path).sort());
     const handlers = ROUTE_FILES.reduce((sum, file) => sum + Object.keys(file.handlers).length, 0);
-    expect(handlers).toBe(26);
+    expect(handlers).toBe(29);
   });
 
   for (const file of ROUTE_FILES) {
@@ -324,6 +340,9 @@ const SERVICE_CALLS: Record<string, (actor: Actor) => Promise<unknown>> = {
   getSummary: (a) => service.getSummary(a),
   getReport: (a) => service.getReport(a, { from, to }),
   listAuditLogs: (a) => service.listAuditLogs(a, page),
+  listReviews: (a) => service.listReviews(a, page),
+  hideReview: (a) => service.hideReview(a, "r1", { reason: "r" }),
+  unhideReview: (a) => service.unhideReview(a, "r1", {}),
 };
 
 describe("T-050 review: every admin service function refuses a customer and a seller first", () => {
@@ -385,6 +404,9 @@ const PRIVILEGED_KEYS = [
   "priceSatang",
   "stock",
   "paymentStatus",
+  // SEC-092: the hide fields come from the session and the database clock only.
+  "hiddenAt",
+  "hiddenByUserId",
   "__proto__",
   "constructor",
 ];
@@ -403,6 +425,7 @@ describe("T-050 review: admin request bodies are strict", () => {
     ],
     ["updateSettingsBodySchema", admin.updateSettingsBodySchema, { commissionRateBps: 500 }],
     ["rejectApplicationBodySchema", admin.rejectApplicationBodySchema, { reason: "r" }],
+    ["reviewModerationBodySchema", admin.reviewModerationBodySchema, { reason: "r" }],
   ];
 
   for (const [name, schema, valid] of bodies) {
@@ -496,6 +519,7 @@ describe("T-050 review: admin request bodies are strict", () => {
       admin.listCategoriesQuerySchema,
       admin.listOrdersQuerySchema,
       admin.listAuditLogsQuerySchema,
+      admin.listReviewsQuerySchema,
     ];
     for (const schema of lists) {
       expect(accepts(schema, { pageSize: "50" })).toBe(true);
@@ -593,6 +617,7 @@ describe("T-050 review: the admin repository and service", () => {
       "deleteCategory",
       "moveSellerOrderAsAdmin",
       "updateSettings",
+      "moveReviewVisibility",
     ];
     for (const name of writes) {
       const body = functionBody(repository, name);
@@ -601,6 +626,31 @@ describe("T-050 review: the admin repository and service", () => {
       expect(body, name).toMatch(/actorId: adminId,/);
       expect(body, name).toMatch(/db\.\$transaction\(/);
     }
+  });
+
+  it("SEC-092: a review hide or unhide locks the row, is guarded, uses the database clock, and never audits the comment", () => {
+    const body = functionBody(repository, "moveReviewVisibility");
+    expect(body).not.toBe("");
+    const lock = body.indexOf('FROM "Review" WHERE "id" = ${reviewId} FOR NO KEY UPDATE');
+    const hide = body.indexOf('WHERE "id" = ${reviewId} AND "hiddenAt" IS NULL');
+    const unhide = body.indexOf('WHERE "id" = ${reviewId} AND "hiddenAt" IS NOT NULL');
+    const audit = body.indexOf("await writeAudit(tx, {");
+    expect(lock).toBeGreaterThan(-1);
+    expect(hide).toBeGreaterThan(lock);
+    expect(unhide).toBeGreaterThan(lock);
+    expect(audit).toBeGreaterThan(Math.max(hide, unhide));
+    // A zero-row guarded write is refused before the audit row.
+    expect(body).toMatch(/if \(count !== 1\) return \{ kind: "invalid-state" \} as const;/);
+    // The time is the database's; the hider is the session's admin; no client time.
+    expect(body).toMatch(/SET "hiddenAt" = now\(\), "hiddenByUserId" = \$\{adminId\},/);
+    expect(body).not.toMatch(/new Date\(|Date\.now\(/);
+    // The audit metadata: reason, product id, before and after. Never the customer's text.
+    const metadata = /metadata: \{([\s\S]*?)\n {6}\},/.exec(body)?.[1] ?? "";
+    expect(metadata).toMatch(/reason,/);
+    expect(metadata).toMatch(/productId: current\.productId,/);
+    expect(metadata).not.toMatch(/comment|rating|userId|author/);
+    // Rating and comment are never written.
+    expect(body).not.toMatch(/SET[^`]*"(comment|rating)"/);
   });
 
   it("deactivation deletes every session of the target in the same transaction", () => {
@@ -633,6 +683,9 @@ describe("T-050 review: the admin repository and service", () => {
       "deleteCategory",
       "changeSellerOrderStatus",
       "updateSettings",
+      "listReviews",
+      "hideReview",
+      "unhideReview",
     ]) {
       expect(functionBody(serviceSource, name), name).toMatch(/adminId\(actor\)/);
     }
