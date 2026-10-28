@@ -17,7 +17,8 @@
  * The acting admin (SEC-088, D-024). The actor is read once per request, so every write
  * transaction first checks that `adminId` is still an active `ADMIN` (`assertActingAdmin`, the row
  * locked `FOR SHARE`; acting-admin.ts) and refuses with 401 UNAUTHENTICATED otherwise. A deactivation
- * of an admin target checks it against the active admin rows it locks `FOR UPDATE` instead.
+ * of an admin target checks it against the active admin rows it locks `FOR UPDATE` instead, and a
+ * reactivation against the acting admin's row it locks together with the target (SEC-094).
  *
  * Locks (DATA_MODEL.md 7.5). Each transaction first locks the acting admin's `User` row as above,
  * then only the rows of its own table group:
@@ -417,18 +418,30 @@ export async function deactivateUser(userId: string, adminId: string): Promise<A
 }
 
 /**
- * Reactivates a user in one transaction: lock the row (`FOR NO KEY UPDATE`; none is `not-found`),
- * already active is `invalid-state`, the guarded update `false` to `true`, one audit row
- * (`USER_REACTIVATED`). The user signs in again; nothing else is written (DATA_MODEL.md 4.5).
+ * Reactivates a user in one transaction: lock the acting admin's row and the target row in one
+ * statement (`FOR NO KEY UPDATE`, in `id` order; SEC-094), refuse unless the acting admin is an
+ * active `ADMIN` (401, SEC-088), no target row is `not-found`, already active is `invalid-state`,
+ * the guarded update `false` to `true`, one audit row (`USER_REACTIVATED`). The user signs in
+ * again; nothing else is written (DATA_MODEL.md 4.5).
+ *
+ * This function does not call `assertActingAdmin`: its `FOR SHARE` on the acting admin taken
+ * before the lock on the target let two admins reactivating each other lock the two rows in
+ * opposite order and deadlock (SEC-094). Both rows are locked by one statement, in the same
+ * `"id" COLLATE "C"` order as the `FOR UPDATE` of every active admin row in `deactivateUser`, so
+ * no two of these transactions can wait on each other in a cycle. The acting admin is still
+ * checked under a lock in the same transaction, as SEC-088 requires.
  */
 export async function reactivateUser(userId: string, adminId: string): Promise<ActivationOutcome> {
   const move = activationMove("reactivate");
   return db.$transaction(async (tx) => {
-    await assertActingAdmin(tx, adminId);
-    const rows = await tx.$queryRaw<LockedUser[]>`
-      SELECT "role"::text AS "role", "isActive" FROM "User" WHERE "id" = ${userId}
+    const rows = await tx.$queryRaw<(LockedUser & { id: string })[]>`
+      SELECT "id", "role"::text AS "role", "isActive" FROM "User"
+       WHERE "id" IN (${adminId}, ${userId})
+       ORDER BY "id" COLLATE "C" ASC
          FOR NO KEY UPDATE`;
-    const locked = rows[0];
+    const acting = rows.find((row) => row.id === adminId);
+    if (acting?.role !== "ADMIN" || !acting.isActive) throw actingAdminRefused();
+    const locked = rows.find((row) => row.id === userId);
     if (locked === undefined) return { kind: "not-found" } as const;
     if (locked.isActive !== move.from) return { kind: "invalid-state" } as const;
     const { count } = await tx.user.updateMany({
