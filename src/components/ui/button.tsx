@@ -85,21 +85,16 @@ export function Button({
   const showSpinner = loading && !disabled;
   return (
     <button
-      type={type}
       {...props}
       // A loading button stays focusable (aria-disabled, not native disabled) so keyboard focus is not
-      // lost when an action starts. Activation is blocked below. Click covers Enter and Space too.
+      // lost when an action starts. It becomes type="button" with no click handler, so Enter and
+      // Space do nothing and a submit button cannot submit. No handler is created here: Button also
+      // renders in server components, which cannot pass functions to a host element.
+      type={showSpinner ? "button" : type}
       disabled={disabled}
       aria-disabled={showSpinner || undefined}
       aria-busy={showSpinner || undefined}
-      onClick={(event) => {
-        if (showSpinner) {
-          // Also stops a submit button from submitting its form.
-          event.preventDefault();
-          return;
-        }
-        onClick?.(event);
-      }}
+      onClick={showSpinner ? undefined : onClick}
       className={cn(buttonVariants({ variant, size, fullWidth, loading: showSpinner }), className)}
     >
       {showSpinner ? (
