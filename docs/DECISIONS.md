@@ -387,3 +387,17 @@ Security headers are set in `next.config.ts` (`buildSecurityHeaders`). The CSP i
 ### D-047 Review comment rules and Docker image size (T-035, T-071, 2026-10-26)
 
 Owner approved on 2026-10-26: (1) review comment at most 2000 characters, blank or `null` stored as `null`; (2) a customer may review a delivered item after the product is archived or hidden or the store is suspended (the review is listed publicly only while the product is visible); (3) the Docker image does not use `output: "standalone"` for now. Status: ACCEPTED.
+
+### D-048 Admin review hide: un-hide offered, reason optional, double hide is 409 (SEC-092 step 2, 2026-10-29)
+
+Context: the owner chose SEC-092 remediation (1), an admin hide with an audit row (session 128; the columns are DATA_MODEL.md section 6.15, migration `20261028163543_review_admin_hide`). Choices made by backend-api when building the endpoints ([API_CONTRACTS.md section 5.9.9](API_CONTRACTS.md#599-review-moderation-sec-092-2026-10-29)):
+
+1. **Un-hide is offered** (`POST /admin/reviews/{id}/unhide`). The data model allows it (all three hide columns back to null). Reason: a mistaken hide must be reversible without a database operator; who hid it and why stays in `AuditLog`.
+2. **The reason is optional** on hide and on un-hide, the admin `reason` rule (1 to 500 characters after normalisation; blank is `400`). On hide it is stored in `Review.hiddenReason` and the audit row; on un-hide only in the audit row.
+3. **A double hide, and an un-hide of a public review, are `409 INVALID_STATE_TRANSITION`**, as every other admin move outside its table; nothing is written. The table is `REVIEW_VISIBILITY_TRANSITIONS` in `src/modules/admin/state.ts`.
+4. **`GET /admin/reviews`** lists every review, hidden ones included, so the admin page can find one; filters `productId` and `hidden`. The admin sees the comment and the author's id and name.
+5. **The audit row never holds the comment** (SR-04): `metadata` is `{ reason, productId, before: { visibility }, after: { visibility } }`.
+6. **Public reads** (the product's review list, its `total`, and the rating summary) filter `hiddenAt: null`. The customer's own order view (`GET /orders`, `GET /orders/{id}`) still shows the buyer's own review, hidden or not, and the one-review-per-item rule still counts hidden reviews.
+7. `hiddenAt` is the database clock (`now()`), not the application clock.
+
+Status: PROPOSED by backend-api; the owner may change points 1 to 4 without a data model change.

@@ -482,7 +482,7 @@ All public. All return only what the visibility rule allows ([section 3.4](#34-v
 | GET | `/categories/{slug}` | public | The `categorySummary` of one active category. Unknown or inactive category: 404. |
 | GET | `/products` | public | Paginated. Visible products only. Query below. |
 | GET | `/products/{slug}` | public | A product that is not visible: 404. |
-| GET | `/products/{slug}/reviews` | public | Paginated, newest first. Product not visible: 404. |
+| GET | `/products/{slug}/reviews` | public | Paginated, newest first. Product not visible: 404. Reviews hidden by an admin are not listed ([section 5.9.9](#599-review-moderation-sec-092-2026-10-29)). |
 | GET | `/stores/{slug}` | public | Store not `APPROVED`, or owner deactivated: 404. |
 | GET | `/stores/{slug}/products` | public | Paginated. Visible products of that store; same query as `/products`. Store not public: 404. |
 
@@ -540,7 +540,7 @@ Shapes. The block below is a catalogue of the six shapes keyed by name, not one 
 
 - `images` is ordered; the first one is the primary picture.
 - `soldOut` is `stock == 0` (BR-24). The product detail carries `stock` so that a quantity selector can be capped (BR-30).
-- `reviewSummary` is `null` when the product has no review (REQ-C-08). `averageRating` is not money.
+- `reviewSummary` is `null` when the product has no review (REQ-C-08). Reviews hidden by an admin are not counted ([section 5.9.9](#599-review-moderation-sec-092-2026-10-29)). `averageRating` is not money.
 - `comment` is plain text, or `null` when the reviewer wrote none. It is returned exactly as stored and must be rendered escaped (REQ-C-14).
 - Public responses never contain a SKU, a moderation field, a store's contact phone, or an owner id.
 
@@ -973,7 +973,7 @@ Code: `src/modules/checkout/` (schema, pricing, repository, service), `src/modul
 | The item's seller order is not `DELIVERED` (BR-11) | `409 CONFLICT`, reason `NOT_DELIVERED` |
 | The item already has a review | `409 CONFLICT`, reason `DUPLICATE_REVIEW` |
 
-The product and the reviewer are taken from the order item and the session, never from the request. `comment` is stored as plain text and returned unchanged; it is never interpreted as markup. There is no edit or delete endpoint.
+The product and the reviewer are taken from the order item and the session, never from the request. `comment` is stored as plain text and returned unchanged; it is never interpreted as markup. There is no edit or delete endpoint. An admin can hide a review from the public list and the rating summary ([section 5.9.9](#599-review-moderation-sec-092-2026-10-29)).
 
 #### 5.6.1 As built (T-035 backend, 2026-10-26)
 
@@ -1687,6 +1687,25 @@ Every body is strict: `role`, `status`, `slug`, `storeId`, `userId`, `isSample`,
 - Text and number bounds in the field table above (`q` 100, category name 100, `sortOrder` 0 to 1,000,000, `reason` 500 as for applications).
 - Store and user lists newest first; application list oldest first (as section 5.9.2 says).
 - No security event is logged for an admin action; the audit row is the record (SECURITY.md SR-04 permits one, nothing requires it).
+
+#### 5.9.9 Review moderation (SEC-092, 2026-10-29)
+
+An admin can hide a review from the public and un-hide it. Nothing is deleted: the rating and the comment stay as written. Why and the rules: SECURITY.md SEC-092, DATA_MODEL.md section 6.15, [D-048](DECISIONS.md).
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/admin/reviews` | Paginated (at most 50), newest first (`createdAt`, `id`), hidden reviews included. Filters: `productId` (opaque id), `hidden` (`true` only hidden, `false` only public). |
+| POST | `/admin/reviews/{id}/hide` | Body `{ reason? }`. Public to hidden. Already hidden: `409 INVALID_STATE_TRANSITION`. |
+| POST | `/admin/reviews/{id}/unhide` | Body `{ reason? }`. Hidden to public. Not hidden: `409 INVALID_STATE_TRANSITION`. |
+
+- **Order of checks**: as every admin `GET` and every admin mutation with a body ([section 5.9.8](#598-as-built-t-050-2026-10-23)): `Origin` (403), `Content-Type` (415), the session (401), the role `ADMIN` (403 `FORBIDDEN` for a customer and a seller of any store status, before the body is read), the body (413), the path parameter and the body (400), then the service (404, then 409). The service checks the role again before any query. Every response is `Cache-Control: no-store`. Not rate-limited.
+- **Body** (strict object): `reason` optional, a string or `null`; absent and `null` both mean no reason. The admin `reason` rule of [section 5.9.8](#598-as-built-t-050-2026-10-23): multi-line, 1 to 500 characters after normalisation; blank is `400`. Every other key, `hiddenAt`, `hiddenByUserId`, `userId`, `rating`, and `comment` included, is `400 unrecognized_keys`. An empty object `{}` is a valid body.
+- **Success** `200`, `AdminReviewDto` after the change: `{ id, rating, comment, createdAt, product: { id, title, slug }, author: { id, name }, hiddenAt, hiddenByUserId, hiddenReason }`. The three hide fields are all `null` on a public review; on a hidden one `hiddenAt` and `hiddenByUserId` are set and `hiddenReason` is the reason or `null`. `GET /admin/reviews` returns a list of the same shape. Code: `AdminReviewDto`, `listReviewsQuerySchema`, `reviewModerationBodySchema` in `src/modules/admin/schema.ts` (authoritative).
+- **Refusals**: unknown `{id}` `404 NOT_FOUND`; a double hide and an un-hide of a public review `409 INVALID_STATE_TRANSITION`. Nothing is written on any refusal, and no audit row.
+- **Mechanism**: one transaction (`ADMIN_TRANSACTION_OPTIONS`). The `Review` row is locked `FOR NO KEY UPDATE`; the move must be a row of `REVIEW_VISIBILITY_TRANSITIONS` (`src/modules/admin/state.ts`: `hide` `PUBLIC` to `HIDDEN`, `unhide` `HIDDEN` to `PUBLIC`; the visibility is `HIDDEN` exactly when `hiddenAt` is set). The guarded update names the current state (`"hiddenAt" IS NULL` for hide, `IS NOT NULL` for un-hide); zero rows is `409`. Hide sets `hiddenAt` to the database clock, `hiddenByUserId` to the session's admin (never a request value), and `hiddenReason`; un-hide sets all three to `null`. Two concurrent hides of one review: one `200`, one `409`, one audit row.
+- **Audit row**, in the same transaction: action `REVIEW_HIDDEN` or `REVIEW_UNHIDDEN`, target type `Review`, target id the review id, `metadata` `{ reason, productId, before: { visibility }, after: { visibility } }` (`visibility` `PUBLIC` or `HIDDEN`). Never the comment (SECURITY.md SR-04).
+- **Effect on public reads**: `GET /products/{slug}/reviews` (rows and `meta.total`) and `reviewSummary` of `GET /products/{slug}` count only reviews whose `hiddenAt` is null; a product whose every review is hidden has `reviewSummary: null`. An un-hide brings the review back in both. The buyer's own order (`GET /orders`, `GET /orders/{id}`) still carries the buyer's review as `review` of the item, hidden or not, and a hidden review still counts as the item's one review (`DUPLICATE_REVIEW`).
+- **Tests**: unit `src/modules/admin/state.test.ts`, `schema.test.ts`, `service.test.ts`, `src/modules/catalog/repository.test.ts`, route test `src/app/api/v1/admin/admin-routes.test.ts`; integration against PostgreSQL `tests/integration/admin/reviews.test.ts` (15 cases: guest 401, customer and seller 403 with nothing written, unknown id 404, validation, double hide, un-hide, audit rows, concurrent hides, the public list and rating summary with a hidden review).
 
 ### 5.10 Platform
 
