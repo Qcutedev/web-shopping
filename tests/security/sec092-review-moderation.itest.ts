@@ -125,7 +125,7 @@ describe("SEC-092 re-check: review moderation under attack and under races", () 
     for (const entry of audit) expect(entry.actorId).toBe(admin.userId);
     // Moves alternate under the row lock, starting from PUBLIC: the hides that succeeded equal
     // the un-hides, or exceed them by one when the review ends hidden. Counted, not ordered:
-    // createdAt is the transaction's start time, not its commit order.
+    // createdAt is a clock reading per row, not a commit sequence number.
     const hides = audit.filter((entry) => entry.action === "REVIEW_HIDDEN").length;
     const unhides = audit.filter((entry) => entry.action === "REVIEW_UNHIDDEN").length;
     expect(hides + unhides).toBe(successes);
