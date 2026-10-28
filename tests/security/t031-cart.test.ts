@@ -13,9 +13,9 @@
  * SEC-053 (a cart holds any number of distinct lines) is FIXED (re-checked 2026-10-22 at 3e2f4d1):
  * its cases are plain `it` and assert the cap of 50 lines.
  *
- * Open findings, written as `it.fails` (passes while the flaw is present):
- *   SEC-054 a hidden line shows the product's current picture, slug, and title, including content
- *           a seller wrote after approval or an admin took down.
+ * SEC-054 (a hidden line showed the product's current picture, slug, and title) is fixed by
+ * backend-api: a NOT_AVAILABLE line carries `image`, `slug`, and `title` as null. Its `it.fails`
+ * case is flipped to `it` and extended to the title; awaiting the security re-check.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -567,23 +567,96 @@ describe("SEC-054 a hidden line shows the product's current picture, slug, and t
     return line;
   }
 
-  it.fails("a NOT_AVAILABLE line carries no picture and no slug", async () => {
+  it("a NOT_AVAILABLE line carries no picture, no slug, and no title", async () => {
     const line = await editedAfterApproval();
     expect(line.unbuyableReason).toBe("NOT_AVAILABLE");
     expect(line.image).toBeNull();
     expect(line.slug).not.toBe("unapproved-slug");
+    expect(line.slug).toBeNull();
+    expect(line.title).toBeNull();
   });
 
-  it("documents the present behaviour: the unapproved title, slug, and picture are returned", async () => {
+  it("no unapproved value appears anywhere in the cart answer", async () => {
+    await editedAfterApproval();
+    const body = JSON.stringify(await getCart(ALICE));
+    expect(body).not.toContain("Unapproved text from the seller");
+    expect(body).not.toContain("unapproved-slug");
+    expect(body).not.toContain("unapproved-key");
+  });
+
+  it("the hidden line keeps its id, product id, quantity, and store group, and can be removed", async () => {
     const line = await editedAfterApproval();
+    const cart = await getCart(ALICE);
+    expect(cart.stores[0]?.store.name).toBe("store_s");
+    expect(line.id).toMatch(/^line_/);
+    expect(line.productId).toBe("p_edit");
+    expect(line.quantity).toBe(1);
     expect(line.buyable).toBe(false);
-    expect(line.unbuyableReason).toBe("NOT_AVAILABLE");
-    expect(line.title).toBe("Unapproved text from the seller");
-    expect(line.slug).toBe("unapproved-slug");
-    expect(line.image?.key).toBe("unapproved-key");
     // Price, total, and stock are withheld as the contract says.
     expect(line.unitPriceSatang).toBeNull();
     expect(line.lineTotalSatang).toBeNull();
     expect(line.stock).toBeNull();
+    expect(cart.canCheckout).toBe(false);
+    await expect(deleteCartItem(ALICE, line.id)).resolves.toEqual({ deleted: true });
+    expect((await getCart(ALICE)).stores).toEqual([]);
+  });
+
+  it("a take-down with unchanged content also withholds title, slug, and picture", async () => {
+    addProduct({ id: "p_down", title: "Taken down title", imageKey: "taken-down-key" });
+    await addCartItem(ALICE, { productId: "p_down", quantity: 2 });
+    const product = state.products.get("p_down");
+    if (product === undefined) throw new Error("fixture");
+    product.visible = false; // an admin takes it down; nothing of its content changes
+    const line = (await getCart(ALICE)).stores[0]?.items[0];
+    expect(line?.unbuyableReason).toBe("NOT_AVAILABLE");
+    expect(line?.title).toBeNull();
+    expect(line?.slug).toBeNull();
+    expect(line?.image).toBeNull();
+  });
+
+  it("a hidden line that is also sold out is NOT_AVAILABLE with no content", async () => {
+    addProduct({ id: "p_both", title: "Hidden and empty", imageKey: "k", stock: 5 });
+    await addCartItem(ALICE, { productId: "p_both", quantity: 1 });
+    const product = state.products.get("p_both");
+    if (product === undefined) throw new Error("fixture");
+    product.visible = false;
+    product.stock = 0;
+    const line = (await getCart(ALICE)).stores[0]?.items[0];
+    expect(line?.unbuyableReason).toBe("NOT_AVAILABLE");
+    expect([line?.title, line?.slug, line?.image]).toEqual([null, null, null]);
+  });
+
+  it("a visible line next to the hidden one keeps its title, slug, and picture", async () => {
+    addProduct({ id: "p_ok", title: "Visible title", imageKey: "visible-key" });
+    await addCartItem(ALICE, { productId: "p_ok", quantity: 1 });
+    await editedAfterApproval();
+    const items = (await getCart(ALICE)).stores.flatMap((s) => s.items);
+    const visible = items.find((i) => i.productId === "p_ok");
+    expect(visible?.buyable).toBe(true);
+    expect(visible?.title).toBe("Visible title");
+    expect(visible?.slug).toBe("p_ok");
+    expect(visible?.image?.key).toBe("visible-key");
+  });
+
+  it("the line shows the product's content again once it is visible again (re-approved)", async () => {
+    await editedAfterApproval();
+    const product = state.products.get("p_edit");
+    if (product === undefined) throw new Error("fixture");
+    product.visible = true; // an admin approved the edit
+    const line = (await getCart(ALICE)).stores[0]?.items[0];
+    expect(line?.buyable).toBe(true);
+    expect(line?.title).toBe("Unapproved text from the seller");
+    expect(line?.slug).toBe("unapproved-slug");
+    expect(line?.image?.key).toBe("unapproved-key");
+  });
+
+  it("a quantity change of the hidden line is refused and names no content", async () => {
+    const line = await editedAfterApproval();
+    const error = await refusal(updateCartItem(ALICE, line.id, { quantity: 2 }));
+    expect(error.status).toBe(409);
+    const text = JSON.stringify({ message: error.message, details: error.details });
+    expect(text).not.toContain("Unapproved text from the seller");
+    expect(text).not.toContain("unapproved-slug");
+    expect(text).not.toContain("unapproved-key");
   });
 });

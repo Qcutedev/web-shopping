@@ -188,13 +188,20 @@ function CartLine({
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <Link
-            id={titleId}
-            href={productHref(line.slug)}
-            className={`type-card-title hover:underline ${USER_NAME_CONTAINER_CLASS}`}
-          >
-            <UserName>{line.title}</UserName>
-          </Link>
+          {line.slug !== null && line.title !== null ? (
+            <Link
+              id={titleId}
+              href={productHref(line.slug)}
+              className={`type-card-title hover:underline ${USER_NAME_CONTAINER_CLASS}`}
+            >
+              <UserName>{line.title}</UserName>
+            </Link>
+          ) : (
+            // A NOT_AVAILABLE line has no slug, title, or picture (SEC-054): a fixed label instead.
+            <span id={titleId} className="type-card-title">
+              {th.cart.unavailableLine}
+            </span>
+          )}
           {unbuyable ? (
             <Badge variant="danger">
               {line.unbuyableReason === "SOLD_OUT" ? th.cart.soldOut : th.cart.notAvailable}

@@ -150,6 +150,9 @@ describe("getCart", () => {
       "NOT_AVAILABLE",
     ]);
     expect(cart.stores[0]?.items[0]?.image).toEqual({ key: "k1", url: "/api/files/k1" });
+    expect(cart.stores[0]?.items[0]).toMatchObject({ slug: "p1", title: "หนึ่ง" });
+    // SEC-054: the hidden line carries no slug, title, or picture.
+    expect(cart.stores[0]?.items[1]).toMatchObject({ slug: null, title: null, image: null });
     expect(cart).toMatchObject({
       itemsSubtotalSatang: 2_000,
       shippingTotalSatang: 4_000,

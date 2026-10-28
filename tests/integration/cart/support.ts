@@ -74,6 +74,10 @@ async function read<T>(response: Response): Promise<Called<T>> {
 export interface LineBody {
   id: string;
   productId: string;
+  /** `null` on a `NOT_AVAILABLE` line (SEC-054), like `title` and `image`. */
+  slug: string | null;
+  title: string | null;
+  image: { key: string; url: string } | null;
   quantity: number;
   requestedQuantity: number;
   quantityLowered: boolean;

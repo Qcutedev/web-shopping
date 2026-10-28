@@ -109,8 +109,47 @@ describe("priceLine", () => {
         unbuyableReason: "NOT_AVAILABLE",
         quantityLowered: false,
       });
-      expect(priced.title).not.toBe("");
+      // SEC-054: no content of a hidden product is returned.
+      expect(priced.title).toBeNull();
+      expect(priced.slug).toBeNull();
+      expect(priced.image).toBeNull();
     }
+  });
+
+  it("returns exactly the id, product id, and quantity of a hidden line, with no product content (SEC-054)", () => {
+    const input = line({
+      visible: false,
+      slug: "unapproved-slug",
+      title: "Unapproved title",
+      imageKey: "unapproved-key",
+      storedQuantity: 3,
+    });
+    const priced = priceLine(input);
+    expect(priced).toEqual({
+      id: input.id,
+      productId: input.productId,
+      slug: null,
+      title: null,
+      image: null,
+      unitPriceSatang: null,
+      quantity: 3,
+      lineTotalSatang: null,
+      stock: null,
+      buyable: false,
+      unbuyableReason: "NOT_AVAILABLE",
+      quantityLowered: false,
+    });
+    const text = JSON.stringify(priced);
+    expect(text).not.toContain("unapproved");
+    expect(text).not.toContain("Unapproved");
+  });
+
+  it("keeps the slug, title, and picture of a visible sold-out line (SEC-054 is about hidden lines only)", () => {
+    const input = line({ stock: 0, imageKey: "sold-out-key" });
+    const priced = priceLine(input);
+    expect(priced.slug).toBe(input.slug);
+    expect(priced.title).toBe(input.title);
+    expect(priced.image?.key).toBe("sold-out-key");
   });
 
   it("handles the largest line without leaving integers: 99 x 100,000,000 satang", () => {
@@ -171,6 +210,23 @@ describe("buildCart", () => {
       grandTotalSatang: 14_000,
       canCheckout: false,
     });
+  });
+
+  it("keeps the store name of a group whose only line is hidden, so the line can be recognised (SEC-054)", () => {
+    const hidden = line({ store: STORE_B, visible: false, title: "Hidden title" });
+    const cart = buildCart([hidden], 4_000);
+    expect(cart.stores[0]?.store).toEqual({
+      name: STORE_B.name,
+      slug: STORE_B.slug,
+      isSample: true,
+    });
+    expect(cart.stores[0]?.items[0]).toMatchObject({
+      id: hidden.id,
+      title: null,
+      slug: null,
+      image: null,
+    });
+    expect(cart.stores[0]?.shippingFeeSatang).toBe(0);
   });
 
   it("charges no fee for a store whose every line is unbuyable, and the fees add up", () => {

@@ -105,22 +105,38 @@ describe("CartView", () => {
     expect(screen.getByText(th.cart.blockedNote)).toBeTruthy();
   });
 
+  /** A hidden line as `GET /cart` returns it: no slug, title, or picture (SEC-054). */
+  function hiddenLine(): CartLineDto {
+    return line({
+      slug: null,
+      title: null,
+      image: null,
+      buyable: false,
+      unbuyableReason: "NOT_AVAILABLE",
+      unitPriceSatang: null,
+      lineTotalSatang: null,
+      stock: null,
+    });
+  }
+
   it("marks a hidden product line without price and total", () => {
-    render(
-      <CartView
-        cart={cartOf([
-          line({
-            buyable: false,
-            unbuyableReason: "NOT_AVAILABLE",
-            unitPriceSatang: null,
-            lineTotalSatang: null,
-            stock: null,
-          }),
-        ])}
-      />,
-    );
+    render(<CartView cart={cartOf([hiddenLine()])} />);
     expect(screen.getByText(th.cart.notAvailable)).toBeTruthy();
     expect(screen.queryByText(th.cart.unitPrice, { exact: false })).toBeNull();
+  });
+
+  it("names a hidden line with the fixed label and the store, links nowhere, and can remove it (SEC-054)", async () => {
+    api.removeCartItem.mockResolvedValue(ok);
+    render(<CartView cart={cartOf([hiddenLine()])} />);
+    expect(screen.getByText(th.cart.unavailableLine)).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "ร้านชา" })).toBeTruthy();
+    // No link to a product page: only the empty-state and checkout links could exist, and neither does.
+    expect(screen.queryAllByRole("link")).toEqual([]);
+    const remove = screen.getByRole("button", {
+      name: `${th.cart.remove} ${th.cart.unavailableLine}`,
+    });
+    await userEvent.click(remove);
+    await waitFor(() => expect(api.removeCartItem).toHaveBeenCalledWith("l1"));
   });
 
   it("changes a quantity through the endpoint, confirms, and refreshes", async () => {

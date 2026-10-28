@@ -37,6 +37,12 @@ const SETTINGS_ID = 1;
 // Reads (no transaction, no lock, no write)
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * The columns of a cart line read. The product's slug, title, and first picture are read for every
+ * line, because which lines are visible is known only after `findVisibleProductIds`. For a line
+ * whose product is not visible they are dropped by `priceLine` (pricing.ts) and never leave the
+ * server (SEC-054): a hidden product's current content may be unapproved or taken down.
+ */
 const CART_LINE_SELECT = {
   id: true,
   productId: true,

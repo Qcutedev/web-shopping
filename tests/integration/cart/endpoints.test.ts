@@ -15,6 +15,7 @@ import {
   createCartItem,
   createCategory,
   createProduct,
+  createProductImage,
   createStore,
 } from "../../helpers/factories";
 import { diffSnapshots, snapshotDatabase } from "../../helpers/snapshot";
@@ -178,6 +179,70 @@ describe("GET /api/v1/cart", () => {
     expect(byProduct(visible.id)).toMatchObject({ buyable: true, unbuyableReason: null });
     expect(body.data.itemsSubtotalSatang).toBe(10_000);
     expect(body.data.canCheckout).toBe(false);
+  });
+
+  it("sends no title, slug, or picture of a hidden product, edited or taken down (SEC-054)", async () => {
+    const user = await signedIn();
+    const store = await createStore();
+    const edited = await createProduct({ storeId: store.id, title: "Approved title" });
+    const takenDown = await createProduct({ storeId: store.id, title: "Taken down title" });
+    const soldOut = await createProduct({ storeId: store.id, title: "Sold out title" });
+    for (const product of [edited, takenDown, soldOut]) {
+      await createProductImage({ productId: product.id });
+      expect((await addItem(user, { productId: product.id, quantity: 1 })).status).toBe(201);
+    }
+    // A seller edit after approval (OQ-05): new text and slug, hidden until re-approved.
+    await db.product.update({
+      where: { id: edited.id },
+      data: {
+        title: "Unapproved text from the seller",
+        slug: `unapproved-${edited.id}`,
+        moderationStatus: "PENDING",
+      },
+    });
+    await db.product.update({
+      where: { id: takenDown.id },
+      data: { moderationStatus: "TAKEN_DOWN" },
+    });
+    await db.product.update({ where: { id: soldOut.id }, data: { stock: 0 } });
+    const keys = await db.productImage.findMany({
+      where: { productId: { in: [edited.id, takenDown.id] } },
+      select: { upload: { select: { storageKey: true } } },
+    });
+
+    const { status, body } = await getCart(user);
+    expect(status).toBe(200);
+    const group = body.data.stores.find((entry) => entry.store.slug === store.slug);
+    expect(group?.store.name).toBe(store.name);
+    const byProduct = (id: string) => group?.items.find((line) => line.productId === id);
+    for (const id of [edited.id, takenDown.id]) {
+      expect(byProduct(id)).toMatchObject({
+        unbuyableReason: "NOT_AVAILABLE",
+        slug: null,
+        title: null,
+        image: null,
+        unitPriceSatang: null,
+        stock: null,
+      });
+    }
+    // A sold-out product is visible: its content stays.
+    expect(byProduct(soldOut.id)).toMatchObject({
+      unbuyableReason: "SOLD_OUT",
+      slug: soldOut.slug,
+      title: "Sold out title",
+    });
+    expect(byProduct(soldOut.id)?.image).not.toBeNull();
+    const text = JSON.stringify(body);
+    expect(text).not.toContain("Unapproved text from the seller");
+    expect(text).not.toContain(`unapproved-${edited.id}`);
+    expect(text).not.toContain("Taken down title");
+    // Followed by the closing quote, so `test-upload-1` does not match `test-upload-12`.
+    for (const key of keys) expect(text).not.toContain(`${key.upload.storageKey}"`);
+
+    // The hidden line can still be removed by its id.
+    const hiddenLine = byProduct(edited.id);
+    if (hiddenLine === undefined) throw new Error("expected the hidden line");
+    expect((await deleteItem(user, hiddenLine.id)).status).toBe(200);
   });
 
   it("writes nothing, not even for a line above the stock, and the lowering is not stored", async () => {

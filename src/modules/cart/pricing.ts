@@ -17,7 +17,7 @@
  *   | visible, stock >= q| true    | null            | stored              | yes               |
  *
  * A hidden line carries no price, line total, or stock (`null`), and is never called sold out,
- * whatever its stock (BR-38). The lowering of a read is reported, never stored (BR-30; D-029).
+ * whatever its stock (BR-38). It carries no slug, title, or picture either (`null`; SEC-054). The lowering of a read is reported, never stored (BR-30; D-029).
  */
 import { imageRef } from "@/modules/catalog/image";
 
@@ -73,18 +73,23 @@ export function resolveWriteQuantity(
   return { quantity: requestedQuantity, lowered: false };
 }
 
-/** The response shape of one line, from its stored state and its product's current state. */
+/**
+ * The response shape of one line, from its stored state and its product's current state.
+ *
+ * A `NOT_AVAILABLE` line carries no content of the product: `slug`, `title`, and `image` are null
+ * (SEC-054; docs/API_CONTRACTS.md section 5.4). A hidden product's current content may be text or
+ * a picture no admin approved (a seller's edit awaiting re-approval, OQ-05) or one an admin took
+ * down, so it is never sent. The line id and the store group stay, so the customer can still
+ * recognise the line and remove it. The product page of a hidden product cannot be opened anyway.
+ */
 export function priceLine(input: LineState): CartLineDto {
-  const common = {
-    id: input.id,
-    productId: input.productId,
-    slug: input.slug,
-    title: input.title,
-    image: input.imageKey === null ? null : imageRef(input.imageKey),
-  };
+  const base = { id: input.id, productId: input.productId };
   if (!input.visible) {
     return {
-      ...common,
+      ...base,
+      slug: null,
+      title: null,
+      image: null,
       unitPriceSatang: null,
       quantity: input.storedQuantity,
       lineTotalSatang: null,
@@ -94,6 +99,12 @@ export function priceLine(input: LineState): CartLineDto {
       quantityLowered: false,
     };
   }
+  const common = {
+    ...base,
+    slug: input.slug,
+    title: input.title,
+    image: input.imageKey === null ? null : imageRef(input.imageKey),
+  };
   const unitPriceSatang = assertSatang(input.priceSatang);
   if (input.stock <= 0) {
     return {

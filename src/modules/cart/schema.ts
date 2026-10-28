@@ -98,8 +98,14 @@ export type UnbuyableReason = (typeof UNBUYABLE_REASONS)[number];
 export interface CartLineDto {
   id: string;
   productId: string;
-  slug: string;
-  title: string;
+  /** The product's slug. `null` on a `NOT_AVAILABLE` line (SEC-054). */
+  slug: string | null;
+  /** The product's current title. `null` on a `NOT_AVAILABLE` line (SEC-054). */
+  title: string | null;
+  /**
+   * The product's first picture, or `null` when it has none. Always `null` on a `NOT_AVAILABLE`
+   * line (SEC-054): a hidden product's content may be unapproved or taken down, so none is sent.
+   */
   image: ImageRef | null;
   /** The product's current price. `null` on a `NOT_AVAILABLE` line. */
   unitPriceSatang: number | null;
@@ -118,8 +124,13 @@ export interface CartLineDto {
   quantityLowered: boolean;
 }
 
-/** The line returned by `POST /cart/items` and `PATCH /cart/items/{itemId}`. */
+/**
+ * The line returned by `POST /cart/items` and `PATCH /cart/items/{itemId}`. A write succeeds only
+ * on a visible product, so its line is never `NOT_AVAILABLE` and always has a slug and a title.
+ */
 export interface CartWriteLineDto extends CartLineDto {
+  slug: string;
+  title: string;
   /** The resulting quantity the request asked for: for an add, the earlier quantity plus the sent one. */
   requestedQuantity: number;
 }

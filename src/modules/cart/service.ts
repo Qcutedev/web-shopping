@@ -156,6 +156,10 @@ function toWriteLine(outcome: WriteOutcome): CartWriteLineDto {
   });
   return {
     ...line,
+    // The product was read as visible in this transaction, so the line carries its slug and title
+    // (priceLine returns them unchanged for a visible line; SEC-054 nulls them only when hidden).
+    slug: outcome.product.slug,
+    title: outcome.product.title,
     quantityLowered: outcome.storedQuantity < outcome.requestedQuantity,
     requestedQuantity: outcome.requestedQuantity,
   };

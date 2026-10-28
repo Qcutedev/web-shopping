@@ -102,6 +102,9 @@ export const th = {
     notAvailable: "สินค้าไม่พร้อมจำหน่าย",
     notAvailableNote:
       "สินค้านี้ไม่พร้อมจำหน่ายในขณะนี้ ไม่นับรวมในยอดและสั่งซื้อไม่ได้ นำออกจากตะกร้าเพื่อชำระเงินต่อ",
+    // Proposal (SEC-054), not yet approved by the owner: shown in place of the product name of a
+    // hidden line, whose title, picture, and link the server no longer sends.
+    unavailableLine: "สินค้านี้ไม่พร้อมจำหน่าย",
     blockedNote: "มีสินค้าที่สั่งซื้อไม่ได้ในตะกร้า นำออกก่อนจึงจะชำระเงินได้",
     summaryTitle: "สรุปคำสั่งซื้อ",
     itemsSubtotal: "ราคาสินค้า",
