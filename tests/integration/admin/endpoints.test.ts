@@ -247,7 +247,11 @@ describe("users", () => {
 
   it("the last active admin cannot be deactivated (service, under the admin row locks)", async () => {
     // Every active admin but one is switched off; the acting admin is the deactivated one, so
-    // only the service can be called (a deactivated user has no session).
+    // only the service can be called (a deactivated user has no session). Since SEC-088 (D-024)
+    // the acting admin must itself be among the active admin rows the deactivation locks, so this
+    // request is refused as 401 UNAUTHENTICATED before the count. An active acting admin and a
+    // different active target are always two active admins, so LAST_ADMIN stays the backstop of
+    // the locked count; the last admin stays active either way.
     const actingAdmin = await createUser({ role: "ADMIN", isActive: false });
     const remaining = await db.user.findMany({ where: { role: "ADMIN", isActive: true } });
     const keep = remaining[0]!;
@@ -258,7 +262,7 @@ describe("users", () => {
     try {
       await expect(
         deactivateUserService(adminActor(actingAdmin.id), keep.id),
-      ).rejects.toMatchObject({ code: "CONFLICT", details: { reason: "LAST_ADMIN" } });
+      ).rejects.toMatchObject({ code: "UNAUTHENTICATED", status: 401 });
       expect((await db.user.findUniqueOrThrow({ where: { id: keep.id } })).isActive).toBe(true);
       expect(await auditRows(keep.id)).toHaveLength(0);
     } finally {

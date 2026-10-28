@@ -14,10 +14,14 @@
  *
  * Locks, always taken in this order when a transaction takes more than one: the application row
  * (`FOR UPDATE`), then the user row (by the guarded role update, or `FOR NO KEY UPDATE`), then
- * the store row. So a submission and an approval for the same user run one after the other.
+ * the store row. So a submission and an approval for the same user run one after the other. The
+ * admin decisions take one lock before all of these: the acting admin's own `User` row
+ * `FOR SHARE` (`assertActingAdmin`, SEC-088), which refuses with 401 UNAUTHENTICATED an admin
+ * deactivated after the request passed the guard.
  *
  * Nothing here logs: the rows hold names and phone numbers (SECURITY.md SR-04).
  */
+import { assertActingAdmin } from "@/modules/admin/acting-admin";
 import {
   db,
   type DbTransaction,
@@ -530,6 +534,8 @@ async function moveApplication(
 /**
  * `PENDING` to `APPROVED` in one transaction (DATA_MODEL.md section 4.1):
  *
+ *   0. the acting admin must still be an active `ADMIN` (`assertActingAdmin`; SEC-088), else 401
+ *      UNAUTHENTICATED is thrown and nothing is written;
  *   1. lock the application (`FOR UPDATE`): none is `not-found`, not `PENDING` is `not-pending`;
  *   2. lock the applicant's user row (`FOR NO KEY UPDATE`): `isActive = false` is
  *      `applicant-inactive` and nothing is written, so the application stays `PENDING` and can be
@@ -563,6 +569,7 @@ export async function approveApplicationRow(
   for (let attempt = 1; ; attempt += 1) {
     try {
       return await db.$transaction(async (tx) => {
+        await assertActingAdmin(tx, adminId);
         const application = await lockApplication(tx, applicationId);
         if (application === null) return { kind: "not-found" } as const;
         if (application.status !== "PENDING") return { kind: "not-pending" } as const;
@@ -639,8 +646,9 @@ export async function approveApplicationRow(
 }
 
 /**
- * `PENDING` to `REJECTED` with the reason, in one transaction: lock, guarded update (the role
- * stays `CUSTOMER`, no store is created), one `AuditLog` row with the reason.
+ * `PENDING` to `REJECTED` with the reason, in one transaction: the acting admin's check
+ * (`assertActingAdmin`, SEC-088), lock, guarded update (the role stays `CUSTOMER`, no store is
+ * created), one `AuditLog` row with the reason.
  */
 export async function rejectApplicationRow(
   applicationId: string,
@@ -648,6 +656,7 @@ export async function rejectApplicationRow(
   reason: string,
 ): Promise<DecisionOutcome> {
   return db.$transaction(async (tx) => {
+    await assertActingAdmin(tx, adminId);
     const application = await lockApplication(tx, applicationId);
     if (application === null) return { kind: "not-found" } as const;
     if (application.status !== "PENDING") return { kind: "not-pending" } as const;

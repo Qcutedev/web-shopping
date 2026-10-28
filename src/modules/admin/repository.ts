@@ -14,7 +14,13 @@
  * through a guarded statement whose `WHERE` names the expected current value (DATA_MODEL.md 7.6),
  * and zero affected rows is a refusal, never a silent success.
  *
- * Locks (DATA_MODEL.md 7.5). Each transaction locks only the rows of its own table group:
+ * The acting admin (SEC-088, D-024). The actor is read once per request, so every write
+ * transaction first checks that `adminId` is still an active `ADMIN` (`assertActingAdmin`, the row
+ * locked `FOR SHARE`; acting-admin.ts) and refuses with 401 UNAUTHENTICATED otherwise. A deactivation
+ * of an admin target checks it against the active admin rows it locks `FOR UPDATE` instead.
+ *
+ * Locks (DATA_MODEL.md 7.5). Each transaction first locks the acting admin's `User` row as above,
+ * then only the rows of its own table group:
  *
  *   - a user's active flag: the active admin rows (`FOR UPDATE`, id order) when the target is an
  *     admin ("not the last admin"), else the target row (`FOR NO KEY UPDATE`); then its sessions;
@@ -56,6 +62,7 @@ import { generateSlug, STORE_TRANSITIONS, type StoreStatusValue } from "@/module
 import type { Role } from "@/server/auth/actor";
 import { db, type DbTransaction, isUniqueIndexViolation, Prisma } from "@/server/db";
 
+import { actingAdminRefused, assertActingAdmin } from "./acting-admin";
 import type { AdminTargetStatus } from "./schema";
 import {
   activationMove,
@@ -337,12 +344,15 @@ interface LockedUser {
  * Deactivates a user in one transaction (REQ-A-02; DATA_MODEL.md 4.5), in this order, the first
  * failing step answering:
  *
- *   1. read the target (no lock yet): none is `not-found`;
- *   2. the target is the acting admin: `self` (SELF_DEACTIVATION);
- *   3. lock: when the target is an admin, every active admin row `FOR UPDATE` in byte order of the
- *      id (the "not the last admin" count of 7.5), so two admins deactivating each other queue;
- *      otherwise the target row `FOR NO KEY UPDATE`. The role is read again under the lock;
- *   4. already inactive: `invalid-state`;
+ *   1. read the target (no lock yet). When it is unknown or not an admin, the acting admin's row
+ *      is checked (`assertActingAdmin`, 401 UNAUTHENTICATED); then none is `not-found`;
+ *   2. when the target is an admin, every active admin row `FOR UPDATE` in byte order of the id
+ *      (the "not the last admin" count of 7.5), so two admins deactivating each other queue; the
+ *      acting admin not among them is 401 UNAUTHENTICATED (SEC-088: it was deactivated after its
+ *      request passed the guard);
+ *   3. the target is the acting admin: `self` (SELF_DEACTIVATION);
+ *   4. lock the target row: `FOR UPDATE` for an admin, else `FOR NO KEY UPDATE`. The role is read
+ *      again under the lock. Already inactive: `invalid-state`;
  *   5. an admin target that is the only active admin left: `last-admin` (LAST_ADMIN);
  *   6. the guarded update `isActive = true` to `false`, every session of the user deleted, and one
  *      audit row (`USER_DEACTIVATED`).
@@ -354,8 +364,10 @@ export async function deactivateUser(userId: string, adminId: string): Promise<A
   const move = activationMove("deactivate");
   return db.$transaction(async (tx) => {
     const target = await tx.user.findUnique({ where: { id: userId }, select: { role: true } });
+    // An admin target is checked against the admin rows locked below instead: a FOR SHARE on the
+    // acting admin's row before that FOR UPDATE would deadlock two admins removing each other.
+    if (target === null || target.role !== "ADMIN") await assertActingAdmin(tx, adminId);
     if (target === null) return { kind: "not-found" } as const;
-    if (userId === adminId) return { kind: "self" } as const;
 
     let activeAdminCount = 0;
     if (target.role === "ADMIN") {
@@ -364,8 +376,10 @@ export async function deactivateUser(userId: string, adminId: string): Promise<A
          WHERE "role" = 'ADMIN' AND "isActive" = true
          ORDER BY "id" COLLATE "C" ASC
            FOR UPDATE`;
+      if (!admins.some((admin) => admin.id === adminId)) throw actingAdminRefused();
       activeAdminCount = admins.length;
     }
+    if (userId === adminId) return { kind: "self" } as const;
     const lockedRows =
       target.role === "ADMIN"
         ? await tx.$queryRaw<LockedUser[]>`
@@ -410,6 +424,7 @@ export async function deactivateUser(userId: string, adminId: string): Promise<A
 export async function reactivateUser(userId: string, adminId: string): Promise<ActivationOutcome> {
   const move = activationMove("reactivate");
   return db.$transaction(async (tx) => {
+    await assertActingAdmin(tx, adminId);
     const rows = await tx.$queryRaw<LockedUser[]>`
       SELECT "role"::text AS "role", "isActive" FROM "User" WHERE "id" = ${userId}
          FOR NO KEY UPDATE`;
@@ -590,6 +605,7 @@ export async function moveStoreStatus(
 ): Promise<StoreMoveOutcome> {
   const sources = STORE_TRANSITIONS.filter((row) => row.to === to).map((row) => row.from);
   return db.$transaction(async (tx) => {
+    await assertActingAdmin(tx, adminId);
     const rows = await tx.$queryRaw<{ status: StoreStatusValue }[]>`
       SELECT "status"::text AS "status" FROM "Store" WHERE "id" = ${storeId} FOR NO KEY UPDATE`;
     const current = rows[0];
@@ -799,6 +815,7 @@ export async function decideProduct(
 ): Promise<DecisionOutcome> {
   const rule = moderationRule(decision);
   return db.$transaction(async (tx) => {
+    await assertActingAdmin(tx, adminId);
     const rows = await tx.$queryRaw<LockedProductState[]>`
       SELECT "storeId", "status"::text AS "status", "moderationStatus"::text AS "moderationStatus",
              "contentRevision"
@@ -890,6 +907,7 @@ export async function createCategory(
   for (let attempt = 1; ; attempt += 1) {
     try {
       return await db.$transaction(async (tx) => {
+        await assertActingAdmin(tx, adminId);
         let sortOrder = input.sortOrder;
         if (sortOrder === undefined) {
           const last = await tx.category.aggregate({ _max: { sortOrder: true } });
@@ -944,6 +962,7 @@ export async function updateCategory(
   adminId: string,
 ): Promise<CategoryUpdateOutcome> {
   return db.$transaction(async (tx) => {
+    await assertActingAdmin(tx, adminId);
     const rows = await tx.$queryRaw<LockedCategory[]>`
       SELECT "name", "slug", "sortOrder", "isActive" FROM "Category" WHERE "id" = ${categoryId}
          FOR NO KEY UPDATE`;
@@ -1003,6 +1022,7 @@ export async function deleteCategory(
 ): Promise<CategoryDeleteOutcome> {
   try {
     return await db.$transaction(async (tx) => {
+      await assertActingAdmin(tx, adminId);
       const rows = await tx.$queryRaw<LockedCategory[]>`
         SELECT "name", "slug", "sortOrder", "isActive" FROM "Category" WHERE "id" = ${categoryId}
            FOR UPDATE`;
@@ -1214,6 +1234,7 @@ export async function moveSellerOrderAsAdmin(
   const sources = fulfilmentSourceStates(to, "ADMIN");
   if (sources.length === 0) throw new Error("admin: a fulfilment move with no source state.");
   return db.$transaction(async (tx) => {
+    await assertActingAdmin(tx, adminId);
     const rows = await tx.$queryRaw<LockedSellerOrder[]>`
       SELECT so."orderId", so."storeId", so."fulfilmentStatus"::text AS "fulfilmentStatus",
              o."paymentStatus"::text AS "paymentStatus"
@@ -1297,6 +1318,7 @@ export async function updateSettings(
   adminId: string,
 ): Promise<SettingsRow> {
   return db.$transaction(async (tx) => {
+    await assertActingAdmin(tx, adminId);
     const rows = await tx.$queryRaw<{ flatShippingFeeSatang: number; commissionRateBps: number }[]>`
       SELECT "flatShippingFeeSatang", "commissionRateBps" FROM "MarketplaceSettings"
        WHERE "id" = ${SETTINGS_ROW_ID}
@@ -1532,6 +1554,7 @@ export async function moveReviewVisibility(
 ): Promise<ReviewVisibilityOutcome> {
   const move = reviewVisibilityMove(action);
   return db.$transaction(async (tx) => {
+    await assertActingAdmin(tx, adminId);
     const rows = await tx.$queryRaw<{ hiddenAt: Date | null; productId: string }[]>`
       SELECT "hiddenAt", "productId" FROM "Review" WHERE "id" = ${reviewId} FOR NO KEY UPDATE`;
     const current = rows[0];
