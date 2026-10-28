@@ -114,7 +114,8 @@ model User {
   reviewedApplications SellerApplication[]   @relation("SellerApplicationReviewer")
   cart                 Cart?
   orders               Order[]
-  reviews              Review[]
+  reviews              Review[]              @relation("ReviewAuthor")
+  hiddenReviews        Review[]              @relation("ReviewHiddenBy")
   auditLogs            AuditLog[]
   settingsUpdates      MarketplaceSettings[]
 
@@ -477,10 +478,21 @@ model Review {
   productId   String
   product     Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
   userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  user        User      @relation("ReviewAuthor", fields: [userId], references: [id], onDelete: Restrict)
   rating      Int
   comment     String?
   createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime  @default(now()) @updatedAt @db.Timestamptz(3)
+
+  // Admin hide (SECURITY.md SEC-092; DATA_MODEL.md section 6.15). All three null: the review is
+  // public. `hiddenAt` and `hiddenByUserId` set: hidden from the public list and the rating
+  // summary; `hiddenReason` is optional. Raw SQL: "Review_hidden_pair_check",
+  // "Review_hiddenReason_check" (1 to 500 characters), and the partial index
+  // "Review_productId_createdAt_visible_idx" (WHERE "hiddenAt" IS NULL).
+  hiddenAt       DateTime? @db.Timestamptz(3)
+  hiddenByUserId String?
+  hiddenBy       User?     @relation("ReviewHiddenBy", fields: [hiddenByUserId], references: [id], onDelete: Restrict)
+  hiddenReason   String?
 
   @@unique([orderItemId], map: "Review_orderItemId_key")
   @@index([productId, createdAt])
