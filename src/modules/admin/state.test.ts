@@ -12,6 +12,10 @@ import {
   judgeModerationDecision,
   MODERATION_DECISIONS,
   type ModerationDecision,
+  REVIEW_VISIBILITIES,
+  REVIEW_VISIBILITY_TRANSITIONS,
+  reviewVisibilityMove,
+  reviewVisibilityOf,
 } from "./state";
 
 const ALLOWED: Record<ModerationDecision, (status: string, moderation: string) => boolean> = {
@@ -96,5 +100,31 @@ describe("activationMove", () => {
   it("deactivate goes true to false, reactivate false to true", () => {
     expect(activationMove("deactivate")).toEqual({ from: true, to: false });
     expect(activationMove("reactivate")).toEqual({ from: false, to: true });
+  });
+});
+
+describe("review visibility table (SEC-092; DATA_MODEL.md 6.15)", () => {
+  it("has exactly hide PUBLIC to HIDDEN and unhide HIDDEN to PUBLIC", () => {
+    expect(REVIEW_VISIBILITY_TRANSITIONS).toEqual([
+      { action: "hide", from: "PUBLIC", to: "HIDDEN" },
+      { action: "unhide", from: "HIDDEN", to: "PUBLIC" },
+    ]);
+    expect(Object.isFrozen(REVIEW_VISIBILITY_TRANSITIONS)).toBe(true);
+    expect(reviewVisibilityMove("hide")).toEqual({ from: "PUBLIC", to: "HIDDEN" });
+    expect(reviewVisibilityMove("unhide")).toEqual({ from: "HIDDEN", to: "PUBLIC" });
+  });
+
+  it("only hiddenAt decides the visibility", () => {
+    expect(reviewVisibilityOf(null)).toBe("PUBLIC");
+    expect(reviewVisibilityOf(new Date(0))).toBe("HIDDEN");
+  });
+
+  it("refuses a double hide and an un-hide of a public review (no row for the source)", () => {
+    for (const visibility of REVIEW_VISIBILITIES) {
+      const sources = REVIEW_VISIBILITY_TRANSITIONS.filter((row) => row.from === visibility);
+      expect(sources).toHaveLength(1);
+    }
+    expect(reviewVisibilityMove("hide").from).not.toBe("HIDDEN");
+    expect(reviewVisibilityMove("unhide").from).not.toBe("PUBLIC");
   });
 });

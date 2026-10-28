@@ -35,6 +35,9 @@ import * as productItem from "./products/[id]/route";
 import * as productTakedown from "./products/[id]/takedown/route";
 import * as products from "./products/route";
 import * as reports from "./reports/route";
+import * as reviewHide from "./reviews/[id]/hide/route";
+import * as reviewUnhide from "./reviews/[id]/unhide/route";
+import * as reviews from "./reviews/route";
 import * as sellerOrderStatus from "./seller-orders/[id]/status/route";
 import * as settings from "./settings/route";
 import * as storeReinstate from "./stores/[id]/reinstate/route";
@@ -66,11 +69,13 @@ vi.mock("@/modules/admin/service", () => ({
   getReport: vi.fn(),
   getSettings: vi.fn(),
   getSummary: vi.fn(),
+  hideReview: vi.fn(),
   listApplications: vi.fn(),
   listAuditLogs: vi.fn(),
   listCategories: vi.fn(),
   listOrders: vi.fn(),
   listProducts: vi.fn(),
+  listReviews: vi.fn(),
   listStores: vi.fn(),
   listUsers: vi.fn(),
   reactivateUser: vi.fn(),
@@ -79,6 +84,7 @@ vi.mock("@/modules/admin/service", () => ({
   reinstateStore: vi.fn(),
   suspendStore: vi.fn(),
   takedownProduct: vi.fn(),
+  unhideReview: vi.fn(),
   updateCategory: vi.fn(),
   updateSettings: vi.fn(),
 }));
@@ -339,6 +345,32 @@ const ROUTES: RouteCase[] = [
     kind: "list",
     service: "listAuditLogs",
   },
+  {
+    name: "GET /admin/reviews",
+    file: "reviews/route.ts",
+    handler: reviews.GET,
+    method: "GET",
+    kind: "list",
+    service: "listReviews",
+  },
+  {
+    name: "POST /admin/reviews/{id}/hide",
+    file: "reviews/[id]/hide/route.ts",
+    handler: reviewHide.POST as Handler,
+    method: "POST",
+    kind: "json",
+    service: "hideReview",
+    body: { reason: "สแปม" },
+  },
+  {
+    name: "POST /admin/reviews/{id}/unhide",
+    file: "reviews/[id]/unhide/route.ts",
+    handler: reviewUnhide.POST as Handler,
+    method: "POST",
+    kind: "json",
+    service: "unhideReview",
+    body: {},
+  },
 ];
 
 interface SendOptions {
@@ -533,6 +565,28 @@ describe("parsed input reaches the service", () => {
     expect((await send(route, { body: { requireProductApproval: false } })).status).toBe(400);
     expect((await send(route, { body: { commissionRateBps: 250 } })).status).toBe(400);
     expect(anyServiceCalled()).toBe(false);
+  });
+
+  it("a review hide passes the id and the normalised reason; hiddenByUserId is refused", async () => {
+    const route = ROUTES.find((entry) => entry.name === "POST /admin/reviews/{id}/hide");
+    await send(route as RouteCase, { id: "r9", body: { reason: " สแปม " } });
+    expect(serviceMock("hideReview")).toHaveBeenCalledWith(ADMIN, "r9", { reason: "สแปม" });
+    vi.clearAllMocks();
+    const forged = await send(route as RouteCase, { body: { hiddenByUserId: "someone" } });
+    expect(forged.status).toBe(400);
+    expect((await send(route as RouteCase, { body: { reason: "   " } })).status).toBe(400);
+    expect(anyServiceCalled()).toBe(false);
+  });
+
+  it("the review list passes productId and hidden", async () => {
+    const route = ROUTES.find((entry) => entry.name === "GET /admin/reviews") as RouteCase;
+    await send(route, { query: "productId=p1&hidden=true" });
+    expect(serviceMock("listReviews")).toHaveBeenCalledWith(ADMIN, {
+      page: 1,
+      pageSize: 20,
+      productId: "p1",
+      hidden: true,
+    });
   });
 
   it("a report without both ends is 400", async () => {

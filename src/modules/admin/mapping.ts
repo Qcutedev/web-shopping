@@ -13,6 +13,7 @@ import type {
   AdminCategoryDto,
   AdminOrderDto,
   AdminProductDto,
+  AdminReviewDto,
   AdminStoreDto,
   AdminSummaryDto,
   AdminUserDto,
@@ -28,6 +29,7 @@ import type {
   CategoryRow,
   ProductRow,
   ReportRows,
+  ReviewRow,
   SettingsRow,
   StoreRow,
   SummaryRows,
@@ -213,5 +215,23 @@ export function toAuditLogDto(row: AuditRow): AuditLogDto {
     targetId: row.targetId,
     metadata: row.metadata as AuditMetadata,
     createdAt: row.createdAt.toISOString(),
+  };
+}
+
+/**
+ * A review as an admin sees it (section 5.9.9). The hide fields are taken as stored; the CHECK
+ * `Review_hidden_pair_check` keeps them all null on a public review.
+ */
+export function toAdminReviewDto(row: ReviewRow): AdminReviewDto {
+  return {
+    id: row.id,
+    rating: row.rating,
+    comment: row.comment,
+    createdAt: row.createdAt.toISOString(),
+    product: { id: row.product.id, title: row.product.title, slug: row.product.slug },
+    author: { id: row.author.id, name: row.author.name },
+    hiddenAt: row.hiddenAt === null ? null : row.hiddenAt.toISOString(),
+    hiddenByUserId: row.hiddenByUserId,
+    hiddenReason: row.hiddenReason,
   };
 }

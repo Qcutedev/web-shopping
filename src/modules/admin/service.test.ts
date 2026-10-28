@@ -34,6 +34,8 @@ const repo = vi.hoisted(() => ({
   readSummaryRows: vi.fn(),
   readReportRows: vi.fn(),
   listAuditLogs: vi.fn(),
+  listReviews: vi.fn(),
+  moveReviewVisibility: vi.fn(),
 }));
 const sellers = vi.hoisted(() => ({
   approveApplication: vi.fn(),
@@ -99,6 +101,9 @@ const CALLS: [string, (who: Actor) => Promise<unknown>][] = [
   ["getSummary", (who) => service.getSummary(who)],
   ["getReport", (who) => service.getReport(who, REPORT_RANGE)],
   ["listAuditLogs", (who) => service.listAuditLogs(who, PAGE)],
+  ["listReviews", (who) => service.listReviews(who, PAGE)],
+  ["hideReview", (who) => service.hideReview(who, "r1", { reason: "spam" })],
+  ["unhideReview", (who) => service.unhideReview(who, "r1", {})],
 ];
 
 async function codeOf(promise: Promise<unknown>): Promise<string> {
@@ -330,5 +335,64 @@ describe("settings, summary, report, audit", () => {
       { action: "STORE_SUSPENDED", targetId: "s1" },
       expect.objectContaining(PAGE),
     );
+  });
+});
+
+describe("review moderation (SEC-092)", () => {
+  const REVIEW_ROW = {
+    id: "r1",
+    productId: "p1",
+    userId: "u1",
+    rating: 1,
+    comment: "text",
+    createdAt: new Date("2026-10-20T00:00:00Z"),
+    hiddenAt: new Date("2026-10-28T00:00:00Z"),
+    hiddenByUserId: "user_me",
+    hiddenReason: "spam",
+    product: { id: "p1", title: "T", slug: "t" },
+    author: { id: "u1", name: "A" },
+  };
+
+  it("list passes the filters and the page", async () => {
+    repo.listReviews.mockResolvedValue(EMPTY);
+    await service.listReviews(ADMIN, { ...PAGE, productId: "p1", hidden: true });
+    expect(repo.listReviews).toHaveBeenCalledWith(
+      { productId: "p1", hidden: true },
+      expect.objectContaining(PAGE),
+    );
+  });
+
+  it("hide passes the reason and the session's admin id; the row maps to AdminReviewDto", async () => {
+    repo.moveReviewVisibility.mockResolvedValue({ kind: "done", row: REVIEW_ROW });
+    const dto = await service.hideReview(ADMIN, "r1", { reason: "spam" });
+    expect(repo.moveReviewVisibility).toHaveBeenCalledWith("r1", "hide", "spam", "user_me");
+    expect(dto).toEqual({
+      id: "r1",
+      rating: 1,
+      comment: "text",
+      createdAt: "2026-10-20T00:00:00.000Z",
+      product: { id: "p1", title: "T", slug: "t" },
+      author: { id: "u1", name: "A" },
+      hiddenAt: "2026-10-28T00:00:00.000Z",
+      hiddenByUserId: "user_me",
+      hiddenReason: "spam",
+    });
+  });
+
+  it("an absent or null reason is passed as null", async () => {
+    repo.moveReviewVisibility.mockResolvedValue({ kind: "done", row: REVIEW_ROW });
+    await service.hideReview(ADMIN, "r1", {});
+    expect(repo.moveReviewVisibility).toHaveBeenLastCalledWith("r1", "hide", null, "user_me");
+    await service.unhideReview(ADMIN, "r1", { reason: null });
+    expect(repo.moveReviewVisibility).toHaveBeenLastCalledWith("r1", "unhide", null, "user_me");
+  });
+
+  it.each([
+    ["not-found", "NOT_FOUND"],
+    ["invalid-state", "INVALID_STATE_TRANSITION"],
+  ])("hide and unhide outcome %s is %s", async (kind, code) => {
+    repo.moveReviewVisibility.mockResolvedValue({ kind });
+    expect(await codeOf(service.hideReview(ADMIN, "r1", {}))).toBe(code);
+    expect(await codeOf(service.unhideReview(ADMIN, "r1", {}))).toBe(code);
   });
 });

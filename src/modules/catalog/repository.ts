@@ -213,8 +213,9 @@ export async function findVisibleProductBySlug(
     select: PRODUCT_DETAIL_SELECT,
   });
   if (product === null) return null;
+  // Hidden reviews (SEC-092, DATA_MODEL 6.15) are not part of the public rating summary.
   const aggregate = await db.review.aggregate({
-    where: { productId: product.id },
+    where: { productId: product.id, hiddenAt: null },
     _count: { _all: true },
     _sum: { rating: true },
   });
@@ -255,7 +256,8 @@ export async function findReviewsOfVisibleProduct(
 ): Promise<PageResult<ReviewRow> | null> {
   const productId = await findVisibleProductIdBySlug(slug);
   if (productId === null) return null;
-  const where = { productId } satisfies Prisma.ReviewWhereInput;
+  // Hidden reviews (SEC-092, DATA_MODEL 6.15) are never listed publicly.
+  const where = { productId, hiddenAt: null } satisfies Prisma.ReviewWhereInput;
   const total = await db.review.count({ where });
   const skip = offsetOf(request);
   if (skip >= total) return { rows: [], total };

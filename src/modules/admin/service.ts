@@ -36,6 +36,7 @@ import {
   toAdminCategoryDto,
   toAdminOrderDto,
   toAdminProductDto,
+  toAdminReviewDto,
   toAdminStoreDto,
   toAdminSummaryDto,
   toAdminUserDto,
@@ -49,6 +50,7 @@ import {
   type AdminCategoryDto,
   type AdminOrderDto,
   type AdminProductDto,
+  type AdminReviewDto,
   type AdminSellerOrderStatusBody,
   type AdminStoreDto,
   type AdminSummaryDto,
@@ -62,12 +64,14 @@ import {
   type ListCategoriesQuery,
   type ListOrdersQuery,
   type ListProductsQuery,
+  type ListReviewsQuery,
   type ListStoresQuery,
   type ListUsersQuery,
   type Page,
   type ProductReasonBody,
   type ReportDto,
   type ReportQuery,
+  type ReviewModerationBody,
   type SettingsDto,
   type StoreReasonBody,
   type UpdateCategoryBody,
@@ -472,6 +476,61 @@ export async function getSummary(actor: Actor): Promise<AdminSummaryDto> {
 export async function getReport(actor: Actor, query: ReportQuery): Promise<ReportDto> {
   adminId(actor);
   return toReportDto(query.from, query.to, await repo.readReportRows(query.from, query.to));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Review moderation (SECURITY.md SEC-092; DATA_MODEL.md section 6.15)
+// ---------------------------------------------------------------------------------------------
+
+/** GET /admin/reviews: paginated, newest first, hidden reviews included unless filtered out. */
+export async function listReviews(
+  actor: Actor,
+  query: ListReviewsQuery,
+): Promise<Page<AdminReviewDto>> {
+  adminId(actor);
+  const filter: repo.ReviewFilter = {};
+  if (query.productId !== undefined) filter.productId = query.productId;
+  if (query.hidden !== undefined) filter.hidden = query.hidden;
+  return pageOf(await repo.listReviews(filter, query), query, toAdminReviewDto);
+}
+
+function reviewMoved(outcome: repo.ReviewVisibilityOutcome): AdminReviewDto {
+  switch (outcome.kind) {
+    case "done":
+      return toAdminReviewDto(outcome.row);
+    case "not-found":
+      throw adminNotFound();
+    case "invalid-state":
+      throw invalidStateTransition();
+  }
+}
+
+/**
+ * POST /admin/reviews/{id}/hide: the review leaves the product's public list and its rating
+ * summary; nothing is deleted. Unknown: 404. Already hidden: 409 INVALID_STATE_TRANSITION.
+ */
+export async function hideReview(
+  actor: Actor,
+  reviewId: string,
+  body: ReviewModerationBody,
+): Promise<AdminReviewDto> {
+  const admin = adminId(actor);
+  return reviewMoved(await repo.moveReviewVisibility(reviewId, "hide", body.reason ?? null, admin));
+}
+
+/**
+ * POST /admin/reviews/{id}/unhide: the review is public again, the hide fields cleared; who hid it
+ * stays in the audit log. Unknown: 404. Not hidden: 409 INVALID_STATE_TRANSITION.
+ */
+export async function unhideReview(
+  actor: Actor,
+  reviewId: string,
+  body: ReviewModerationBody,
+): Promise<AdminReviewDto> {
+  const admin = adminId(actor);
+  return reviewMoved(
+    await repo.moveReviewVisibility(reviewId, "unhide", body.reason ?? null, admin),
+  );
 }
 
 /** GET /admin/audit-logs: paginated, newest first. Read-only: nothing edits or deletes an entry. */

@@ -29,7 +29,8 @@
  *     `Cart` and `Order`. The `Order` row is read, not locked: its payment status can still move
  *     from `PENDING` while an admin cancels, and the payment failure then finds the part cancelled
  *     and its items already claimed (BR-20, D-028);
- *   - the settings: the single row, `FOR UPDATE`.
+ *   - the settings: the single row, `FOR UPDATE`;
+ *   - a review's visibility (SEC-092): the `Review` row, `FOR NO KEY UPDATE`.
  *
  * No transaction here locks a row of both the seller chain (`Store`, `Category`) and the cart and
  * order chain (`Cart`, `Order`, `SellerOrder`), as DATA_MODEL.md 7.5 requires.
@@ -56,7 +57,14 @@ import type { Role } from "@/server/auth/actor";
 import { db, type DbTransaction, isUniqueIndexViolation, Prisma } from "@/server/db";
 
 import type { AdminTargetStatus } from "./schema";
-import { activationMove, type ModerationDecision, moderationRule } from "./state";
+import {
+  activationMove,
+  type ModerationDecision,
+  moderationRule,
+  type ReviewVisibilityAction,
+  reviewVisibilityMove,
+  reviewVisibilityOf,
+} from "./state";
 
 /** Interactive transaction limits of an admin write. */
 export const ADMIN_TRANSACTION_OPTIONS = { maxWait: 5_000, timeout: 10_000 } as const;
@@ -156,6 +164,8 @@ export const AUDIT_ACTIONS = {
   sellerOrderCancelled: "SELLER_ORDER_CANCELLED",
   sellerOrderDelivered: "SELLER_ORDER_DELIVERED",
   settingsUpdated: "SETTINGS_UPDATED",
+  reviewHidden: "REVIEW_HIDDEN",
+  reviewUnhidden: "REVIEW_UNHIDDEN",
 } as const;
 
 /** Every target type this module writes (`AuditLog.targetType`). */
@@ -166,6 +176,7 @@ export const AUDIT_TARGETS = {
   category: "Category",
   sellerOrder: "SellerOrder",
   settings: "MarketplaceSettings",
+  review: "Review",
 } as const;
 
 export interface AuditEntry {
@@ -1410,4 +1421,155 @@ export async function readReportRows(from: Date, to: Date): Promise<ReportRows> 
       newSellerCount,
     };
   });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Review moderation (SECURITY.md SEC-092; DATA_MODEL.md section 6.15)
+// ---------------------------------------------------------------------------------------------
+
+const REVIEW_SCALAR_SELECT = {
+  id: true,
+  productId: true,
+  userId: true,
+  rating: true,
+  comment: true,
+  createdAt: true,
+  hiddenAt: true,
+  hiddenByUserId: true,
+  hiddenReason: true,
+} as const satisfies Prisma.ReviewSelect;
+
+type ReviewScalarRow = Prisma.ReviewGetPayload<{ select: typeof REVIEW_SCALAR_SELECT }>;
+
+export interface ReviewRow extends ReviewScalarRow {
+  product: { id: string; title: string; slug: string };
+  author: { id: string; name: string };
+}
+
+type ReviewHydrationClient = Pick<DbTransaction, "product" | "user">;
+
+/** Adds the product and the author to each row, two scalar reads (DATA_MODEL.md 7.8). */
+async function hydrateReviews(
+  client: ReviewHydrationClient,
+  rows: ReviewScalarRow[],
+): Promise<ReviewRow[]> {
+  if (rows.length === 0) return [];
+  const products = await client.product.findMany({
+    where: { id: { in: [...new Set(rows.map((row) => row.productId))] } },
+    select: { id: true, title: true, slug: true },
+  });
+  const authors = await client.user.findMany({
+    where: { id: { in: [...new Set(rows.map((row) => row.userId))] } },
+    select: { id: true, name: true },
+  });
+  const productById = new Map(products.map((product) => [product.id, product]));
+  const authorById = new Map(authors.map((author) => [author.id, author]));
+  return rows.map((row) => {
+    const product = productById.get(row.productId);
+    const author = authorById.get(row.userId);
+    if (product === undefined || author === undefined) {
+      throw new Error("admin: a review's product or author is missing.");
+    }
+    return { ...row, product, author };
+  });
+}
+
+export interface ReviewFilter {
+  productId?: string;
+  hidden?: boolean;
+}
+
+/**
+ * One page of reviews, newest first, then `id`; hidden reviews included unless filtered out. An
+ * admin read, so it uses `Review_productId_createdAt_idx`, not the partial index of the public
+ * reads (DATA_MODEL.md 6.15).
+ */
+export async function listReviews(
+  filter: ReviewFilter,
+  page: PageRequest,
+): Promise<PageRows<ReviewRow>> {
+  const where: Prisma.ReviewWhereInput = {
+    ...(filter.productId === undefined ? {} : { productId: filter.productId }),
+    ...(filter.hidden === undefined ? {} : { hiddenAt: filter.hidden ? { not: null } : null }),
+  };
+  return snapshot(async (tx) => {
+    const total = await tx.review.count({ where });
+    if (skipOf(page) >= total) return { rows: [], total };
+    const rows = await tx.review.findMany({
+      where,
+      select: REVIEW_SCALAR_SELECT,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      skip: skipOf(page),
+      take: page.pageSize,
+    });
+    return { rows: await hydrateReviews(tx, rows), total };
+  });
+}
+
+export type ReviewVisibilityOutcome =
+  { kind: "done"; row: ReviewRow } | { kind: "not-found" } | { kind: "invalid-state" };
+
+/**
+ * Hides or un-hides a review in one transaction (SEC-092; DATA_MODEL.md 6.15), in this order:
+ *
+ *   1. lock the `Review` row `FOR NO KEY UPDATE` (none is `not-found`);
+ *   2. its visibility must be the action's source in `REVIEW_VISIBILITY_TRANSITIONS`
+ *      (`invalid-state` otherwise: a double hide, or an un-hide of a public review);
+ *   3. the guarded update (D-024): a hide is `WHERE id AND "hiddenAt" IS NULL` and sets
+ *      `hiddenAt` to the database clock, `hiddenByUserId` to the session's admin, and
+ *      `hiddenReason`; an un-hide is `WHERE id AND "hiddenAt" IS NOT NULL` and sets all three to
+ *      null. Zero rows is `invalid-state`;
+ *   4. one audit row (`REVIEW_HIDDEN` or `REVIEW_UNHIDDEN`, target `Review`): the reason, the
+ *      product id, and the before and after visibility. Never the comment (SR-04).
+ *
+ * The review's rating and comment are never changed; nothing is deleted.
+ */
+export async function moveReviewVisibility(
+  reviewId: string,
+  action: ReviewVisibilityAction,
+  reason: string | null,
+  adminId: string,
+): Promise<ReviewVisibilityOutcome> {
+  const move = reviewVisibilityMove(action);
+  return db.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<{ hiddenAt: Date | null; productId: string }[]>`
+      SELECT "hiddenAt", "productId" FROM "Review" WHERE "id" = ${reviewId} FOR NO KEY UPDATE`;
+    const current = rows[0];
+    if (current === undefined) return { kind: "not-found" } as const;
+    if (reviewVisibilityOf(current.hiddenAt) !== move.from) {
+      return { kind: "invalid-state" } as const;
+    }
+    const count =
+      move.to === "HIDDEN"
+        ? await tx.$executeRaw`
+            UPDATE "Review"
+               SET "hiddenAt" = now(), "hiddenByUserId" = ${adminId},
+                   "hiddenReason" = ${reason}, "updatedAt" = now()
+             WHERE "id" = ${reviewId} AND "hiddenAt" IS NULL`
+        : await tx.$executeRaw`
+            UPDATE "Review"
+               SET "hiddenAt" = NULL, "hiddenByUserId" = NULL, "hiddenReason" = NULL,
+                   "updatedAt" = now()
+             WHERE "id" = ${reviewId} AND "hiddenAt" IS NOT NULL`;
+    if (count !== 1) return { kind: "invalid-state" } as const;
+    await writeAudit(tx, {
+      actorId: adminId,
+      action: move.to === "HIDDEN" ? AUDIT_ACTIONS.reviewHidden : AUDIT_ACTIONS.reviewUnhidden,
+      targetType: AUDIT_TARGETS.review,
+      targetId: reviewId,
+      metadata: {
+        reason,
+        productId: current.productId,
+        before: { visibility: move.from },
+        after: { visibility: move.to },
+      },
+    });
+    const row = await tx.review.findUniqueOrThrow({
+      where: { id: reviewId },
+      select: REVIEW_SCALAR_SELECT,
+    });
+    const [hydrated] = await hydrateReviews(tx, [row]);
+    if (hydrated === undefined) throw new Error("admin: a review read back is missing.");
+    return { kind: "done", row: hydrated } as const;
+  }, ADMIN_TRANSACTION_OPTIONS);
 }

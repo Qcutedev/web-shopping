@@ -17,11 +17,13 @@ import {
   listCategoriesQuerySchema,
   listOrdersQuerySchema,
   listProductsQuerySchema,
+  listReviewsQuerySchema,
   listStoresQuerySchema,
   listUsersQuerySchema,
   MAX_PAGE_SIZE,
   productReasonBodySchema,
   reportQuerySchema,
+  reviewModerationBodySchema,
   storeReasonBodySchema,
   updateCategoryBodySchema,
   updateSettingsBodySchema,
@@ -39,6 +41,7 @@ const LISTS: [string, ZodType][] = [
   ["categories", listCategoriesQuerySchema],
   ["orders", listOrdersQuerySchema],
   ["audit logs", listAuditLogsQuerySchema],
+  ["reviews", listReviewsQuerySchema],
 ];
 
 describe("every admin list is paginated with a page size of at most 50 (REQ-N-06)", () => {
@@ -271,5 +274,34 @@ describe("settings (REQ-A-09, BR-17, BR-28)", () => {
     expect(accepts(updateSettingsBodySchema, { commissionRateBps: 500, updatedById: "u" })).toBe(
       false,
     );
+  });
+});
+
+describe("review moderation (SEC-092)", () => {
+  it("list parses productId and hidden", () => {
+    expect(listReviewsQuerySchema.parse({ productId: "p1", hidden: "true" })).toEqual({
+      page: 1,
+      pageSize: 20,
+      productId: "p1",
+      hidden: true,
+    });
+    expect(listReviewsQuerySchema.parse({ hidden: "false" }).hidden).toBe(false);
+    expect(accepts(listReviewsQuerySchema, { hidden: "yes" })).toBe(false);
+    expect(accepts(listReviewsQuerySchema, { productId: "" })).toBe(false);
+    expect(accepts(listReviewsQuerySchema, { productId: "x".repeat(201) })).toBe(false);
+  });
+
+  it("the body is strict, the reason optional and 1 to 500 characters after normalisation", () => {
+    expect(reviewModerationBodySchema.parse({})).toEqual({});
+    expect(reviewModerationBodySchema.parse({ reason: null })).toEqual({ reason: null });
+    expect(reviewModerationBodySchema.parse({ reason: "  สแปม \r\n" })).toEqual({ reason: "สแปม" });
+    expect(accepts(reviewModerationBodySchema, { reason: "ก".repeat(500) })).toBe(true);
+    expect(accepts(reviewModerationBodySchema, { reason: "ก".repeat(501) })).toBe(false);
+    expect(accepts(reviewModerationBodySchema, { reason: "   " })).toBe(false);
+    expect(accepts(reviewModerationBodySchema, { reason: "" })).toBe(false);
+    expect(accepts(reviewModerationBodySchema, { reason: 5 })).toBe(false);
+    for (const key of ["hiddenAt", "hiddenByUserId", "userId", "productId", "rating", "comment"]) {
+      expect(accepts(reviewModerationBodySchema, { [key]: "x" })).toBe(false);
+    }
   });
 });

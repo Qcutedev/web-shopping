@@ -492,3 +492,44 @@ export interface AuditLogDto {
   metadata: AuditMetadata;
   createdAt: string;
 }
+
+// ---------------------------------------------------------------------------------------------
+// 5.9.9 Review moderation (SECURITY.md SEC-092; DATA_MODEL.md section 6.15)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * `GET /admin/reviews`: newest first, hidden reviews included. Filters: `productId`, `hidden`
+ * (`true` only hidden, `false` only public).
+ */
+export const listReviewsQuerySchema = paginationQuerySchema.extend({
+  productId: queryId.optional(),
+  hidden: booleanParam.optional(),
+});
+export type ListReviewsQuery = z.infer<typeof listReviewsQuerySchema>;
+
+/**
+ * Body of `hide` and `unhide`: an optional reason, the admin reason rule (1 to 500 characters
+ * after normalisation; blank is 400). Absent and `null` both mean "no reason". A hide stores it in
+ * `Review.hiddenReason` and the audit row; an un-hide writes it to the audit row only.
+ */
+export const reviewModerationBodySchema = z.strictObject({
+  reason: reviewReasonSchema.nullable().optional(),
+});
+export type ReviewModerationBody = z.infer<typeof reviewModerationBodySchema>;
+
+/**
+ * A review as an admin sees it (section 5.9.9): the customer's text as stored, the product it is
+ * on, the author, and the hide fields. `hiddenAt`, `hiddenByUserId`, and `hiddenReason` are all
+ * null while the review is public.
+ */
+export interface AdminReviewDto {
+  id: string;
+  rating: number;
+  comment: string | null;
+  createdAt: string;
+  product: { id: string; title: string; slug: string };
+  author: { id: string; name: string };
+  hiddenAt: string | null;
+  hiddenByUserId: string | null;
+  hiddenReason: string | null;
+}

@@ -6,6 +6,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const findFirst = vi.fn();
 const aggregate = vi.fn();
+const count = vi.fn();
+const findMany = vi.fn();
 
 vi.mock("@/server/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/server/db")>();
@@ -13,17 +15,46 @@ vi.mock("@/server/db", async (importOriginal) => {
     ...actual,
     db: {
       product: { findFirst: (...args: unknown[]) => findFirst(...args) },
-      review: { aggregate: (...args: unknown[]) => aggregate(...args) },
+      review: {
+        aggregate: (...args: unknown[]) => aggregate(...args),
+        count: (...args: unknown[]) => count(...args),
+        findMany: (...args: unknown[]) => findMany(...args),
+      },
     },
   };
 });
 
-const { findVisibleProductBySlug } = await import("./repository");
+const { findVisibleProductBySlug, findReviewsOfVisibleProduct } = await import("./repository");
 const { MAX_PRODUCT_IMAGES } = await import("./schema");
 
 beforeEach(() => {
   findFirst.mockReset();
   aggregate.mockReset();
+  count.mockReset();
+  findMany.mockReset();
+});
+
+describe("public review reads exclude hidden reviews (SEC-092)", () => {
+  it("the rating aggregate filters hiddenAt: null", async () => {
+    findFirst.mockResolvedValue({ id: "prod-1" });
+    aggregate.mockResolvedValue({ _count: { _all: 2 }, _sum: { rating: 9 } });
+    const result = await findVisibleProductBySlug("p-1");
+    expect(aggregate).toHaveBeenCalledTimes(1);
+    const args = aggregate.mock.calls[0]?.[0] as { where: unknown };
+    expect(args.where).toEqual({ productId: "prod-1", hiddenAt: null });
+    expect(result?.reviews).toEqual({ count: 2, ratingSum: 9 });
+  });
+
+  it("the review list and its total filter hiddenAt: null", async () => {
+    findFirst.mockResolvedValue({ id: "prod-1" });
+    count.mockResolvedValue(1);
+    findMany.mockResolvedValue([]);
+    await findReviewsOfVisibleProduct("p-1", { page: 1, pageSize: 20 });
+    const countArgs = count.mock.calls[0]?.[0] as { where: unknown };
+    const listArgs = findMany.mock.calls[0]?.[0] as { where: unknown };
+    expect(countArgs.where).toEqual({ productId: "prod-1", hiddenAt: null });
+    expect(listArgs.where).toEqual({ productId: "prod-1", hiddenAt: null });
+  });
 });
 
 describe("findVisibleProductBySlug (CR-87)", () => {

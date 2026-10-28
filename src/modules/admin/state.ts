@@ -106,3 +106,34 @@ export function activationMove(action: UserActivationAction): { from: boolean; t
   if (row === undefined) throw new Error(`admin: no activation row for ${action}.`);
   return { from: row.from, to: row.to };
 }
+
+/**
+ * The visibility table of a review (SECURITY.md SEC-092; DATA_MODEL.md section 6.15). A review is
+ * `PUBLIC` when `hiddenAt` is null and `HIDDEN` otherwise; there is no status column. The
+ * repository's lock check and guarded update of `hideReview` and `unhideReview` take their values
+ * from here; anything else (hiding a hidden review, un-hiding a public one) is refused with
+ * `409 INVALID_STATE_TRANSITION`.
+ */
+export const REVIEW_VISIBILITIES = ["PUBLIC", "HIDDEN"] as const;
+export type ReviewVisibility = (typeof REVIEW_VISIBILITIES)[number];
+
+export const REVIEW_VISIBILITY_TRANSITIONS = Object.freeze([
+  { action: "hide", from: "PUBLIC", to: "HIDDEN" },
+  { action: "unhide", from: "HIDDEN", to: "PUBLIC" },
+] as const);
+export type ReviewVisibilityAction = (typeof REVIEW_VISIBILITY_TRANSITIONS)[number]["action"];
+
+/** The visibility of a stored review: only `hiddenAt` decides (the CHECK keeps the pair in step). */
+export function reviewVisibilityOf(hiddenAt: Date | null): ReviewVisibility {
+  return hiddenAt === null ? "PUBLIC" : "HIDDEN";
+}
+
+/** The visibility the action starts from and the one it leaves. */
+export function reviewVisibilityMove(action: ReviewVisibilityAction): {
+  from: ReviewVisibility;
+  to: ReviewVisibility;
+} {
+  const row = REVIEW_VISIBILITY_TRANSITIONS.find((entry) => entry.action === action);
+  if (row === undefined) throw new Error(`admin: no review visibility row for ${action}.`);
+  return { from: row.from, to: row.to };
+}
