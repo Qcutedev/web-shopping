@@ -6,9 +6,9 @@ Last updated: 2026-10-22 (trimmed after the ninety-seventh session). The per-ses
 
 ## Summary
 
-Done: foundation, database schema, auth, catalog, storefront pages, profile and addresses, cart, uploads, seller UI, seller isolation tests, concurrency tests. Several of these are IMPLEMENTED but not VERIFIED (code review or security re-check or browser check still open).
+Implemented locally (see the Tasks table for each state): foundation, schema, auth, catalog, storefront, profile and addresses, cart, checkout with mock payment, orders, reviews, uploads, seller onboarding, products, inventory and orders, admin module and UI, security headers, e2e suite (partial), CI workflow file, Dockerfile. Many are IMPLEMENTED but not VERIFIED (code review, security re-check, or browser check open).
 
-Not started: checkout UI (T-034), reviews, seller onboarding and seller products/orders, the whole admin area, the E2E suite, CI, Dockerfile, security headers, docs audit, final acceptance. Nothing has been deployed.
+Not done: a11y checks, the final code review, security review, and fix pass (T-061 to T-063), docs audit (T-080), final acceptance (T-081). CI has never run (no GitHub remote). Nothing has been deployed.
 
 ## Resume here
 
@@ -148,20 +148,22 @@ Notes marked "stale?" were written while Docker was down; later sessions ran the
 
 ## MVP acceptance checklist
 
-| # | Capability | Status |
-| --- | --- | --- |
-| 1 | Customers register and log in | NOT STARTED |
-| 2 | Customers browse products and manage a cart | NOT STARTED |
-| 3 | Customers complete a labelled mock checkout | NOT STARTED |
-| 4 | Orders persist in the database | NOT STARTED |
-| 5 | Multi-seller cart handled correctly | NOT STARTED |
-| 6 | Sellers apply, get approved, manage own products | NOT STARTED |
-| 7 | Sellers manage only their own orders and inventory | NOT STARTED |
-| 8 | Admins approve sellers and moderate listings | NOT STARTED |
-| 9 | Server-side price, stock, and permission validation | NOT STARTED |
-| 10 | App builds and runs from documented instructions | NOT STARTED |
-| 11 | Automated tests run with truthful results | NOT STARTED |
-| 12 | Deployment and security limitations documented | IN PROGRESS |
+Statuses come from the Tasks table and the recorded runs above; the documentation agent did not re-run e2e or integration suites for this table (2026-10-28). Nothing here is VERIFIED until T-081 acceptance.
+
+| # | Capability | Status | Evidence |
+| --- | --- | --- | --- |
+| 1 | Customers register and log in | IMPLEMENTED | `/sign-up`, `/sign-in`; e2e `auth-negative.spec.ts` |
+| 2 | Customers browse products and manage a cart | IMPLEMENTED | T-020, T-021, T-031; e2e `browse`, `cart-negative` |
+| 3 | Customers complete a labelled mock checkout | IMPLEMENTED | T-032, T-034; e2e `checkout.spec.ts`; payment is `MOCK` |
+| 4 | Orders persist in the database | IMPLEMENTED | T-032; integration suite |
+| 5 | Multi-seller cart handled correctly | IMPLEMENTED | T-032 splits per seller; `tests/integration/checkout` |
+| 6 | Sellers apply, get approved, manage own products | IMPLEMENTED | T-040, T-042, T-044, T-050; e2e `seller-onboarding`, `listing-lifecycle` |
+| 7 | Sellers manage only their own orders and inventory | IMPLEMENTED | T-043, T-045 isolation tests |
+| 8 | Admins approve sellers and moderate listings | IMPLEMENTED | T-050, T-051, T-052; no browser check of T-051; review moderation absent (SEC-092) |
+| 9 | Server-side price, stock, and permission validation | IMPLEMENTED | T-032, T-033, T-045, T-052 tests; security review open items in SECURITY.md |
+| 10 | App builds and runs from documented instructions | IN PROGRESS | README rewritten (session 122); a clean-machine run not done; `pnpm verify` not run in session 123 |
+| 11 | Automated tests run with truthful results | IN PROGRESS | `pnpm test:e2e` 68 passed (session 123); full `pnpm test` times out under load; CI never run |
+| 12 | Deployment and security limitations documented | IN PROGRESS | [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) rewritten 2026-10-28; no deployment exists |
 
 ## Deployment
 
