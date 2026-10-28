@@ -39,8 +39,25 @@ describe("Button", () => {
     await userEvent.click(button);
     fireEvent.click(button);
     expect(onClick).not.toHaveBeenCalled();
-    expect(button.disabled).toBe(true);
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute("aria-disabled")).toBe("true");
     expect(button.getAttribute("aria-busy")).toBe("true");
+  });
+
+  it("stays keyboard focusable while loading and ignores Enter and Space", async () => {
+    const onClick = vi.fn();
+    render(
+      <Button loading onClick={onClick}>
+        ชำระเงิน
+      </Button>,
+    );
+    const button = screen.getByRole("button", { name: "ชำระเงิน" });
+    button.focus();
+    expect(document.activeElement).toBe(button);
+    await userEvent.keyboard("{Enter}");
+    await userEvent.keyboard(" ");
+    expect(onClick).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(button);
   });
 
   it("does not submit its form while loading", () => {

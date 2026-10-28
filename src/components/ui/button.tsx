@@ -60,7 +60,7 @@ export function buttonVariants({
 }
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement>, ButtonVariantOptions {
-  /** Shows a spinner, keeps the width, and disables the button. */
+  /** Shows a spinner, keeps the width, and blocks activation. The button stays focusable (aria-disabled). */
   loading?: boolean;
   ref?: Ref<HTMLButtonElement>;
 }
@@ -78,6 +78,7 @@ export function Button({
   type = "button",
   className,
   children,
+  onClick,
   ...props
 }: ButtonProps) {
   // A plainly disabled button never shows the spinner.
@@ -85,11 +86,21 @@ export function Button({
   return (
     <button
       type={type}
-      // A loading button uses the native disabled state so it can neither be clicked nor submit a form.
-      disabled={disabled || loading}
-      aria-busy={showSpinner || undefined}
-      className={cn(buttonVariants({ variant, size, fullWidth, loading: showSpinner }), className)}
       {...props}
+      // A loading button stays focusable (aria-disabled, not native disabled) so keyboard focus is not
+      // lost when an action starts. Activation is blocked below. Click covers Enter and Space too.
+      disabled={disabled}
+      aria-disabled={showSpinner || undefined}
+      aria-busy={showSpinner || undefined}
+      onClick={(event) => {
+        if (showSpinner) {
+          // Also stops a submit button from submitting its form.
+          event.preventDefault();
+          return;
+        }
+        onClick?.(event);
+      }}
+      className={cn(buttonVariants({ variant, size, fullWidth, loading: showSpinner }), className)}
     >
       {showSpinner ? (
         <>
