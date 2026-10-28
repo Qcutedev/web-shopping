@@ -596,3 +596,5 @@ No end-to-end run yet.
 | CR-68 | Done later in T-060: Playwright 1.64.0, `playwright.config.ts`, and Chromium are installed and `pnpm test:e2e` runs (see Environment requirements). Nothing was installed when the finding was raised | n/a |
 
 Run on 2026-10-13: `pnpm test:integration`, 23 files, 848 passed, 1 expected fail, 0 failed; `pnpm test`, 52 files, 2033 passed, 7 expected fail.
+
+Run on 2026-10-28 (session 127, commit 76fb1cd, test DB container marketplace-db-test-1): `pnpm test:integration`, exit 0, 69 files passed, 1564 tests passed, 8 expected fail, 0 failed, 0 skipped (1572 total), 142 s. No test was changed.
