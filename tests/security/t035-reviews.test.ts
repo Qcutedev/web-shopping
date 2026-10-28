@@ -299,7 +299,10 @@ describe("T-035 review: the route file", () => {
       "assertSameOrigin(",
       "assertContentType(",
       "requireActor(",
-      "rateLimiter.consume(actor.userId, RATE_LIMITS.REVIEW_CREATE)",
+      // SEC-052: the client address first, then the user's rule, counted in the database since
+      // option (b) (re-pinned 2026-10-29); its subject is the session's actor only.
+      "rateLimiter.consume(clientIp, RATE_LIMITS.SIGNED_IN_ADDRESS)",
+      "consumeUserRateLimit(actor, USER_RATE_LIMITS.REVIEW_CREATE)",
       "readJsonBody(",
       "parseInput(reviewTargetParamsSchema",
       "parseInput(createReviewBodySchema",

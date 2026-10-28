@@ -10,7 +10,9 @@
  *   1. a source gate: every route handler under src/app that consumes one of the four signed-in
  *      per-user rules consumes `signed-in-address` first, on `getClientAddress`, and the per-user
  *      rule only when the address rule allowed it. A new handler that forgets the address rule
- *      fails here;
+ *      fails here. Re-pinned 2026-10-29 for SEC-052 option (b): `seller-application` and
+ *      `review-create` are consumed through `consumeUserRateLimit(actor, USER_RATE_LIMITS.<rule>)`
+ *      (counted in the database), `checkout` and `uploads` still through `rateLimiter.consume`;
  *   2. the residual of the new rule itself: it holds 5,000 windows and fails closed, and its
  *      subject is the client address, so one account and 5,000 IPv6 /64 networks of one /48 in a
  *      minute (about 83 requests a second) refuse checkout to every address without a live
@@ -32,7 +34,11 @@ import { getClientAddress } from "@/server/client-address";
 import { createRateLimiter, MemoryRateLimitStore, RATE_LIMITS } from "@/server/rate-limit";
 
 const ROOT = process.cwd();
-const PER_USER_RULES = ["CHECKOUT", "UPLOADS", "SELLER_APPLICATION", "REVIEW_CREATE"] as const;
+/** Per-user rules counted in the process table (RATE_LIMITS). */
+const PER_USER_RULES = ["CHECKOUT", "UPLOADS"] as const;
+/** Per-user rules counted in the database since SEC-052 option (b) (USER_RATE_LIMITS). */
+const DATABASE_RULES = ["SELLER_APPLICATION", "REVIEW_CREATE"] as const;
+const ALL_RULES = [...PER_USER_RULES, ...DATABASE_RULES];
 
 function routeFiles(dir: string): string[] {
   const out: string[] = [];
@@ -45,18 +51,26 @@ function routeFiles(dir: string): string[] {
 }
 
 describe("SEC-052 re-check: every signed-in per-user rule sits behind signed-in-address", () => {
+  // src/modules is scanned too since SEC-052 option (b), less the rate-limit module that defines
+  // the database store, so that a service consuming a per-user rule on its own is caught.
   const files = [
     ...routeFiles(join(ROOT, "src", "app")),
     ...routeFiles(join(ROOT, "src", "server")),
+    ...routeFiles(join(ROOT, "src", "modules")),
   ]
     .map((path) => ({
       path: relative(ROOT, path).split(sep).join("/"),
       text: readFileSync(path, "utf8"),
     }))
-    .filter(({ text }) =>
-      PER_USER_RULES.some((rule) => new RegExp(`RATE_LIMITS\\.${rule}\\b`).test(text)),
+    .filter(
+      ({ text }) =>
+        ALL_RULES.some((rule) => new RegExp(`(USER_)?RATE_LIMITS\\.${rule}\\b`).test(text)) ||
+        /consumeUserRateLimit\(/.test(text),
     )
-    .filter(({ path }) => path !== "src/server/rate-limit.ts");
+    .filter(
+      ({ path }) =>
+        path !== "src/server/rate-limit.ts" && !path.startsWith("src/modules/rate-limit/"),
+    );
 
   it("the four handlers, and no other file, consume a signed-in per-user rule", () => {
     expect(files.map(({ path }) => path).sort()).toEqual([
@@ -70,20 +84,40 @@ describe("SEC-052 re-check: every signed-in per-user rule sits behind signed-in-
   it("each consumes signed-in-address on the client address, then its rule only when allowed", () => {
     for (const { path, text } of files) {
       const consumes = [...text.matchAll(/rateLimiter\.consume\(([^,]+),\s*RATE_LIMITS\.(\w+)\)/g)];
-      expect(
-        consumes.map((m) => [m[1]?.trim(), m[2]]),
-        path,
-      ).toEqual([
+      const database = [
+        ...text.matchAll(/consumeUserRateLimit\(([^,]+),\s*USER_RATE_LIMITS\.(\w+)\)/g),
+      ];
+      const steps = [...consumes, ...database]
+        .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+        .map((m) => [m[1]?.trim(), m[2]]);
+      // Re-pinned 2026-10-29 (SEC-052 option (b)): the in-process rules keep
+      // `rateLimiter.consume(actor.userId, RATE_LIMITS.<rule>)`; the database rules are
+      // `consumeUserRateLimit(actor, USER_RATE_LIMITS.<rule>)`, whose subject is `actor.userId`.
+      expect(steps, path).toEqual([
         ["clientIp", "SIGNED_IN_ADDRESS"],
-        ["actor.userId", expect.stringMatching(new RegExp(`^(${PER_USER_RULES.join("|")})$`))],
+        expect.toSatisfy(
+          (step: unknown) =>
+            (Array.isArray(step) &&
+              step[0] === "actor.userId" &&
+              (PER_USER_RULES as readonly string[]).includes(String(step[1]))) ||
+            (Array.isArray(step) &&
+              step[0] === "actor" &&
+              (DATABASE_RULES as readonly string[]).includes(String(step[1]))),
+        ),
       ]);
       expect(text, path).toMatch(
         /const clientIp = getClientAddress\(request, env\.trustedProxy\);/,
       );
       // The per-user consume is the true branch of `byAddress.allowed ? ... : byAddress`.
       expect(text, path).toMatch(
-        /byAddress\.allowed\s*\?\s*await rateLimiter\.consume\(actor\.userId, RATE_LIMITS\.\w+\)\s*:\s*byAddress/,
+        /byAddress\.allowed\s*\?\s*await (rateLimiter\.consume\(actor\.userId, RATE_LIMITS\.\w+\)|consumeUserRateLimit\(actor, USER_RATE_LIMITS\.\w+\))\s*:\s*byAddress/,
       );
+      // A JSON handler consumes the per-user rule before the body is read (API_CONTRACTS 1.8).
+      if (text.includes("readJsonBody(")) {
+        expect(text.indexOf("byAddress.allowed"), path).toBeLessThan(
+          text.indexOf("await readJsonBody("),
+        );
+      }
       // The address rule runs after the session (an anonymous request uses no allowance).
       expect(text.indexOf("requireActor("), path).toBeGreaterThan(-1);
       expect(text.indexOf("requireActor("), path).toBeLessThan(

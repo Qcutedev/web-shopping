@@ -72,7 +72,10 @@ describe("T-040 review: the seller route files are thin and keep the order of re
       at(post, /assertContentType\(request/, "content type"),
       at(post, /requireActor\(request\)/, "session"),
       at(post, /requireRole\(actor, "CUSTOMER"\)/, "role"),
-      at(post, /rateLimiter\.consume\(actor\.userId, RATE_LIMITS\.SELLER_APPLICATION\)/, "limit"),
+      // SEC-052: the client address first, then the user's rule, counted in the database since
+      // option (b) (re-pinned 2026-10-29); its subject is the session's actor only.
+      at(post, /rateLimiter\.consume\(clientIp, RATE_LIMITS\.SIGNED_IN_ADDRESS\)/, "address limit"),
+      at(post, /consumeUserRateLimit\(actor, USER_RATE_LIMITS\.SELLER_APPLICATION\)/, "limit"),
       at(post, /readJsonBody\(request\)/, "body"),
       at(post, /submitApplication\(actor, body\)/, "service"),
     ];

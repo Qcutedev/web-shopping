@@ -42,8 +42,28 @@ function post(orderId: string, itemId: string, options: CallOptions): Promise<Re
   } as never);
 }
 
+/**
+ * Every table but `Session` and, since SEC-052 option (b) (re-pinned 2026-10-29),
+ * `UserRateLimitWindow`: a refused request has used its `review-create` allowance by design
+ * (API_CONTRACTS section 6), so its window row is checked exactly by `expectWindows` instead.
+ */
 function snapshot() {
-  return snapshotDatabase({ excludeTables: ["Session"] });
+  return snapshotDatabase({ excludeTables: ["Session", "UserRateLimitWindow"] });
+}
+
+/** The `UserRateLimitWindow` rows are exactly `expected` (user id to review-create count). */
+async function expectWindows(expected: Record<string, number>): Promise<void> {
+  const rows = await db.userRateLimitWindow.findMany({
+    where: { userId: { in: Object.keys(expected) } },
+    select: { userId: true, rule: true, count: true },
+  });
+  expect(Object.fromEntries(rows.map((row) => [`${row.userId} ${row.rule}`, row.count]))).toEqual(
+    Object.fromEntries(
+      Object.entries(expected)
+        .filter(([, count]) => count > 0)
+        .map(([userId, count]) => [`${userId} review-create`, count]),
+    ),
+  );
 }
 
 async function setStatus(sellerOrderId: string, status: FulfilmentStatus): Promise<void> {
@@ -91,6 +111,11 @@ describe("T-035 security: no IDOR on the review target", () => {
       expect(error).toMatchObject({ code: "NOT_FOUND", details: {} });
     }
     expect(diffSnapshots(before, await snapshot())).toEqual([]);
+    // One counted request each, nothing for the buyer, and nothing else in the table.
+    const [another, , admin] = others;
+    if (another === undefined || admin === undefined) throw new Error("missing caller");
+    await expectWindows({ [another.userId]: 1, [seller.userId]: 1, [admin.userId]: 1 });
+    await expectWindows({ [buyer.userId]: 0 });
 
     // The real buyer still can.
     const own = await post(order.id, item.id, { cookie: buyer.cookie, body: { rating: 5 } });
@@ -116,6 +141,7 @@ describe("T-035 security: no IDOR on the review target", () => {
       expect(response.status, `${orderId}/${itemId}`).toBe(404);
     }
     expect(diffSnapshots(before, await snapshot())).toEqual([]);
+    await expectWindows({ [a.userId]: 3, [b.userId]: 1 });
   });
 
   it("the stored review names the session's user and the item's product whatever the path or body claim", async () => {

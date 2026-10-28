@@ -40,10 +40,12 @@ import {
 } from "../../src/server/http";
 import { createLogger, type Logger } from "../../src/server/logger";
 import {
+  assertUserRateLimitRules,
   createRateLimiter,
   MemoryRateLimitStore,
   RATE_LIMITS,
   type RateLimitRule,
+  USER_RATE_LIMITS,
 } from "../../src/server/rate-limit";
 import {
   REQUEST_ID_HEADER,
@@ -491,8 +493,11 @@ describe("SEC-004 one flood of new keys refuses every other rate-limited action"
     const store = new MemoryRateLimitStore({ maxKeys: 1 });
     const limiter = createRateLimiter({ store, now: () => now, logger: { warn: () => {} } });
     await limiter.consume("signup:ip:a", RATE_LIMITS.SIGN_UP);
-    const refused = await limiter.consume("sellerapp:user:u1", RATE_LIMITS.SELLER_APPLICATION);
+    // Re-pinned 2026-10-29 (SEC-052 option (b)): `seller-application` (24 h) is counted in the
+    // database now, so the longest-window in-process per-user rule, `uploads` (1 h), stands in.
+    const refused = await limiter.consume("uploads:user:u1", RATE_LIMITS.UPLOADS);
     expect(refused.allowed).toBe(false);
+    expect(refused.saturated).toBe(true);
     expect(refused.retryAfterSeconds).toBeLessThanOrEqual(60);
   });
 
@@ -529,13 +534,17 @@ describe("SEC-004 one flood of new keys refuses every other rate-limited action"
       const known = await limiter.consume("flood-subject-0", rule);
       expect(known.saturated).toBe(false);
     }
-    for (const rule of [
-      RATE_LIMITS.CHECKOUT,
-      RATE_LIMITS.UPLOADS,
-      RATE_LIMITS.SELLER_APPLICATION,
-      RATE_LIMITS.REVIEW_CREATE,
-    ]) {
+    // Since SEC-052 option (b) (2026-10-29) the in-process signed-in rules are these three;
+    // `seller-application` and `review-create` are counted in the database and have no capacity
+    // here that a flood could take (tests/security/sec052b-recheck.itest.ts).
+    for (const rule of [RATE_LIMITS.SIGNED_IN_ADDRESS, RATE_LIMITS.CHECKOUT, RATE_LIMITS.UPLOADS]) {
       expect((await limiter.consume("user-1", rule)).allowed).toBe(true);
+    }
+    for (const rule of Object.values(USER_RATE_LIMITS)) {
+      // A per-user database rule cannot be counted in the in-process table by mistake.
+      await expect(
+        limiter.consume("user-1", { ...rule, maxKeys: 1 } as RateLimitRule),
+      ).rejects.toThrow(TypeError);
     }
 
     // One warn line per rule for the whole flood, holding no subject.
@@ -557,9 +566,25 @@ describe("SEC-005 two rules that share a key share one counter and one window", 
     const now = 1_000_000;
     const limiter = createRateLimiter({ now: () => now });
     // Same caller-built key used for two rules, as nothing in the API prevents.
+    // Re-pinned 2026-10-29: `review-create` moved to the database (SEC-052 option (b)); `uploads`
+    // is the other in-process per-user rule.
     for (let i = 0; i < 10; i += 1) await limiter.consume("user:cku1", RATE_LIMITS.CHECKOUT);
-    const firstReview = await limiter.consume("user:cku1", RATE_LIMITS.REVIEW_CREATE);
-    expect(firstReview.remaining).toBe(RATE_LIMITS.REVIEW_CREATE.limit - 1);
+    const firstUpload = await limiter.consume("user:cku1", RATE_LIMITS.UPLOADS);
+    expect(firstUpload.remaining).toBe(RATE_LIMITS.UPLOADS.limit - 1);
+  });
+
+  it("re-check 2026-10-29: a per-user database rule cannot reuse an in-process rule's name", () => {
+    // One name, one counter: the database rules may not shadow a RATE_LIMITS name.
+    for (const rule of Object.values(RATE_LIMITS)) {
+      expect(() => {
+        assertUserRateLimitRules([{ name: rule.name, limit: 1, windowMs: 60_000 }]);
+      }).toThrow(TypeError);
+    }
+    expect(() => {
+      assertUserRateLimitRules(Object.values(USER_RATE_LIMITS));
+    }).not.toThrow();
+    const names = new Set<string>(Object.values(RATE_LIMITS).map((rule) => rule.name));
+    for (const rule of Object.values(USER_RATE_LIMITS)) expect(names.has(rule.name)).toBe(false);
   });
 
   it("re-check 2026-10-11: a subject cannot be shaped to collide with another rule or another subject", async () => {
@@ -588,14 +613,15 @@ describe("SEC-005 two rules that share a key share one counter and one window", 
       );
     }
 
-    // The window length belongs to the rule: checkout resets after a minute, review does not.
+    // The window length belongs to the rule: checkout resets after a minute, uploads (1 h; it
+    // stands in for review-create since SEC-052 option (b)) does not.
     const clock = { now: 5_000_000 };
     const second = createRateLimiter({ now: () => clock.now });
     for (let i = 0; i < 11; i += 1) await second.consume("u", RATE_LIMITS.CHECKOUT);
-    for (let i = 0; i < 11; i += 1) await second.consume("u", RATE_LIMITS.REVIEW_CREATE);
+    for (let i = 0; i < 31; i += 1) await second.consume("u", RATE_LIMITS.UPLOADS);
     clock.now += 60_000;
     expect((await second.consume("u", RATE_LIMITS.CHECKOUT)).allowed).toBe(true);
-    expect((await second.consume("u", RATE_LIMITS.REVIEW_CREATE)).allowed).toBe(false);
+    expect((await second.consume("u", RATE_LIMITS.UPLOADS)).allowed).toBe(false);
   });
 
   it("re-check 2026-10-11: one rule name cannot be reused with other settings", async () => {

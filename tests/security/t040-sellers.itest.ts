@@ -60,8 +60,14 @@ beforeEach(() => {
   resetProcessRateLimiter();
 });
 
+/**
+ * Every table but `Session` and, since SEC-052 option (b) (re-pinned 2026-10-29),
+ * `UserRateLimitWindow`: an application refused after step 5 has used its allowance by design
+ * (API_CONTRACTS section 6), and `applyRequest` removes those windows between requests. The
+ * counting itself is checked in sec052b-recheck.itest.ts and tests/integration/rate-limit.
+ */
 function snapshot() {
-  return snapshotDatabase({ excludeTables: ["Session"] });
+  return snapshotDatabase({ excludeTables: ["Session", "UserRateLimitWindow"] });
 }
 
 async function refusal(promise: Promise<unknown>): Promise<AppError> {
@@ -358,8 +364,12 @@ function renameRequest(cookie: string, body: Record<string, unknown>): Promise<R
   return patchStoreRoute(request("PATCH", "/api/v1/seller/store", { cookie, body }));
 }
 
-function applyRequest(cookie: string, storeName: string): Promise<Response> {
+async function applyRequest(cookie: string, storeName: string): Promise<Response> {
   resetProcessRateLimiter();
+  // Since SEC-052 option (b) (re-pinned 2026-10-29) `seller-application` is counted in the
+  // database, which the in-process reset does not touch. These cases send many applications to
+  // probe the name rules, so they also remove the per-user windows of that rule.
+  await db.userRateLimitWindow.deleteMany({ where: { rule: "seller-application" } });
   return postApplicationRoute(
     request("POST", "/api/v1/seller/application", {
       cookie,
