@@ -265,7 +265,11 @@ describe("OrderStatusPanel", () => {
     render(<OrderStatusPanel orderId="so1" status="PENDING" />);
     const confirm = screen.getByRole("button", { name: th.seller.orders.actions.confirm });
     await user.click(confirm);
-    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+    // The pending button is loading, not natively disabled: it keeps focus and ignores clicks.
+    expect((confirm as HTMLButtonElement).disabled).toBe(false);
+    expect(confirm.getAttribute("aria-disabled")).toBe("true");
+    expect(confirm.getAttribute("aria-busy")).toBe("true");
+    expect(document.activeElement).toBe(confirm);
     expect(
       (screen.getByRole("button", { name: th.seller.orders.actions.cancel }) as HTMLButtonElement)
         .disabled,

@@ -127,7 +127,7 @@ export function CategoryCreateForm() {
           />
         </div>
         <div>
-          <Button type="submit" loading={pending} disabled={pending}>
+          <Button type="submit" loading={pending}>
             {th.admin.categories.create}
           </Button>
         </div>
@@ -221,7 +221,7 @@ function CategoryEdit({ category }: { category: AdminCategoryDto }) {
             <Button variant="secondary" disabled={pending} onClick={close}>
               {th.admin.common.cancel}
             </Button>
-            <Button loading={pending} disabled={pending} onClick={() => void save()}>
+            <Button loading={pending} onClick={() => void save()}>
               {th.admin.common.save}
             </Button>
           </>

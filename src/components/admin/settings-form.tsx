@@ -144,7 +144,7 @@ export function SettingsForm({ settings }: { settings: SettingsDto }) {
           disabled={pending}
         />
         <div>
-          <Button type="submit" loading={pending} disabled={pending}>
+          <Button type="submit" loading={pending}>
             {th.admin.settings.save}
           </Button>
         </div>

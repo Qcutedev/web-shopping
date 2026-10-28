@@ -176,7 +176,11 @@ export function OrderStatusPanel({
               />
             </div>
             <div>
-              <Button type="submit" loading={pending === "SHIPPED"} disabled={busy}>
+              <Button
+                type="submit"
+                loading={pending === "SHIPPED"}
+                disabled={busy && pending !== "SHIPPED"}
+              >
                 {th.seller.orders.actions.ship}
               </Button>
             </div>
@@ -187,7 +191,7 @@ export function OrderStatusPanel({
           {moves.includes("PROCESSING") ? (
             <Button
               loading={pending === "PROCESSING"}
-              disabled={busy}
+              disabled={busy && pending !== "PROCESSING"}
               onClick={() => void send({ to: "PROCESSING" })}
             >
               {th.seller.orders.actions.confirm}
@@ -196,7 +200,7 @@ export function OrderStatusPanel({
           {moves.includes("DELIVERED") ? (
             <Button
               loading={pending === "DELIVERED"}
-              disabled={busy}
+              disabled={busy && pending !== "DELIVERED"}
               onClick={() => void send({ to: "DELIVERED" })}
             >
               {th.seller.orders.actions.deliver}
@@ -227,7 +231,7 @@ export function OrderStatusPanel({
             <Button
               variant="danger"
               loading={pending === "CANCELLED"}
-              disabled={busy}
+              disabled={busy && pending !== "CANCELLED"}
               onClick={() => void send({ to: "CANCELLED" })}
             >
               {th.seller.orders.actions.cancelConfirmAction}

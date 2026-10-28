@@ -596,11 +596,15 @@ describe("CategoryCreateForm", () => {
     await user.type(screen.getByLabelText(th.admin.categories.name), "เสื้อผ้า");
     const submit = screen.getByRole("button", { name: th.admin.categories.create });
     await user.click(submit);
-    expect((submit as HTMLButtonElement).disabled).toBe(true);
+    // Loading, not natively disabled: focus stays and the click is ignored.
+    expect((submit as HTMLButtonElement).disabled).toBe(false);
+    expect(submit.getAttribute("aria-disabled")).toBe("true");
+    expect(submit.getAttribute("aria-busy")).toBe("true");
+    expect(document.activeElement).toBe(submit);
     await user.click(submit);
     expect(api.createCategory).toHaveBeenCalledTimes(1);
     finish(ok({ id: "c1" }));
-    await waitFor(() => expect((submit as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => expect(submit.getAttribute("aria-disabled")).toBeNull());
   });
 
   it("shows the server refusal of a field under that field", async () => {
@@ -785,10 +789,14 @@ describe("SettingsForm", () => {
     await user.type(percent, "7");
     const submit = screen.getByRole("button", { name: th.admin.settings.save });
     await user.click(submit);
-    expect((submit as HTMLButtonElement).disabled).toBe(true);
+    // Loading, not natively disabled: focus stays and the click is ignored.
+    expect((submit as HTMLButtonElement).disabled).toBe(false);
+    expect(submit.getAttribute("aria-disabled")).toBe("true");
+    expect(submit.getAttribute("aria-busy")).toBe("true");
+    expect(document.activeElement).toBe(submit);
     await user.click(submit);
     expect(api.updateSettings).toHaveBeenCalledTimes(1);
     finish(ok({ ...settings, commissionRateBps: 700 }));
-    await waitFor(() => expect((submit as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => expect(submit.getAttribute("aria-disabled")).toBeNull());
   });
 });
