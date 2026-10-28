@@ -28,7 +28,7 @@ import {
 } from "../helpers/factories";
 import { diffSnapshots, snapshotDatabase } from "../helpers/snapshot";
 import { resetProcessRateLimiter, stubAuthEnvironment } from "../integration/auth/support";
-import { call } from "../integration/seller-orders/support";
+import { ageShipment, call } from "../integration/seller-orders/support";
 import { json, signedIn, type SignedIn } from "../integration/sellers/support";
 
 beforeAll(() => {
@@ -78,6 +78,8 @@ describe("T-045 gaps: foreign seller order moves from a state where the move is 
       data: { fulfilmentStatus: "SHIPPED" },
     });
     await createShipment({ sellerOrderId: victimPart });
+    // SEC-072: old enough for the owner's control move below (a database time shift).
+    await ageShipment(victimPart);
 
     const before = await snapshot();
     const foreign = await call.status(victimPart, {

@@ -18,7 +18,7 @@ import { db } from "@/server/db";
 import { createCategory, createOrder, createProduct } from "../../helpers/factories";
 import { diffSnapshots, snapshotDatabase } from "../../helpers/snapshot";
 import { resetProcessRateLimiter, stubAuthEnvironment } from "../auth/support";
-import { call, errorCode, json, type SignedIn, signedIn } from "./support";
+import { ageShipment, call, errorCode, json, type SignedIn, signedIn } from "./support";
 
 beforeAll(() => {
   stubAuthEnvironment();
@@ -449,6 +449,18 @@ describe("POST /api/v1/seller/orders/{id}/status", () => {
       deliveredAt: null,
     });
 
+    // SEC-072: not at once. DELIVERED right after SHIPPED is refused and changes nothing.
+    const before = await snapshot();
+    const early = await move(id, me.cookie, "DELIVERED");
+    expect(early.status).toBe(409);
+    expect(await errorOf(early)).toEqual({
+      code: "CONFLICT",
+      message: expect.any(String),
+      details: { reason: "DELIVERY_TOO_EARLY" },
+    });
+    await expectUnchanged(before);
+
+    await ageShipment(id);
     const delivered = await dataOf(await move(id, me.cookie, "DELIVERED"));
     expect(delivered.fulfilmentStatus).toBe("DELIVERED");
     expect(delivered.shipment?.deliveredAt).not.toBeNull();
@@ -547,7 +559,10 @@ describe("POST /api/v1/seller/orders/{id}/status", () => {
       SHIPPED: ["PROCESSING", "SHIPPED"],
       DELIVERED: ["PROCESSING", "SHIPPED", "DELIVERED"],
     }[from];
-    for (const step of path) expect((await move(id, me.cookie, step)).status).toBe(200);
+    for (const step of path) {
+      if (step === "DELIVERED") await ageShipment(id);
+      expect((await move(id, me.cookie, step)).status).toBe(200);
+    }
     expect(await statusOf(id)).toBe(from);
 
     const before = await snapshot();
@@ -589,6 +604,7 @@ describe("POST /api/v1/seller/orders/{id}/status", () => {
     const placed = await paidOrder([me.storeId]);
     const id = placed.sellerOrderOf(me.storeId).id;
     for (const to of ["PROCESSING", "SHIPPED", "DELIVERED"]) {
+      if (to === "DELIVERED") await ageShipment(id);
       expect((await move(id, me.cookie, to)).status).toBe(200);
     }
     const second = await paidOrder([me.storeId]);

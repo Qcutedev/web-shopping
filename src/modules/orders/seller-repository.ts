@@ -423,6 +423,46 @@ export async function markShipmentDelivered(
 }
 
 /**
+ * SEC-072. Whether the seller order's undelivered shipment is old enough for a seller to mark it
+ * delivered: `shippedAt` at least `minHours` before `now()`, the database clock of the caller's
+ * transaction (the same `now()` the guarded statement below reads). `null` when the seller order
+ * has no undelivered shipment. Called after the seller order row is locked; `shippedAt` is written
+ * once, by the move to `SHIPPED`, and never changed, so the answer holds until the commit.
+ */
+export async function readSellerDeliveryEligibility(
+  tx: DbTransaction,
+  sellerOrderId: string,
+  minHours: number,
+): Promise<"ELIGIBLE" | "TOO_EARLY" | null> {
+  const rows = await tx.$queryRaw<{ eligible: boolean }[]>`
+    SELECT ("shippedAt" <= now() - ${minHours}::int * interval '1 hour') AS "eligible"
+      FROM "Shipment"
+     WHERE "sellerOrderId" = ${sellerOrderId} AND "deliveredAt" IS NULL`;
+  const row = rows[0];
+  if (row === undefined) return null;
+  return row.eligible ? "ELIGIBLE" : "TOO_EARLY";
+}
+
+/**
+ * The seller's guarded form of `markShipmentDelivered` (SEC-072): the same write, and the statement
+ * itself repeats the minimum age, `shippedAt` at least `minHours` before the database clock. So a
+ * shipment that is too young is never marked delivered, whatever the caller checked before. False
+ * when it changed no row. The admin's move uses `markShipmentDelivered`, without this condition.
+ */
+export async function markShipmentDeliveredBySeller(
+  tx: DbTransaction,
+  sellerOrderId: string,
+  minHours: number,
+): Promise<boolean> {
+  const updated = await tx.$executeRaw`
+    UPDATE "Shipment"
+       SET "deliveredAt" = GREATEST(now(), "shippedAt"), "updatedAt" = now()
+     WHERE "sellerOrderId" = ${sellerOrderId} AND "deliveredAt" IS NULL
+       AND "shippedAt" <= now() - ${minHours}::int * interval '1 hour'`;
+  return updated === 1;
+}
+
+/**
  * Claim and restore of DATA_MODEL.md 7.3: marks the seller order's items whose stock was not yet
  * given back, then adds exactly those quantities back, in byte order of the product id
  * (`COLLATE "C"`, CR-T032-06). A restore is never refused (no guard, no upper bound; BR-34) and

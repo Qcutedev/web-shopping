@@ -19,6 +19,8 @@ export {
   listOwnSellerOrders,
 } from "./seller-service";
 export * from "./seller-schema";
+// SEC-072: the `CONFLICT` reason of a seller's `DELIVERED` sent too soon after `SHIPPED`.
+export { DELIVERY_TOO_EARLY } from "./errors";
 export {
   aggregateSatang,
   toSellerOrderListItemDto,

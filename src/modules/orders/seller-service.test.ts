@@ -12,7 +12,11 @@ import type { Actor } from "@/server/auth/actor";
 import { AppError } from "@/server/errors";
 
 import type { SellerOrderViewRow } from "./seller-repository";
-import { FULFILMENT_STATUSES, type FulfilmentStatusValue } from "./state";
+import {
+  FULFILMENT_STATUSES,
+  type FulfilmentStatusValue,
+  SELLER_DELIVERY_MIN_HOURS_AFTER_SHIPPED,
+} from "./state";
 
 const calls: string[] = [];
 
@@ -66,7 +70,11 @@ const repo = {
   insertShipment: vi.fn(async () => {
     calls.push("shipment");
   }),
-  markShipmentDelivered: vi.fn(async () => {
+  readSellerDeliveryEligibility: vi.fn(async (): Promise<"ELIGIBLE" | "TOO_EARLY" | null> => {
+    calls.push("eligibility");
+    return "ELIGIBLE";
+  }),
+  markShipmentDeliveredBySeller: vi.fn(async () => {
     calls.push("delivered");
     return true;
   }),
@@ -99,7 +107,8 @@ vi.mock("./seller-repository", () => ({
       lockOwnPaidSellerOrder: 0,
       moveSellerOrderStatus: 0,
       insertShipment: 0,
-      markShipmentDelivered: 0,
+      readSellerDeliveryEligibility: 0,
+      markShipmentDeliveredBySeller: 0,
       claimAndRestoreStock: 0,
       findOwnPaidSellerOrder: 0,
       readOwnPaidSellerOrder: 0,
@@ -112,6 +121,14 @@ vi.mock("./seller-repository", () => ({
     ]),
   ),
 }));
+
+/** The next age check answers `answer`, still recorded in `calls`. */
+function eligibilityOnce(answer: "ELIGIBLE" | "TOO_EARLY" | null): void {
+  repo.readSellerDeliveryEligibility.mockImplementationOnce(async () => {
+    calls.push("eligibility");
+    return answer;
+  });
+}
 
 const service = await import("./seller-service");
 
@@ -295,7 +312,8 @@ describe("changeSellerOrderStatus", () => {
       DELIVERED: ["delivered"],
       CANCELLED: ["restore"],
     }[to];
-    expect(calls).toEqual(["begin", "lock", "move", ...effect, "read"]);
+    const check = to === "DELIVERED" ? ["eligibility"] : [];
+    expect(calls).toEqual(["begin", "lock", ...check, "move", ...effect, "read"]);
     const sources = repo.moveSellerOrderStatus.mock.calls[0] as unknown[];
     expect(sources[4]).toBe(to);
     expect(sources[3]).toContain(from);
@@ -332,9 +350,78 @@ describe("changeSellerOrderStatus", () => {
 
   it("DELIVERED without an undelivered shipment is a fault (rolled back), not a success", async () => {
     lockedStatus = "SHIPPED";
-    repo.markShipmentDelivered.mockResolvedValueOnce(false);
+    eligibilityOnce(null);
     await expect(
       service.changeSellerOrderStatus(SELLER, "so1", { to: "DELIVERED" }),
     ).rejects.not.toBeInstanceOf(AppError);
+    expect(calls).toEqual(["begin", "lock", "eligibility"]);
   });
+
+  it("a DELIVERED write that changed no row is a fault (rolled back), not a success", async () => {
+    lockedStatus = "SHIPPED";
+    repo.markShipmentDeliveredBySeller.mockResolvedValueOnce(false);
+    await expect(
+      service.changeSellerOrderStatus(SELLER, "so1", { to: "DELIVERED" }),
+    ).rejects.not.toBeInstanceOf(AppError);
+    expect(repo.findOwnPaidSellerOrder).not.toHaveBeenCalled();
+  });
+});
+
+describe("SEC-072: a seller marks DELIVERED only SELLER_DELIVERY_MIN_HOURS_AFTER_SHIPPED after shippedAt", () => {
+  it("the minimum is 24 hours, a named constant of state.ts", () => {
+    expect(SELLER_DELIVERY_MIN_HOURS_AFTER_SHIPPED).toBe(24);
+  });
+
+  it.each([SELLER, SUSPENDED])(
+    "too early is 409 CONFLICT DELIVERY_TOO_EARLY before any write",
+    async (who) => {
+      lockedStatus = "SHIPPED";
+      eligibilityOnce("TOO_EARLY");
+      const error = await service.changeSellerOrderStatus(who, "so1", { to: "DELIVERED" }).then(
+        () => null,
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(AppError);
+      expect((error as AppError).status).toBe(409);
+      expect((error as AppError).toPublic()).toMatchObject({
+        code: "CONFLICT",
+        details: { reason: "DELIVERY_TOO_EARLY" },
+      });
+      expect(calls).toEqual(["begin", "lock", "eligibility"]);
+      expect(repo.moveSellerOrderStatus).not.toHaveBeenCalled();
+      expect(repo.markShipmentDeliveredBySeller).not.toHaveBeenCalled();
+    },
+  );
+
+  it("the check and the guarded write get the constant and the id, never a time from the process", async () => {
+    lockedStatus = "SHIPPED";
+    await service.changeSellerOrderStatus(SELLER, "so1", { to: "DELIVERED" });
+    expect(repo.readSellerDeliveryEligibility).toHaveBeenCalledWith(
+      { tx: true },
+      "so1",
+      SELLER_DELIVERY_MIN_HOURS_AFTER_SHIPPED,
+    );
+    expect(repo.markShipmentDeliveredBySeller).toHaveBeenCalledWith(
+      { tx: true },
+      "so1",
+      SELLER_DELIVERY_MIN_HOURS_AFTER_SHIPPED,
+    );
+  });
+
+  it("a move the table refuses is judged first: DELIVERED from PROCESSING is INVALID_STATE_TRANSITION, no age check", async () => {
+    lockedStatus = "PROCESSING";
+    expect(await codeOf(service.changeSellerOrderStatus(SELLER, "so1", { to: "DELIVERED" }))).toBe(
+      "INVALID_STATE_TRANSITION",
+    );
+    expect(repo.readSellerDeliveryEligibility).not.toHaveBeenCalled();
+  });
+
+  it.each(["PROCESSING", "SHIPPED", "CANCELLED"] as const)(
+    "the age check runs only for DELIVERED, not for %s",
+    async (to) => {
+      lockedStatus = to === "SHIPPED" ? "PROCESSING" : "PENDING";
+      await service.changeSellerOrderStatus(SELLER, "so1", { to });
+      expect(repo.readSellerDeliveryEligibility).not.toHaveBeenCalled();
+    },
+  );
 });

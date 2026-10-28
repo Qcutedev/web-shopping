@@ -24,16 +24,17 @@
  * (404), the move is judged against the one table in state.ts (409 INVALID_STATE_TRANSITION, also
  * for `SHIPPED` to `CANCELLED`, BR-29), the guarded statement takes its source states from the
  * same table, and the move's effect runs in the same transaction: the shipment on `SHIPPED`, its
- * delivery time on `DELIVERED`, the claim and restore of the items' stock on `CANCELLED` (at most
- * once per item across every path, BR-15; the payment stays `PAID` and no refund is recorded,
- * BR-21).
+ * delivery time on `DELIVERED` (only `SELLER_DELIVERY_MIN_HOURS_AFTER_SHIPPED` after `shippedAt`
+ * by the database clock, else 409 CONFLICT `DELIVERY_TOO_EARLY`; SEC-072), the claim and restore
+ * of the items' stock on `CANCELLED` (at most once per item across every path, BR-15; the payment
+ * stays `PAID` and no refund is recorded, BR-21).
  */
 import { LOW_STOCK_THRESHOLD } from "@/modules/inventory";
 import { type Actor, requireRole } from "@/server/auth/actor";
 import { db } from "@/server/db";
 import { invalidStateTransition } from "@/server/errors";
 
-import { sellerOrderNotFound } from "./errors";
+import { deliveryTooEarly, sellerOrderNotFound } from "./errors";
 import {
   toSellerOrderListItemDto,
   toSellerOrderViewDto,
@@ -45,9 +46,10 @@ import {
   insertShipment,
   listOwnPaidSellerOrders,
   lockOwnPaidSellerOrder,
-  markShipmentDelivered,
+  markShipmentDeliveredBySeller,
   moveSellerOrderStatus,
   readOwnPaidSellerOrder,
+  readSellerDeliveryEligibility,
   readSellerSummaryRows,
   SELLER_ORDER_TRANSACTION_OPTIONS,
   type SellerScope,
@@ -60,7 +62,11 @@ import type {
   SellerSummaryDto,
 } from "./seller-schema";
 import type { Page } from "./schema";
-import { assertFulfilmentTransition, fulfilmentSourceStates } from "./state";
+import {
+  assertFulfilmentTransition,
+  fulfilmentSourceStates,
+  SELLER_DELIVERY_MIN_HOURS_AFTER_SHIPPED,
+} from "./state";
 
 /**
  * Role `SELLER`, then the session's store and owner. A seller without a store is not allowed by
@@ -110,9 +116,11 @@ export async function getOwnSellerOrder(
 /**
  * POST /seller/orders/{id}/status (REQ-S-08). In one transaction: the seller order locked by id,
  * store, owner, and paid order (404), the table of state.ts for the actor `SELLER` (409
- * INVALID_STATE_TRANSITION), the guarded move, then its effect, then the shape read back in the
- * same transaction. `carrierName` and `trackingNumber` are only ever what the seller typed
- * (simulated shipping); the schema accepts them only with `to: "SHIPPED"`.
+ * INVALID_STATE_TRANSITION), for `DELIVERED` the minimum age of the shipment by the database clock
+ * (409 CONFLICT `DELIVERY_TOO_EARLY`, SEC-072), the guarded move, then its effect (for `DELIVERED`
+ * a statement that repeats the minimum age), then the shape read back in the same transaction.
+ * `carrierName` and `trackingNumber` are only ever what the seller typed (simulated shipping); the
+ * schema accepts them only with `to: "SHIPPED"`.
  */
 export async function changeSellerOrderStatus(
   actor: Actor,
@@ -124,6 +132,20 @@ export async function changeSellerOrderStatus(
     const locked = await lockOwnPaidSellerOrder(tx, scope, sellerOrderId);
     if (locked === null) throw sellerOrderNotFound();
     assertFulfilmentTransition(locked.fulfilmentStatus, body.to, "SELLER");
+    if (body.to === "DELIVERED") {
+      // SEC-072: only SELLER_DELIVERY_MIN_HOURS_AFTER_SHIPPED after shippedAt, by the database
+      // clock; refused before anything is written. The guarded statement below repeats it.
+      const eligibility = await readSellerDeliveryEligibility(
+        tx,
+        sellerOrderId,
+        SELLER_DELIVERY_MIN_HOURS_AFTER_SHIPPED,
+      );
+      if (eligibility === null) {
+        // Every move to SHIPPED writes the shipment in the same transaction.
+        throw new Error("orders: a SHIPPED seller order has no undelivered shipment.");
+      }
+      if (eligibility === "TOO_EARLY") throw deliveryTooEarly();
+    }
     const moved = await moveSellerOrderStatus(
       tx,
       scope,
@@ -144,9 +166,18 @@ export async function changeSellerOrderStatus(
         );
         break;
       case "DELIVERED":
-        if (!(await markShipmentDelivered(tx, sellerOrderId))) {
-          // Every move to SHIPPED writes the shipment in the same transaction.
-          throw new Error("orders: a SHIPPED seller order has no undelivered shipment.");
+        if (
+          !(await markShipmentDeliveredBySeller(
+            tx,
+            sellerOrderId,
+            SELLER_DELIVERY_MIN_HOURS_AFTER_SHIPPED,
+          ))
+        ) {
+          // Judged eligible above, under the row lock, with the same now(): this never holds; a
+          // zero-row write still rolls the whole move back rather than being a success.
+          throw new Error(
+            "orders: a seller delivery passed the check but its write changed no row.",
+          );
         }
         break;
       case "CANCELLED":

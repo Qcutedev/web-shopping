@@ -9,6 +9,8 @@ import { GET as getRoute } from "@/app/api/v1/seller/orders/[id]/route";
 import { POST as statusRoute } from "@/app/api/v1/seller/orders/[id]/status/route";
 import { GET as listRoute } from "@/app/api/v1/seller/orders/route";
 import { GET as summaryRoute } from "@/app/api/v1/seller/summary/route";
+import { SELLER_DELIVERY_MIN_HOURS_AFTER_SHIPPED } from "@/modules/orders";
+import { db } from "@/server/db";
 
 import { request, type CallOptions } from "../inventory/support";
 
@@ -35,3 +37,18 @@ export const call = {
   summary: (cookie: string | undefined, query = "") =>
     summaryRoute(request("GET", `/api/v1/seller/summary${query}`, withCookie(cookie))),
 };
+
+/**
+ * SEC-072 test setup: moves the seller order's `Shipment.shippedAt` back by `minutes` (default:
+ * the whole minimum age, so a seller may mark it delivered). A time shift in the database, so the
+ * check under test runs unchanged against the database clock; it is never weakened.
+ */
+export async function ageShipment(
+  sellerOrderId: string,
+  minutes: number = SELLER_DELIVERY_MIN_HOURS_AFTER_SHIPPED * 60,
+): Promise<void> {
+  const updated = await db.$executeRaw`
+    UPDATE "Shipment" SET "shippedAt" = "shippedAt" - ${minutes}::int * interval '1 minute'
+     WHERE "sellerOrderId" = ${sellerOrderId}`;
+  if (updated !== 1) throw new Error("ageShipment: the seller order has no shipment.");
+}

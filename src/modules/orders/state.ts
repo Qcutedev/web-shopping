@@ -62,6 +62,17 @@ export const FULFILMENT_TRANSITIONS: readonly FulfilmentTransition[] = Object.fr
   { from: "PROCESSING", to: "CANCELLED", by: ["SELLER", "ADMIN"] },
 ]);
 
+/**
+ * SEC-072 (owner decision, remediation 1): a seller may move its seller order from `SHIPPED` to
+ * `DELIVERED` only once this many hours have passed since `Shipment.shippedAt`. Compared with the
+ * database clock (`now()` of the status change's transaction) in the guarded statement, never with
+ * the application's clock or a time from the request. At exactly this age the move is allowed.
+ * Refused earlier with `409 CONFLICT`, reason `DELIVERY_TOO_EARLY` (docs/API_CONTRACTS.md sections
+ * 2.3 and 5.7.3). It applies to the actor `SELLER` only: the admin's move (T-050) is unchanged, and
+ * the system never sets `DELIVERED`.
+ */
+export const SELLER_DELIVERY_MIN_HOURS_AFTER_SHIPPED = 24;
+
 /** The states a payment may move to `to` from, for the trigger. Empty when none. */
 export function paymentSourceStates(
   to: PaymentStatusValue,

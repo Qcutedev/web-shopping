@@ -15,8 +15,16 @@ import {
   PAYMENT_STATUSES,
   paymentSourceStates,
   type PaymentStatusValue,
+  SELLER_DELIVERY_MIN_HOURS_AFTER_SHIPPED,
   type TransitionActor,
 } from "./state";
+
+describe("SEC-072 minimum age of a seller's delivery", () => {
+  it("is 24 hours, an exported integer the SQL binds as ::int", () => {
+    expect(SELLER_DELIVERY_MIN_HOURS_AFTER_SHIPPED).toBe(24);
+    expect(Number.isSafeInteger(SELLER_DELIVERY_MIN_HOURS_AFTER_SHIPPED)).toBe(true);
+  });
+});
 
 const ACTORS: TransitionActor[] = ["SELLER", "ADMIN", "SYSTEM"];
 
