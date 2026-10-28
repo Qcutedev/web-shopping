@@ -1,6 +1,7 @@
 /**
- * The 33 named CHECK constraints of the schema (DATA_MODEL.md sections 21.3 and 21.8; migrations
- * 20261011121529_init_schema_v1 and 20261028163543_review_admin_hide).
+ * The 35 named CHECK constraints of the schema (DATA_MODEL.md sections 21.3, 21.8 and 21.9;
+ * migrations 20261011121529_init_schema_v1, 20261028163543_review_admin_hide and
+ * 20261028183507_user_rate_limit_window).
  *
  * For each constraint: writes that it must reject, each matched on the PostgreSQL code 23514
  * and on the constraint's name, and writes at its edges that it must accept, so that a
@@ -28,6 +29,7 @@ import {
   createSellerOrderRow,
   createShipment,
   createUpload,
+  createUser,
 } from "../../helpers/factories";
 
 type Write = () => Promise<unknown>;
@@ -38,6 +40,19 @@ const SHIPPED_AT = new Date("2026-10-02T03:00:00.000Z");
 
 function updateSettings(data: { flatShippingFeeSatang?: number; commissionRateBps?: number }) {
   return db.marketplaceSettings.update({ where: { id: 1 }, data });
+}
+
+/** A rate-limit window of a new user, valid unless `data` breaks it (DATA_MODEL.md 6.18). */
+async function createRateLimitWindow(data: { rule?: string; count?: number } = {}) {
+  const user = await createUser();
+  return db.userRateLimitWindow.create({
+    data: {
+      userId: user.id,
+      rule: data.rule ?? "seller-application",
+      count: data.count ?? 1,
+      resetAt: new Date(Date.now() + 60_000),
+    },
+  });
 }
 
 /** An order item with the cart-return columns set, for a failed order of `quantity` pieces. */
@@ -650,6 +665,46 @@ const CHECK_CONSTRAINTS: Record<string, Cases> = {
       "500": () => updateSettings({ commissionRateBps: 500 }),
     },
   },
+
+  // DATA_MODEL.md 6.18 and 21.9 (migration 20261028183507_user_rate_limit_window).
+  UserRateLimitWindow_count_check: {
+    rejects: {
+      zero: () => createRateLimitWindow({ count: 0 }),
+      "a negative count": () => createRateLimitWindow({ count: -1 }),
+      "an update to zero": async () => {
+        const window = await createRateLimitWindow();
+        return db.userRateLimitWindow.update({
+          where: { userId_rule: { userId: window.userId, rule: window.rule } },
+          data: { count: 0 },
+        });
+      },
+    },
+    accepts: {
+      one: () => createRateLimitWindow({ count: 1 }),
+      "an increment to two": async () => {
+        const window = await createRateLimitWindow();
+        return db.userRateLimitWindow.update({
+          where: { userId_rule: { userId: window.userId, rule: window.rule } },
+          data: { count: { increment: 1 } },
+        });
+      },
+    },
+  },
+
+  // Only the two rules kept in the database; the in-process rules are refused.
+  UserRateLimitWindow_rule_check: {
+    rejects: {
+      checkout: () => createRateLimitWindow({ rule: "checkout" }),
+      uploads: () => createRateLimitWindow({ rule: "uploads" }),
+      "an empty rule": () => createRateLimitWindow({ rule: "" }),
+      "a different case": () => createRateLimitWindow({ rule: "Review-Create" }),
+      "a trailing blank": () => createRateLimitWindow({ rule: "review-create " }),
+    },
+    accepts: {
+      "seller-application": () => createRateLimitWindow({ rule: "seller-application" }),
+      "review-create": () => createRateLimitWindow({ rule: "review-create" }),
+    },
+  },
 };
 
 describe.each(Object.entries(CHECK_CONSTRAINTS))("%s", (constraint, cases) => {
@@ -728,7 +783,7 @@ describe("every CHECK constraint of the database has cases in this file", () => 
       ORDER BY c.conname`;
     const inDatabase = rows.map((row) => row.name).sort();
 
-    expect(inDatabase).toHaveLength(33);
+    expect(inDatabase).toHaveLength(35);
     expect(Object.keys(CHECK_CONSTRAINTS).sort()).toEqual(inDatabase);
   });
 

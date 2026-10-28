@@ -1,7 +1,7 @@
 /**
- * Every unique index of schema v1 (DATA_MODEL.md sections 21.3, 21.4 and 21.7): the 19 unique
- * constraints Prisma manages, the three hand-written partial unique indexes, and the 21 primary
- * keys.
+ * Every unique index of schema v1 (DATA_MODEL.md sections 21.3, 21.4, 21.7 and 21.9): the 20
+ * unique constraints Prisma manages, the three hand-written partial unique indexes, and the 22
+ * primary keys.
  *
  * For each index: a second row that repeats the key is rejected, matched on the PostgreSQL code
  * 23505 and on the index name; and, where the index leaves something allowed that looks close
@@ -40,6 +40,14 @@ import {
 } from "../../helpers/factories";
 
 type Write = () => Promise<unknown>;
+
+/** A live rate-limit window (DATA_MODEL.md 6.18); the id is generated unless given. */
+function createRateLimitWindow(userId: string, rule: string, id?: string) {
+  return db.userRateLimitWindow.create({
+    data: { id, userId, rule, count: 1, resetAt: new Date(Date.now() + 60_000) },
+  });
+}
+
 /** Builds the first row, then returns the writes to try against it. */
 type Scenario = () => Promise<{ rejects: Record<string, Write>; accepts?: Record<string, Write> }>;
 
@@ -294,6 +302,25 @@ const UNIQUE_INDEXES: Record<string, Scenario> = {
     };
   },
 
+  // One window per user and rule: the conflict target of the counting upsert (DATA_MODEL.md
+  // 6.18; migration 20261028183507_user_rate_limit_window).
+  UserRateLimitWindow_userId_rule_key: async () => {
+    const user = await createUser();
+    await createRateLimitWindow(user.id, "seller-application");
+    return {
+      rejects: {
+        "a second window of the same user and rule": () =>
+          createRateLimitWindow(user.id, "seller-application"),
+      },
+      accepts: {
+        "a window of the same user for the other rule": () =>
+          createRateLimitWindow(user.id, "review-create"),
+        "a window of another user for the same rule": async () =>
+          createRateLimitWindow((await createUser()).id, "seller-application"),
+      },
+    };
+  },
+
   // Partial: "Address" ("userId") WHERE "isDefault".
   Address_userId_default_key: async () => {
     const address = await createAddress({ isDefault: true });
@@ -480,6 +507,12 @@ const PRIMARY_KEYS: Record<string, () => Promise<Write>> = {
     const row = await createAuditLog();
     return () => createAuditLog({ id: row.id });
   },
+  // The second row has its own user, so that only the primary key can refuse it.
+  UserRateLimitWindow_pkey: async () => {
+    const row = await createRateLimitWindow((await createUser()).id, "review-create");
+    const other = await createUser();
+    return () => createRateLimitWindow(other.id, "review-create", row.id);
+  },
 };
 
 describe.each(Object.entries(UNIQUE_INDEXES))("%s", (index, scenario) => {
@@ -566,7 +599,7 @@ describe("every unique index of the database has cases in this file", () => {
   it("matches the unique indexes in the catalogue exactly, partial ones included", async () => {
     const inDatabase = await uniqueIndexNames(false);
 
-    expect(inDatabase).toHaveLength(22);
+    expect(inDatabase).toHaveLength(23);
     expect(Object.keys(UNIQUE_INDEXES).sort()).toEqual(inDatabase);
   });
 

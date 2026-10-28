@@ -1,5 +1,5 @@
 /**
- * The 29 foreign keys of the schema (DATA_MODEL.md sections 14, 21.4 and 21.8).
+ * The 30 foreign keys of the schema (DATA_MODEL.md sections 14, 21.4, 21.8 and 21.9).
  *
  * For each key, two tests:
  * - a child row that points at a parent that does not exist is rejected, matched on the
@@ -485,6 +485,27 @@ const FOREIGN_KEYS: Record<string, ForeignKeyCase> = {
       };
     },
   },
+
+  // Rate-limit counters (migration 20261028183507_user_rate_limit_window): `Cascade`, like the
+  // sessions. Users are never deleted by the application, so it does not fire there.
+  UserRateLimitWindow_userId_fkey: {
+    onDelete: "CASCADE",
+    missingParent: () =>
+      db.userRateLimitWindow.create({
+        data: { userId: MISSING_ID, rule: "review-create", count: 1, resetAt: new Date() },
+      }),
+    parentWithChild: async () => {
+      const user = await createUser();
+      await db.userRateLimitWindow.create({
+        data: { userId: user.id, rule: "review-create", count: 1, resetAt: new Date() },
+      });
+      return {
+        deleteParent: deleteUser(user.id),
+        parentExists: userExists(user.id),
+        childExists: () => exists(db.userRateLimitWindow.count({ where: { userId: user.id } })),
+      };
+    },
+  },
 };
 
 describe.each(Object.entries(FOREIGN_KEYS))("%s", (foreignKey, cases) => {
@@ -579,7 +600,7 @@ describe("every foreign key of the database has cases in this file", () => {
       Object.entries(FOREIGN_KEYS).map(([name, cases]) => [name, cases.onDelete]),
     );
 
-    expect(rows).toHaveLength(29);
+    expect(rows).toHaveLength(30);
     expect(inThisFile).toEqual(inDatabase);
   });
 });

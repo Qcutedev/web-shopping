@@ -118,6 +118,7 @@ model User {
   hiddenReviews        Review[]              @relation("ReviewHiddenBy")
   auditLogs            AuditLog[]
   settingsUpdates      MarketplaceSettings[]
+  rateLimitWindows     UserRateLimitWindow[]
 
   @@unique([email], map: "User_email_key")
 }
@@ -169,7 +170,7 @@ model Verification {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Application tables (DATA_MODEL.md sections 6.2 to 6.17)
+// Application tables (DATA_MODEL.md sections 6.2 to 6.18)
 //
 // `updatedAt` has a database default besides `@updatedAt` so that a raw INSERT need not supply
 // it. A raw UPDATE must set `"updatedAt" = now()` itself: `@updatedAt` only acts on writes made
@@ -520,4 +521,26 @@ model AuditLog {
 
   @@index([createdAt])
   @@index([targetType, targetId])
+}
+
+// Per-user rate-limit windows kept in the database (SECURITY.md SEC-052 option (b); DATA_MODEL.md
+// section 6.18). One row per user and rule: the current window's count and the time it ends. Its
+// size is bounded by the number of accounts times the rules, so no shared capacity can be filled.
+// Raw SQL: "UserRateLimitWindow_count_check" (count >= 1) and "UserRateLimitWindow_rule_check"
+// (rule is 'seller-application' or 'review-create'); a new rule needs a migration that replaces
+// the second check. Written by one atomic upsert on "UserRateLimitWindow_userId_rule_key"
+// (section 6.18), never read-then-write. A surrogate `id` and not a composite primary key: every
+// application table has an `id` (section 1), which the test snapshot orders rows by.
+model UserRateLimitWindow {
+  id        String   @id @default(cuid(2))
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rule      String
+  count     Int
+  resetAt   DateTime @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+
+  @@unique([userId, rule], map: "UserRateLimitWindow_userId_rule_key")
+  @@index([resetAt])
 }

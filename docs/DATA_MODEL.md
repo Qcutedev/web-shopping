@@ -41,6 +41,7 @@ erDiagram
   OrderItem ||--o| Review : reviewed_by
   Product ||--o{ Review : receives
   User ||--o{ AuditLog : acts
+  User ||--o{ UserRateLimitWindow : counted_in
 ```
 
 ## 3. Enums
@@ -569,6 +570,39 @@ Single row: `id` (`Int`, always 1, no database default), `flatShippingFeeSatang`
 - Append-only: no update or delete path in application code. Written in the same transaction as the action it records.
 - `metadata` never contains a session token, a password hash, an IP address, or a user agent.
 
+### 6.18 UserRateLimitWindow (SEC-052)
+
+`id`, `userId` FK to `User`, `rule`, `count`, `resetAt`, timestamps. One row per user and per-user rate-limit rule that is kept in the database instead of the bounded in-process table of `src/server/rate-limit.ts`: SECURITY.md SEC-052, owner chose option (b) on 2026-10-29. Migration `20261028183507_user_rate_limit_window`.
+
+- **Why a table.** An in-process rule holds at most a fixed number of windows and refuses everyone once full, so cheap accounts can fill it (SEC-052). A row per user has no shared capacity: the table grows with the number of accounts, which `sign-up` bounds, and one user's rows never refuse another user.
+- **Rules kept here:** `seller-application` (24 h windows) and `review-create` (1 h windows), the two whose windows the one-minute `signed-in-address` rule does not bound. `UserRateLimitWindow_rule_check` refuses any other value. Moving another rule here is a new migration that drops and re-adds that check with the longer list. `rule` is text with a check, not an enum, because the rule names contain hyphens and are the names the limiter already uses.
+- `count` is the number of requests counted in the current window, at least 1 (`UserRateLimitWindow_count_check`): a row is only written by a counted request. `resetAt` is when the window ends; a row with `resetAt <= now()` is an expired window and counts as no row.
+- **Unique `(userId, rule)`** (`UserRateLimitWindow_userId_rule_key`) is the conflict target of the counting statement below. The primary key is a surrogate `id` and not `(userId, rule)` because every application table has an `id` (section 1), which the integration test snapshot (`tests/helpers/snapshot.ts`) orders rows by.
+- **Index `(resetAt)`** serves a purge of expired windows: `DELETE FROM "UserRateLimitWindow" WHERE "resetAt" <= now()`. No purge exists yet; until one does, the table holds at most two rows per user that has ever used either endpoint, which is small. Same position as `Session(expiresAt)` (section 6.1). If no purge is ever built, this index is dropped in a later migration.
+- `userId` is `Cascade` (section 14), as for `Session`: a counter has no meaning without its user and is not history. Users are never deleted by the application, so it does not fire. Deactivation does not delete windows; a reactivated user keeps the counts of windows still running.
+- No `AuditLog` row and no other history: the throttled security event that the route writes on a refusal is the record.
+
+**The counting statement (backend-api owns the code).** One statement per counted request, in raw SQL, never a read followed by a write: concurrent requests of one user must not both see the old count. Observed on the local development database on 2026-10-29 (section 21.9):
+
+```sql
+INSERT INTO "UserRateLimitWindow" ("id", "userId", "rule", "count", "resetAt", "updatedAt")
+VALUES ($id, $userId, $rule, 1, now() + $window::interval, now())
+ON CONFLICT ("userId", "rule") DO UPDATE SET
+  "count" = CASE WHEN "UserRateLimitWindow"."resetAt" <= now() THEN 1
+                 ELSE LEAST("UserRateLimitWindow"."count" + 1, $limit + 1) END,
+  "resetAt" = CASE WHEN "UserRateLimitWindow"."resetAt" <= now() THEN EXCLUDED."resetAt"
+                   ELSE "UserRateLimitWindow"."resetAt" END,
+  "updatedAt" = now()
+RETURNING "count", "resetAt";
+```
+
+- The request is allowed when the returned `count <= $limit`; otherwise it is refused with `Retry-After` computed from the returned `resetAt`.
+- `$id` is a new random id (`randomUUID()`, as for `Upload` and `Shipment`): the column has no database default, and the value is used only when the row is new.
+- The window and the expiry test use the database clock (`now()`), not the application's, so that every process agrees on when a window ends. `now()` is the start of the transaction; run the statement outside a long transaction, or on its own.
+- `LEAST(..., $limit + 1)` stops the count at one above the limit, so a client that keeps sending refused requests cannot push `count` toward the `Int` maximum. A refusal therefore still writes the row (`updatedAt` moves); that is the cost of one atomic statement.
+- The statement sets `"updatedAt" = now()` itself, because `@updatedAt` acts only on writes through the model API (section 1).
+- A refusal by `UserRateLimitWindow_rule_check` is a programming error (a rule name outside the list), not a client error. This statement never writes a count below 1, so `UserRateLimitWindow_count_check` is only the backstop for other writes.
+
 ## 7. Concurrency and guarded writes
 
 ### 7.1 Checkout (D-023, OQ-30)
@@ -930,6 +964,8 @@ Consequences, all intended (REQUIREMENTS.md BR-34 says the same): after a restor
 | Returned items never exceed 99 or the stock | `CHECK` on `CartItem` (99); the stock cap is not expressible as a `CHECK` | computed under the cart and product row locks (section 7.2) |
 | A cap on returned items is on record | `CHECK`s on the two `OrderItem` return columns | written once in the failure transaction |
 | A reorder of pictures needs no approval; any other picture change does | not expressible as a constraint | set comparison of `uploadId` under the product row lock (section 4.2) |
+| A per-user rate-limit window is counted once per request, also under concurrency | unique `UserRateLimitWindow_userId_rule_key` as the conflict target | one `INSERT ... ON CONFLICT DO UPDATE` per request (section 6.18) |
+| A rate-limit window names a known rule and a positive count | `CHECK`s on `UserRateLimitWindow` | the limiter passes only its own rule names |
 | An expired session is gone within one day | index on `Session(expiresAt)`; nothing enforces the time | scheduled purge, which does not exist yet (section 6.1) |
 | Sum of seller orders equals the order's totals | not expressible as a `CHECK` | computed once in checkout; covered by an integration test |
 
@@ -953,6 +989,7 @@ Hand-written in the first migration and kept in sync here. **Every name is liste
 | `Shipment` | `deliveredAt` null or not before `shippedAt` |
 | `Review` | rating 1 to 5; the three hide columns all null, or `hiddenAt` and `hiddenByUserId` both set; `hiddenReason` 1 to 500 characters (both since migration `20261028163543_review_admin_hide`, section 6.15) |
 | `MarketplaceSettings` | `id = 1`; fee 0 to 100,000; commission 0 to 10,000; commission a multiple of 100 (`"commissionRateBps" % 100 = 0`, OQ-38) |
+| `UserRateLimitWindow` | `count >= 1`; `rule` is `seller-application` or `review-create` (both since migration `20261028183507_user_rate_limit_window`, section 6.18) |
 
 **Partial unique indexes**
 
@@ -981,6 +1018,7 @@ Hand-written in the first migration and kept in sync here. **Every name is liste
 | `CartItem.cartId` | `Cascade` | |
 | `CartItem.productId` | `Cascade` | A cart is not history; a hard-deleted product leaves carts (S10) |
 | `Session.userId`, `Account.userId` | `Cascade`, as the auth library defines (`prisma/schema.prisma`) | Users are never deleted by the application, so it does not fire |
+| `UserRateLimitWindow.userId` | `Cascade` | A rate-limit counter is not history and has no meaning without its user (section 6.18). Users are never deleted by the application, so it does not fire |
 
 Named `Restrict` keys that matter: `OrderItem.productId`, `OrderItem.productImageUploadId`, `OrderItem.sellerOrderId`, `SellerOrder.orderId`, `SellerOrder.storeId`, `Order.userId`, `Payment.orderId`, `Shipment.sellerOrderId`, `Review.orderItemId`, `Review.productId`, `Review.userId`, `Review.hiddenByUserId`, `Product.storeId`, `Product.categoryId`, `Store.ownerId`, `Store.logoUploadId`, `ProductImage.uploadId`, `Upload.storeId`, `AuditLog.actorId`. Orders, seller orders, order items, payments, and audit entries are never reachable by a cascade.
 
@@ -1038,6 +1076,7 @@ Indexes are listed with their tables in section 6; each serves a query a require
 | `20261015090000_store_name_key` (SEC-058, D-041) | Hand-written in full: function `store_name_key(text)`, generated column `Store.nameKey` (computed for every existing row by the `ADD COLUMN`, which is the backfill), renaming of colliding existing stores, unique index `Store_nameKey_key` (section 21.7). Applied to the local development database on 2026-10-15 (0 stores renamed: the two sample stores have different keys) and to the integration template database by `pnpm test:integration`. Not applied to any shared or production database | **There is no down migration; Prisma does not generate one.** To undo by hand: `DROP INDEX "Store_nameKey_key"; ALTER TABLE "Store" DROP COLUMN "nameKey"; DROP FUNCTION "store_name_key"(text);` and delete the row of this migration from `_prisma_migrations`. That drops only derived data (the key is recomputable from `name`). **The collision renames are not undone by it**: the earlier names are not stored anywhere (no `AuditLog` row, since the table needs a user as the actor). Before this migration runs on any database holding real stores, run the query in section 21.7 ("Before a shared database") and get the owner's decision on every collision; a backup is taken first |
 | `20261020090000_order_item_upload_index` (SEC-067) | Generated by Prisma from `@@index([productImageUploadId])` on `OrderItem`; no raw SQL. One statement: `CREATE INDEX "OrderItem_productImageUploadId_idx"` (section 6.12). Plain `CREATE INDEX`, not `CONCURRENTLY`, because Prisma runs a migration file as one script and `CONCURRENTLY` cannot run inside a transaction block; it blocks writes to `OrderItem` while the index is built. Applied on 2026-10-20 to a scratch database on the test server and to the integration template database by `pnpm test:integration`. Not applied to the local development database or to any shared or production database. Before a production run on a large `OrderItem` table, the owner decides whether to build the index by hand with `CREATE INDEX CONCURRENTLY` first and then mark this migration applied (`prisma migrate resolve --applied`) | **There is no down migration; Prisma does not generate one.** To undo by hand: `DROP INDEX "OrderItem_productImageUploadId_idx";` and delete the row of this migration from `_prisma_migrations`, and remove the `@@index` from the schema file in the same change. No data is lost; only the lookups become full scans again (SEC-067 reopens) |
 | `20261028163543_review_admin_hide` (SEC-092 step 1) | Prisma-generated: columns `Review.hiddenAt`, `hiddenByUserId`, `hiddenReason` (nullable) and `updatedAt` (not null, default now), foreign key `Review_hiddenByUserId_fkey` (`RESTRICT`). Hand-written: backfill `updatedAt = createdAt`, checks `Review_hidden_pair_check` and `Review_hiddenReason_check`, partial index `Review_productId_createdAt_visible_idx` (sections 6.15, 21.8). Additive: every existing review stays public. Plain `CREATE INDEX`, which blocks writes to `Review` while it is built; the table is small before launch. Applied to the local development database on 2026-10-28 and to the integration template database by `pnpm test:integration`. Not applied to any shared or production database | **There is no down migration; Prisma does not generate one.** To undo by hand, after a backup: `DROP INDEX "Review_productId_createdAt_visible_idx"; ALTER TABLE "Review" DROP CONSTRAINT "Review_hiddenReason_check", DROP CONSTRAINT "Review_hidden_pair_check", DROP CONSTRAINT "Review_hiddenByUserId_fkey", DROP COLUMN "hiddenReason", DROP COLUMN "hiddenByUserId", DROP COLUMN "hiddenAt", DROP COLUMN "updatedAt";`, delete the row of this migration from `_prisma_migrations`, and revert the schema file in the same change. **That is destructive once any review has been hidden**: every hidden review becomes public again and the hide record survives only in `AuditLog`. So it needs the sign-off of section 17 like any other destructive change. Before the undo, deploy code that no longer reads the columns |
+| `20261028183507_user_rate_limit_window` (SEC-052 option (b)) | Prisma-generated: table `UserRateLimitWindow`, primary key `UserRateLimitWindow_pkey`, unique index `UserRateLimitWindow_userId_rule_key`, index `UserRateLimitWindow_resetAt_idx`, foreign key `UserRateLimitWindow_userId_fkey` (`CASCADE`). Hand-written: checks `UserRateLimitWindow_count_check` and `UserRateLimitWindow_rule_check` (sections 6.18, 21.9). Additive: a new empty table; no existing row changes. Applied to the local development database on 2026-10-29 and to the integration template database by the schema integration tests. Not applied to any shared or production database | **There is no down migration; Prisma does not generate one.** To undo by hand: `DROP TABLE "UserRateLimitWindow";` (drops its index, keys, and checks with it), delete the row of this migration from `_prisma_migrations`, and revert the schema file in the same change. Before the undo, deploy code that no longer uses the table. Data lost: only the counts of running windows, so every user starts these two rules from zero; nothing else refers to the table. On a shared database that is still a drop of a table, so it needs the sign-off of section 17 |
 
 ## 18. Seed data
 
@@ -1263,6 +1302,7 @@ These must be supplied by every insert. Everything else either has a default lis
 | `Shipment` | `shippedAt` |
 | `MarketplaceSettings` | `id`; the only row is inserted by the migration |
 | `AuditLog` | `metadata` (`jsonb`, not null) |
+| `UserRateLimitWindow` | `count`, `resetAt`, and `id` when the insert is raw SQL (the counting statement of section 6.18 passes `randomUUID()`) |
 
 ### 21.3 Raw SQL objects, by name
 
@@ -1282,7 +1322,7 @@ These must be supplied by every insert. Everything else either has a default lis
 | --- | --- |
 | `Review_productId_createdAt_visible_idx` | `"Review" ("productId", "createdAt") WHERE "hiddenAt" IS NULL` (migration `20261028163543_review_admin_hide`) |
 
-**Check constraints** (33: 31 from the first migration, 2 from `20261028163543_review_admin_hide`)
+**Check constraints** (35: 31 from the first migration, 2 from `20261028163543_review_admin_hide`, 2 from `20261028183507_user_rate_limit_window`)
 
 | Name | Condition |
 | --- | --- |
@@ -1319,6 +1359,8 @@ These must be supplied by every insert. Everything else either has a default lis
 | `MarketplaceSettings_flatShippingFeeSatang_check` | `"flatShippingFeeSatang" BETWEEN 0 AND 100000` |
 | `MarketplaceSettings_commissionRateBps_check` | `"commissionRateBps" BETWEEN 0 AND 10000` |
 | `MarketplaceSettings_commissionRateBps_whole_percent_check` | `"commissionRateBps" % 100 = 0` |
+| `UserRateLimitWindow_count_check` | `"count" >= 1` |
+| `UserRateLimitWindow_rule_check` | `"rule" IN ('seller-application', 'review-create')` |
 
 **Function and generated column** (migration `20261015090000_store_name_key`, section 21.7)
 
@@ -1333,15 +1375,15 @@ These must be supplied by every insert. Everything else either has a default lis
 
 Naming rule: primary key `<Table>_pkey`; unique `<Table>_<columns>_key`; index `<Table>_<columns>_idx`; foreign key `<Table>_<column>_fkey`. Every unique constraint has its name written in the schema file (`map:`), so a Prisma upgrade cannot rename it.
 
-**Unique constraints:** `User_email_key`, `Session_token_key`, `Store_ownerId_key`, `Store_slug_key`, `Store_nameKey_key` (declared in the schema, created by the hand-written migration of section 21.7), `Store_logoUploadId_key`, `Category_slug_key`, `Product_slug_key`, `Upload_storageKey_key`, `ProductImage_uploadId_key`, `ProductImage_productId_sortOrder_key`, `Cart_userId_key`, `CartItem_cartId_productId_key`, `Order_orderNumber_key`, `Order_userId_idempotencyKey_key`, `SellerOrder_orderId_storeId_key`, `Payment_orderId_key`, `Shipment_sellerOrderId_key`, `Review_orderItemId_key`.
+**Unique constraints:** `User_email_key`, `Session_token_key`, `Store_ownerId_key`, `Store_slug_key`, `Store_nameKey_key` (declared in the schema, created by the hand-written migration of section 21.7), `Store_logoUploadId_key`, `Category_slug_key`, `Product_slug_key`, `Upload_storageKey_key`, `ProductImage_uploadId_key`, `ProductImage_productId_sortOrder_key`, `Cart_userId_key`, `CartItem_cartId_productId_key`, `Order_orderNumber_key`, `Order_userId_idempotencyKey_key`, `SellerOrder_orderId_storeId_key`, `Payment_orderId_key`, `Shipment_sellerOrderId_key`, `Review_orderItemId_key`, `UserRateLimitWindow_userId_rule_key` (migration `20261028183507_user_rate_limit_window`).
 
-**Indexes:** `Session_userId_idx`, `Session_expiresAt_idx`, `Account_userId_idx`, `Verification_identifier_idx`, `Address_userId_idx`, `Store_status_idx`, `SellerApplication_status_createdAt_idx`, `Product_status_moderationStatus_categoryId_createdAt_idx`, `Product_storeId_status_idx`, `Product_moderationStatus_moderationRequestedAt_idx`, `Upload_storeId_idx`, `Order_userId_createdAt_idx`, `Order_paymentStatus_createdAt_idx`, `Order_paidAt_idx`, `SellerOrder_storeId_fulfilmentStatus_createdAt_idx`, `OrderItem_sellerOrderId_idx`, `OrderItem_productId_idx`, `OrderItem_productImageUploadId_idx` (migration `20261020090000_order_item_upload_index`), `Review_productId_createdAt_idx`, `AuditLog_createdAt_idx`, `AuditLog_targetType_targetId_idx`.
+**Indexes:** `Session_userId_idx`, `Session_expiresAt_idx`, `Account_userId_idx`, `Verification_identifier_idx`, `Address_userId_idx`, `Store_status_idx`, `SellerApplication_status_createdAt_idx`, `Product_status_moderationStatus_categoryId_createdAt_idx`, `Product_storeId_status_idx`, `Product_moderationStatus_moderationRequestedAt_idx`, `Upload_storeId_idx`, `Order_userId_createdAt_idx`, `Order_paymentStatus_createdAt_idx`, `Order_paidAt_idx`, `SellerOrder_storeId_fulfilmentStatus_createdAt_idx`, `OrderItem_sellerOrderId_idx`, `OrderItem_productId_idx`, `OrderItem_productImageUploadId_idx` (migration `20261020090000_order_item_upload_index`), `Review_productId_createdAt_idx`, `AuditLog_createdAt_idx`, `AuditLog_targetType_targetId_idx`, `UserRateLimitWindow_resetAt_idx` (migration `20261028183507_user_rate_limit_window`).
 
 **Foreign keys** (all `ON UPDATE CASCADE`, which never fires because ids do not change):
 
 | `onDelete` | Names |
 | --- | --- |
-| `CASCADE` | `Session_userId_fkey`, `Account_userId_fkey`, `ProductImage_productId_fkey`, `CartItem_cartId_fkey`, `CartItem_productId_fkey` |
+| `CASCADE` | `Session_userId_fkey`, `Account_userId_fkey`, `ProductImage_productId_fkey`, `CartItem_cartId_fkey`, `CartItem_productId_fkey`, `UserRateLimitWindow_userId_fkey` |
 | `RESTRICT` | `Address_userId_fkey`, `Store_ownerId_fkey`, `Store_logoUploadId_fkey`, `SellerApplication_userId_fkey`, `SellerApplication_reviewedById_fkey`, `Product_storeId_fkey`, `Product_categoryId_fkey`, `Upload_storeId_fkey`, `ProductImage_uploadId_fkey`, `Cart_userId_fkey`, `Order_userId_fkey`, `SellerOrder_orderId_fkey`, `SellerOrder_storeId_fkey`, `OrderItem_sellerOrderId_fkey`, `OrderItem_productId_fkey`, `OrderItem_productImageUploadId_fkey`, `Payment_orderId_fkey`, `Shipment_sellerOrderId_fkey`, `Review_orderItemId_fkey`, `Review_productId_fkey`, `Review_userId_fkey`, `Review_hiddenByUserId_fkey`, `MarketplaceSettings_updatedById_fkey`, `AuditLog_actorId_fkey` |
 
 ### 21.5 How a violation reaches a service
@@ -1453,3 +1495,19 @@ Added 2026-10-28 by migration `20261028163543_review_admin_hide`. Why and the ru
 - A second `prisma migrate dev` reports "Already in sync": Prisma sees no drift from the hand-written objects.
 
 A check violation reaches the service as in section 21.5: the constraint name is only in `cause.originalMessage`, and `cause.detail` holds the whole row, comment included, so `error.meta` is never logged.
+
+### 21.9 Per-user rate-limit windows (SEC-052)
+
+Added 2026-10-29 by migration `20261028183507_user_rate_limit_window`. Why and the rules: section 6.18. Names: sections 21.3 and 21.4.
+
+**Observed on the local development database** (PostgreSQL 18.6), in one transaction that was rolled back (0 rows in the table afterwards), with a seeded user and the counting statement of section 6.18 as a prepared statement:
+
+- `seller-application`, 24 h, limit 3: five calls returned `count` 1, 2, 3, 4, 4, all with the same row `id`. The fourth and fifth are refusals (`count > 3`), and the count stops at 4.
+- After `resetAt` was set to one second before `now()`, the next call returned `count` 1 and a `resetAt` 24 h ahead: an expired window starts again in the same statement.
+- `review-create` for the same user wrote a second row (two rows for the user).
+- A raw insert of a second `(userId, rule)` pair is refused by `UserRateLimitWindow_userId_rule_key`.
+- Before the surrogate `id` was added (a first draft of the same migration with `(userId, rule)` as the primary key, applied only to the development database and undone there with an empty table): rule `checkout` refused by `UserRateLimitWindow_rule_check`, `count` 0 by `UserRateLimitWindow_count_check`, an unknown user by `UserRateLimitWindow_userId_fkey`. The schema integration tests repeat these against the final migration.
+- `EXPLAIN DELETE FROM "UserRateLimitWindow" WHERE "resetAt" <= now()` (sequential scans off, the table being nearly empty) uses `Bitmap Index Scan on "UserRateLimitWindow_resetAt_idx"`.
+- A second `prisma migrate dev` reports "Already in sync": Prisma sees no drift from the hand-written checks.
+
+Not observed: two concurrent first requests of one user. `INSERT ... ON CONFLICT DO UPDATE` is atomic per conflicting row in PostgreSQL, so one inserts and the other updates; backend-api's integration test should show it with parallel requests.
