@@ -3,15 +3,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLogger, setLogLevel } from "./logger";
 import {
   assertRateLimitRules,
+  assertUserRateLimitRules,
   createRateLimiter,
+  createUserRateLimiter,
   MAX_RULES,
   MAX_TOTAL_WINDOWS,
+  MAX_USER_RATE_LIMIT_WINDOW_MS,
   MemoryRateLimitStore,
   RATE_LIMITS,
   type RateLimitIncrement,
   type RateLimitRule,
   type RateLimitStore,
   rateLimiter,
+  USER_RATE_LIMITS,
+  type UserRateLimitCount,
+  type UserRateLimitRule,
+  type UserRateLimitStore,
+  type UserRateLimitWindowState,
 } from "./rate-limit";
 
 const START = 1_800_000_000_000;
@@ -127,7 +135,7 @@ describe("fixed window", () => {
 describe("the rule is part of the key (SEC-005)", () => {
   it("exhausting one rule for user:u1 leaves another rule for user:u1 untouched", async () => {
     const { limiter } = setup({}, BUILT_IN);
-    const { CHECKOUT, REVIEW_CREATE } = RATE_LIMITS;
+    const { CHECKOUT, UPLOADS } = RATE_LIMITS;
 
     for (let hit = 0; hit < CHECKOUT.limit; hit += 1) {
       expect((await limiter.consume("user:u1", CHECKOUT)).allowed).toBe(true);
@@ -135,12 +143,12 @@ describe("the rule is part of the key (SEC-005)", () => {
     expect((await limiter.consume("user:u1", CHECKOUT)).allowed).toBe(false);
 
     // Same subject, other rule: its own counter starts at one hit, and its own window length.
-    expect(await limiter.consume("user:u1", REVIEW_CREATE)).toEqual({
+    expect(await limiter.consume("user:u1", UPLOADS)).toEqual({
       allowed: true,
-      limit: REVIEW_CREATE.limit,
-      remaining: REVIEW_CREATE.limit - 1,
-      resetAt: START + REVIEW_CREATE.windowMs,
-      retryAfterSeconds: REVIEW_CREATE.windowMs / 1000,
+      limit: UPLOADS.limit,
+      remaining: UPLOADS.limit - 1,
+      resetAt: START + UPLOADS.windowMs,
+      retryAfterSeconds: UPLOADS.windowMs / 1000,
       saturated: false,
     });
     // And the first rule is still blocked on its own one-minute window.
@@ -152,7 +160,7 @@ describe("the rule is part of the key (SEC-005)", () => {
 
   it("a rule used first never decides the window of another rule for the same subject", async () => {
     const { limiter, advance } = setup({}, BUILT_IN);
-    await limiter.consume("user:u1", RATE_LIMITS.REVIEW_CREATE); // one-hour window
+    await limiter.consume("user:u1", RATE_LIMITS.UPLOADS); // one-hour window
     const checkout = await limiter.consume("user:u1", RATE_LIMITS.CHECKOUT);
     expect(checkout.resetAt).toBe(START + 60_000);
 
@@ -160,8 +168,8 @@ describe("the rule is part of the key (SEC-005)", () => {
     expect(await limiter.consume("user:u1", RATE_LIMITS.CHECKOUT)).toMatchObject({
       remaining: RATE_LIMITS.CHECKOUT.limit - 1,
     });
-    expect(await limiter.consume("user:u1", RATE_LIMITS.REVIEW_CREATE)).toMatchObject({
-      remaining: RATE_LIMITS.REVIEW_CREATE.limit - 2,
+    expect(await limiter.consume("user:u1", RATE_LIMITS.UPLOADS)).toMatchObject({
+      remaining: RATE_LIMITS.UPLOADS.limit - 2,
     });
   });
 
@@ -480,13 +488,13 @@ describe("isolated capacity per rule (SEC-004)", () => {
     });
   });
 
-  it("bounds the total: the built-in capacities add up to at most 200,000 windows", () => {
-    expect(MAX_TOTAL_WINDOWS).toBe(200_000);
+  it("bounds the total: the built-in capacities add up to at most 180,000 windows (200,000 before SEC-052 option (b))", () => {
+    expect(MAX_TOTAL_WINDOWS).toBe(180_000);
     const total = Object.values(RATE_LIMITS).reduce((sum, rule) => sum + rule.maxKeys, 0);
     expect(total).toBeLessThanOrEqual(MAX_TOTAL_WINDOWS);
   });
 
-  it("the capacity split is the SEC-050 split of D-038 (option (a)) with SEC-052's signed-in-address taken from uploads", () => {
+  it("the capacity split is the SEC-050 split of D-038 (option (a)) with SEC-052's signed-in-address taken from uploads, less the two rules moved to the database", () => {
     const split = Object.fromEntries(
       Object.values(RATE_LIMITS).map((rule) => [rule.name, rule.maxKeys]),
     );
@@ -498,8 +506,6 @@ describe("isolated capacity per rule (SEC-004)", () => {
       "signed-in-address": 5_000,
       checkout: 10_000,
       uploads: 5_000,
-      "seller-application": 10_000,
-      "review-create": 10_000,
     });
     expect(Object.values(split).reduce((sum, keys) => sum + keys, 0)).toBe(MAX_TOTAL_WINDOWS);
   });
@@ -512,8 +518,9 @@ describe("isolated capacity per rule (SEC-004)", () => {
     // Five times the cost before D-038 (10,000 windows of 300 s, about 33 a second).
     expect(RATE_LIMITS.SIGN_IN_ACCOUNT.maxKeys).toBeGreaterThanOrEqual(5 * 10_000);
     expect(RATE_LIMITS.SIGN_IN_ACCOUNT.windowMs).toBe(300_000);
-    // The total budget did not grow; the share came from the signed-in rules only.
-    expect(MAX_TOTAL_WINDOWS).toBe(200_000);
+    // The total budget did not grow (it shrank by 20,000 with SEC-052 option (b)); the share came
+    // from the signed-in rules only.
+    expect(MAX_TOTAL_WINDOWS).toBe(180_000);
     expect(RATE_LIMITS.SIGN_IN_ADDRESS.maxKeys).toBe(40_000);
     expect(RATE_LIMITS.SIGN_IN_EMAIL.maxKeys).toBe(30_000);
     expect(RATE_LIMITS.SIGN_UP.maxKeys).toBe(40_000);
@@ -543,8 +550,6 @@ describe("isolated capacity per rule (SEC-004)", () => {
     for (const [rule, capacity] of [
       [RATE_LIMITS.CHECKOUT, 10_000],
       [RATE_LIMITS.UPLOADS, 5_000],
-      [RATE_LIMITS.SELLER_APPLICATION, 10_000],
-      [RATE_LIMITS.REVIEW_CREATE, 10_000],
     ] as const) {
       expect(rule.maxKeys).toBe(capacity);
       const { limiter, store } = setup({}, BUILT_IN);
@@ -656,7 +661,7 @@ describe("the rule set is fixed when the limiter is created (SEC-018, N9)", () =
     expect(() => createRateLimiter({ rules: [...BUILT_IN, EXTRA] })).toThrow(TypeError);
     expect(() => createRateLimiter({ rules: [EXTRA, ...BUILT_IN] })).toThrow(TypeError);
     expect(() => createRateLimiter({ rules: [...BUILT_IN, rule({ maxKeys: 1 }, "tiny")] })).toThrow(
-      /at most 200000 windows/,
+      /at most 180000 windows/,
     );
     expect(() => assertRateLimitRules([...BUILT_IN, EXTRA])).toThrow(TypeError);
     // A set that fits is accepted, including one that uses the budget exactly.
@@ -795,9 +800,133 @@ describe("contract", () => {
       SIGNED_IN_ADDRESS: { limit: 60, windowMs: 60 * 1000 },
       CHECKOUT: { limit: 10, windowMs: 60 * 1000 },
       UPLOADS: { limit: 30, windowMs: 60 * 60 * 1000 },
-      SELLER_APPLICATION: { limit: 3, windowMs: 24 * 60 * 60 * 1000 },
-      REVIEW_CREATE: { limit: 10, windowMs: 60 * 60 * 1000 },
     });
+    // The two per-user rules counted in the database (SEC-052 option (b)), same limits as before.
+    expect(USER_RATE_LIMITS).toEqual({
+      SELLER_APPLICATION: { name: "seller-application", limit: 3, windowMs: 24 * 60 * 60 * 1000 },
+      REVIEW_CREATE: { name: "review-create", limit: 10, windowMs: 60 * 60 * 1000 },
+    });
+  });
+});
+
+describe("the per-user limiter over a store (SEC-052 option (b))", () => {
+  const RULE = USER_RATE_LIMITS.SELLER_APPLICATION;
+  const DB_NOW = 1_800_000_000_000;
+
+  /** A store that answers with fixed counts, in its own clock, and records what it was asked. */
+  function fixedStore(answers: Partial<UserRateLimitWindowState>[]) {
+    const calls: UserRateLimitCount[] = [];
+    const store: UserRateLimitStore = {
+      count(input) {
+        calls.push(input);
+        const answer = answers.shift() ?? {};
+        return Promise.resolve({
+          count: 1,
+          resetAt: DB_NOW + input.windowMs,
+          now: DB_NOW,
+          ...answer,
+        });
+      },
+    };
+    return { store, calls };
+  }
+
+  it("passes the store the rule name, the user id, the limit, and the window, nothing else", async () => {
+    const { store, calls } = fixedStore([{}]);
+    await createUserRateLimiter(store).consume("user_1", RULE);
+    expect(calls).toEqual([
+      { rule: "seller-application", userId: "user_1", limit: 3, windowMs: 86_400_000 },
+    ]);
+  });
+
+  it("allows up to the limit and refuses above it, with Retry-After from the store's resetAt and clock", async () => {
+    const { store } = fixedStore([
+      { count: 3, resetAt: DB_NOW + 90_500 },
+      { count: 4, resetAt: DB_NOW + 90_500 },
+    ]);
+    const limiter = createUserRateLimiter(store);
+    expect(await limiter.consume("u", RULE)).toEqual({
+      allowed: true,
+      limit: 3,
+      remaining: 0,
+      resetAt: DB_NOW + 90_500,
+      retryAfterSeconds: 91,
+      saturated: false,
+    });
+    expect(await limiter.consume("u", RULE)).toEqual({
+      allowed: false,
+      limit: 3,
+      remaining: 0,
+      resetAt: DB_NOW + 90_500,
+      retryAfterSeconds: 91,
+      saturated: false,
+    });
+  });
+
+  it("Retry-After is at least 1 second, also for a window that ends now", async () => {
+    const { store } = fixedStore([{ count: 4, resetAt: DB_NOW }]);
+    expect((await createUserRateLimiter(store).consume("u", RULE)).retryAfterSeconds).toBe(1);
+  });
+
+  it("fails closed: a store error rejects, and an impossible answer rejects with a TypeError", async () => {
+    const failing: UserRateLimitStore = { count: () => Promise.reject(new Error("db down")) };
+    await expect(createUserRateLimiter(failing).consume("u", RULE)).rejects.toThrow("db down");
+    for (const answer of [
+      { count: 0 },
+      { count: -1 },
+      { count: 1.5 },
+      { count: Number.NaN },
+      { count: RULE.limit + 2 },
+      { resetAt: Number.NaN },
+      { now: Number.POSITIVE_INFINITY },
+    ]) {
+      const { store } = fixedStore([answer]);
+      await expect(createUserRateLimiter(store).consume("u", RULE)).rejects.toThrow(TypeError);
+    }
+  });
+
+  it("refuses an empty subject, an unknown rule, and a known name with other settings", async () => {
+    const { store, calls } = fixedStore([]);
+    const limiter = createUserRateLimiter(store);
+    await expect(limiter.consume("", RULE)).rejects.toThrow(TypeError);
+    await expect(
+      limiter.consume("u", { name: "other-rule", limit: 3, windowMs: 1_000 }),
+    ).rejects.toThrow(TypeError);
+    await expect(limiter.consume("u", { ...RULE, limit: 1_000 })).rejects.toThrow(TypeError);
+    await expect(limiter.consume("u", { ...RULE, windowMs: 1_000 })).rejects.toThrow(TypeError);
+    // An in-process rule is not a per-user database rule.
+    await expect(
+      limiter.consume("u", RATE_LIMITS.CHECKOUT as unknown as UserRateLimitRule),
+    ).rejects.toThrow(TypeError);
+    expect(calls).toEqual([]);
+  });
+
+  it("validates the rule set: names, positive settings, a window of at most a week, no reuse of a name", () => {
+    expect(() => {
+      assertUserRateLimitRules(Object.values(USER_RATE_LIMITS));
+    }).not.toThrow();
+    for (const rules of [
+      [{ name: "Bad", limit: 1, windowMs: 1 }],
+      [{ name: "ok", limit: 0, windowMs: 1 }],
+      [{ name: "ok", limit: 1, windowMs: 0 }],
+      [{ name: "ok", limit: 1, windowMs: MAX_USER_RATE_LIMIT_WINDOW_MS + 1 }],
+      [
+        { name: "ok", limit: 1, windowMs: 1 },
+        { name: "ok", limit: 2, windowMs: 2 },
+      ],
+      // One name, one counter: a per-user rule may not reuse an in-process rule's name.
+      [{ name: "checkout", limit: 1, windowMs: 1 }],
+    ]) {
+      expect(() => {
+        assertUserRateLimitRules(rules);
+      }).toThrow(TypeError);
+    }
+  });
+
+  it("no rule name is both in-process and in the database", () => {
+    const inProcess = new Set<string>(Object.values(RATE_LIMITS).map((rule) => rule.name));
+    for (const rule of Object.values(USER_RATE_LIMITS))
+      expect(inProcess.has(rule.name)).toBe(false);
   });
 });
 

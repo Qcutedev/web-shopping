@@ -19,6 +19,7 @@ import { AppError } from "@/server/errors";
 import { createAdmin, createSellerApplication, createStore } from "../../helpers/factories";
 import { diffSnapshots, snapshotDatabase } from "../../helpers/snapshot";
 import { resetProcessRateLimiter, stubAuthEnvironment } from "../auth/support";
+import { resetUserRateLimits, USER_RATE_LIMIT_TABLE } from "../rate-limit/support";
 import { adminActor, json, request, signedIn } from "./support";
 
 beforeAll(() => {
@@ -29,7 +30,12 @@ beforeEach(() => {
   resetProcessRateLimiter();
 });
 
-const NO_SESSIONS = { excludeTables: ["Session"] } as const;
+/**
+ * Sessions, and the per-user rate-limit windows: every application request is counted there by
+ * contract whatever its outcome (API_CONTRACTS section 6, SEC-052 option (b)), and `apply` starts
+ * each request with a fresh window.
+ */
+const NO_SESSIONS = { excludeTables: ["Session", USER_RATE_LIMIT_TABLE] } as const;
 
 async function reasonOf(response: Response): Promise<string> {
   const body = await json<{ error: { code: string; details: { reason?: string } } }>(response);
@@ -46,8 +52,12 @@ async function refusal(promise: Promise<unknown>): Promise<AppError> {
   throw new Error("expected a refusal");
 }
 
-function apply(cookie: string, storeName: string): Promise<Response> {
+async function apply(
+  { cookie, userId }: { cookie: string; userId: string },
+  storeName: string,
+): Promise<Response> {
   resetProcessRateLimiter();
+  await resetUserRateLimits(userId);
   return postApplicationRoute(
     request("POST", "/api/v1/seller/application", {
       cookie,
@@ -75,9 +85,7 @@ describe("POST /api/v1/seller/application: store names (SEC-058, D-041)", () => 
       "sunrise mart",
       "Ｓｕｎｒｉｓｅ Ｍａｒｔ", // full-width letters
     ]) {
-      expect(await reasonOf(await apply(user.cookie, storeName))).toBe(
-        "409 CONFLICT STORE_NAME_TAKEN",
-      );
+      expect(await reasonOf(await apply(user, storeName))).toBe("409 CONFLICT STORE_NAME_TAKEN");
     }
     expect(diffSnapshots(before, await snapshotDatabase(NO_SESSIONS))).toEqual([]);
   });
@@ -98,9 +106,7 @@ describe("POST /api/v1/seller/application: store names (SEC-058, D-041)", () => 
       "ทางการ",
       "ร้านค้าทางการ",
     ]) {
-      expect(await reasonOf(await apply(user.cookie, storeName))).toBe(
-        "409 CONFLICT STORE_NAME_RESERVED",
-      );
+      expect(await reasonOf(await apply(user, storeName))).toBe("409 CONFLICT STORE_NAME_RESERVED");
     }
     expect(diffSnapshots(before, await snapshotDatabase(NO_SESSIONS))).toEqual([]);
   });
@@ -115,7 +121,7 @@ describe("POST /api/v1/seller/application: store names (SEC-058, D-041)", () => 
       `${th.site.name} Official`,
       "ร้านแอดมินขายดี",
     ]) {
-      expect(await reasonOf(await apply(user.cookie, storeName)), storeName).toBe(
+      expect(await reasonOf(await apply(user, storeName)), storeName).toBe(
         "409 CONFLICT STORE_NAME_RESERVED",
       );
     }
@@ -124,7 +130,7 @@ describe("POST /api/v1/seller/application: store names (SEC-058, D-041)", () => 
 
   it("accepts a name whose reserved-looking letters are split by a space (one-word entries do not match across a space)", async () => {
     const user = await signedIn();
-    const response = await apply(user.cookie, "Pad Mint Kitchen");
+    const response = await apply(user, "Pad Mint Kitchen");
     expect(response.status).toBe(201);
   });
 
@@ -132,7 +138,7 @@ describe("POST /api/v1/seller/application: store names (SEC-058, D-041)", () => 
     await createStore({ name: "Moonlight Deli" });
     const user = await signedIn();
     await createSellerApplication({ userId: user.userId });
-    expect(await reasonOf(await apply(user.cookie, "moonlight deli"))).toBe(
+    expect(await reasonOf(await apply(user, "moonlight deli"))).toBe(
       "409 CONFLICT OPEN_APPLICATION",
     );
   });
@@ -140,8 +146,8 @@ describe("POST /api/v1/seller/application: store names (SEC-058, D-041)", () => 
   it("does not compare pending applications with each other", async () => {
     const first = await signedIn();
     const second = await signedIn();
-    expect((await apply(first.cookie, "Twin Peaks Shop")).status).toBe(201);
-    expect((await apply(second.cookie, "TWIN PEAKS SHOP")).status).toBe(201);
+    expect((await apply(first, "Twin Peaks Shop")).status).toBe(201);
+    expect((await apply(second, "TWIN PEAKS SHOP")).status).toBe(201);
   });
 });
 
@@ -307,7 +313,7 @@ describe("PATCH /api/v1/seller/store: store names and the rename audit (SEC-058,
     const seller = await signedIn("SELLER");
     expect((await rename(seller.cookie, { name: "Coral Reef Goods" })).status).toBe(200);
     const applicant = await signedIn();
-    expect(await reasonOf(await apply(applicant.cookie, "coral reef goods"))).toBe(
+    expect(await reasonOf(await apply(applicant, "coral reef goods"))).toBe(
       "409 CONFLICT STORE_NAME_TAKEN",
     );
   });

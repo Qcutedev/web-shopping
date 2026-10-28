@@ -24,6 +24,12 @@
  * per-user subject of a signed-in rule (`signed-in-address` first, SEC-052). This module
  * knows nothing about requests, users, or addresses, and it never logs a key or a subject.
  *
+ * Two per-user rules, `seller-application` and `review-create`, are not in this table: they are
+ * counted in the database (SEC-052 option (b)) by a `UserRateLimitStore` that
+ * src/modules/rate-limit provides, because this file may not import src/server/db (CLAUDE.md
+ * rule 7). This file defines their rules (USER_RATE_LIMITS) and the limiter over such a store
+ * (`createUserRateLimiter`).
+ *
  * The default store is in-process, so limits hold for a single long-running instance only. A
  * shared store (for example Redis) can be plugged in by implementing RateLimitStore; the
  * interface is asynchronous for that reason. Within one process, the counters of the exported
@@ -34,7 +40,7 @@
  *   - every rule has its own key capacity (`rule.maxKeys`), so filling one rule cannot refuse a
  *     subject of another rule;
  *   - the capacities of all rules of one limiter may add up to at most MAX_TOTAL_WINDOWS
- *     (200 000); the built-in RATE_LIMITS add up to exactly that; a set that exceeds the total
+ *     (180 000); the built-in RATE_LIMITS add up to exactly that; a set that exceeds the total
  *     is rejected with a TypeError when the limiter is created, as is a set in which two rules
  *     share a name;
  *   - each window holds a counter, a reset time, and a key of at most 128 characters after the
@@ -122,8 +128,13 @@ export interface RateLimiter {
   consume(subject: string, rule: RateLimitRule): Promise<RateLimitResult>;
 }
 
-/** Upper bound on the windows held for all rules together (SR-02). */
-export const MAX_TOTAL_WINDOWS = 200_000;
+/**
+ * Upper bound on the windows held for all rules together (SR-02). 200,000 until SEC-052 option
+ * (b) (2026-10-29) moved `seller-application` and `review-create` (10,000 windows each) to the
+ * database (USER_RATE_LIMITS below); the budget dropped by their 20,000 and no other rule's
+ * capacity changed.
+ */
+export const MAX_TOTAL_WINDOWS = 180_000;
 /** Upper bound on the number of rules in one limiter's rule set. */
 export const MAX_RULES = 64;
 /** Longest retry time reported for a refusal caused by a full store (SR-02). */
@@ -166,7 +177,7 @@ export const RATE_LIMITS = {
   SIGN_IN_ACCOUNT: { name: "sign-in-account", limit: 60, windowMs: 300_000, maxKeys: 50_000 },
   SIGN_UP: { name: "sign-up", limit: 5, windowMs: 3_600_000, maxKeys: 40_000 },
   /**
-   * Subject the client address (SR-01), over the four signed-in rules below together (SEC-052,
+   * Subject the client address (SR-01), over the four signed-in endpoints together (SEC-052,
    * owner ruling option (a)). Every handler of `checkout`, `uploads`, `seller-application`, and
    * `review-create` consumes it at step 5, after the access level and before its per-user rule,
    * and consumes the per-user rule only when this one allowed the request. Without it one client
@@ -176,26 +187,175 @@ export const RATE_LIMITS = {
    *
    * Capacity 5,000, taken from `uploads` (10,000 to 5,000). Keeping this rule full takes 5,000
    * new addresses a minute (about 83 a second), each with a signed-in request; a full rule
-   * refuses new addresses at all four endpoints. The total is unchanged.
+   * refuses new addresses at all four endpoints.
    */
   SIGNED_IN_ADDRESS: { name: "signed-in-address", limit: 60, windowMs: 60_000, maxKeys: 5_000 },
   /*
-   * The per-user signed-in rules hold 10,000 windows each (20,000 before SEC-050), except
-   * `uploads`, 5,000 since SEC-052: its subjects are approved sellers, which an admin approves one
-   * by one. Their subject is the user id, so only that many distinct accounts active inside one
-   * window can fill one of them; accounts are limited by `sign-up`, and since SEC-052 the requests
-   * of one client address by `signed-in-address`. Each user's own limit is unchanged.
+   * The per-user signed-in rules of this table hold 10,000 windows (`checkout`, 20,000 before
+   * SEC-050) and 5,000 (`uploads`, since SEC-052: its subjects are approved sellers, which an admin
+   * approves one by one). Their subject is the user id, so only that many distinct accounts active
+   * inside one window can fill one of them; accounts are limited by `sign-up`, and since SEC-052
+   * the requests of one client address by `signed-in-address`. Each user's own limit is unchanged.
+   * `seller-application` and `review-create` are not in this table since SEC-052 option (b): see
+   * USER_RATE_LIMITS.
    */
   CHECKOUT: { name: "checkout", limit: 10, windowMs: 60_000, maxKeys: 10_000 },
   UPLOADS: { name: "uploads", limit: 30, windowMs: 3_600_000, maxKeys: 5_000 },
-  SELLER_APPLICATION: {
-    name: "seller-application",
-    limit: 3,
-    windowMs: 86_400_000,
-    maxKeys: 10_000,
-  },
-  REVIEW_CREATE: { name: "review-create", limit: 10, windowMs: 3_600_000, maxKeys: 10_000 },
 } as const satisfies Record<string, RateLimitRule>;
+
+/**
+ * A per-user rule whose windows are kept outside this process (SEC-052 option (b), owner ruling
+ * 2026-10-29): one database row per user and rule, so the rule has no shared capacity that other
+ * accounts can fill. No `maxKeys`: the number of windows is bounded by the number of accounts,
+ * which `sign-up` bounds.
+ */
+export interface UserRateLimitRule {
+  /** Stable name, matching `^[a-z][a-z0-9-]{0,31}$`, and not the name of a RATE_LIMITS rule. */
+  name: string;
+  /** Maximum number of allowed hits per window. Positive integer. */
+  limit: number;
+  /** Window length in milliseconds. Positive integer, at most MAX_USER_RATE_LIMIT_WINDOW_MS. */
+  windowMs: number;
+}
+
+/** Longest window of a per-user rule: one week, a bound against a typing error. */
+export const MAX_USER_RATE_LIMIT_WINDOW_MS = 7 * 86_400_000;
+
+/**
+ * The per-user rules counted in the database (docs/DATA_MODEL.md section 6.18; the table's
+ * `UserRateLimitWindow_rule_check` accepts exactly these names). Their windows (24 h and 1 h) are
+ * the ones the one-minute `signed-in-address` rule does not bound (SEC-052). Consumed through
+ * `consumeUserRateLimit` of src/modules/rate-limit, which holds the database store, after
+ * `signed-in-address` allowed the request. The limits and windows are those of SR-02.
+ */
+export const USER_RATE_LIMITS = {
+  SELLER_APPLICATION: { name: "seller-application", limit: 3, windowMs: 86_400_000 },
+  REVIEW_CREATE: { name: "review-create", limit: 10, windowMs: 3_600_000 },
+} as const satisfies Record<string, UserRateLimitRule>;
+
+/** What a per-user store is asked to count: one request of `userId` under `rule`. */
+export interface UserRateLimitCount {
+  /** Validated rule name. */
+  rule: string;
+  /** Non-empty user id. */
+  userId: string;
+  limit: number;
+  windowMs: number;
+}
+
+/** The window after one counted request, in the store's clock. */
+export interface UserRateLimitWindowState {
+  /** Requests counted in the current window, this one included; at most `limit + 1`. */
+  count: number;
+  /** End of the window, epoch milliseconds. */
+  resetAt: number;
+  /** The store's current time, epoch milliseconds; `Retry-After` is computed against it. */
+  now: number;
+}
+
+/**
+ * Storage behind a per-user limiter. `count` must be one atomic operation per user and rule, and
+ * must not run inside a transaction of the request, so that the count survives whatever happens
+ * to the request afterwards (API_CONTRACTS section 6).
+ */
+export interface UserRateLimitStore {
+  count(input: UserRateLimitCount): Promise<UserRateLimitWindowState>;
+}
+
+export interface UserRateLimiter {
+  /**
+   * Records one request of `userId` under `rule`. Rejects with a TypeError when `rule` is not one
+   * of the limiter's rules (same name and settings) or `userId` is empty, and with the store's
+   * error, or a TypeError for an impossible answer, when the store fails: the caller then fails
+   * closed. `saturated` is always false: these rules have no shared capacity.
+   */
+  consume(userId: string, rule: UserRateLimitRule): Promise<RateLimitResult>;
+}
+
+/**
+ * Validates a complete per-user rule set: well-formed rules, no name used twice, no name that is
+ * also a rule of RATE_LIMITS (one name, one counter). Throws a TypeError otherwise.
+ */
+export function assertUserRateLimitRules(rules: readonly UserRateLimitRule[]): void {
+  if (rules.length > MAX_RULES) {
+    throw new TypeError(`A rate limiter accepts at most ${MAX_RULES} rules.`);
+  }
+  const inProcess = new Set<string>(Object.values(RATE_LIMITS).map((rule) => rule.name));
+  const names = new Set<string>();
+  for (const rule of rules) {
+    if (typeof rule.name !== "string" || !RULE_NAME_PATTERN.test(rule.name)) {
+      throw new TypeError("Rate limit rule name must match ^[a-z][a-z0-9-]{0,31}$.");
+    }
+    assertPositiveInteger(rule.limit, "limit");
+    assertPositiveInteger(rule.windowMs, "windowMs");
+    if (rule.windowMs > MAX_USER_RATE_LIMIT_WINDOW_MS) {
+      throw new TypeError(
+        `Rate limit windowMs of a per-user rule must be at most ${MAX_USER_RATE_LIMIT_WINDOW_MS}.`,
+      );
+    }
+    if (names.has(rule.name) || inProcess.has(rule.name)) {
+      throw new TypeError(`Rate limit rule "${rule.name}" is defined more than once.`);
+    }
+    names.add(rule.name);
+  }
+}
+
+/**
+ * Creates a per-user limiter over `store` for a fixed rule set (default: USER_RATE_LIMITS).
+ * Throws a TypeError when the set is not valid as a whole. The answer is computed from the
+ * store's own count, end of window, and clock, so every process agrees on when a window ends.
+ */
+export function createUserRateLimiter(
+  store: UserRateLimitStore,
+  ruleSet: readonly UserRateLimitRule[] = Object.values(USER_RATE_LIMITS),
+): UserRateLimiter {
+  assertUserRateLimitRules(ruleSet);
+  const rules = new Map<string, UserRateLimitRule>();
+  for (const { name, limit, windowMs } of ruleSet) rules.set(name, { name, limit, windowMs });
+
+  return {
+    async consume(userId, candidate) {
+      if (typeof userId !== "string" || userId.length === 0) {
+        throw new TypeError("Rate limit subject must be a non-empty string.");
+      }
+      const known = typeof candidate.name === "string" ? rules.get(candidate.name) : undefined;
+      if (known === undefined) {
+        throw new TypeError(
+          "Rate limit rule is not part of this limiter's rule set. Define it where the limiter is created.",
+        );
+      }
+      if (known.limit !== candidate.limit || known.windowMs !== candidate.windowMs) {
+        throw new TypeError(
+          `Rate limit rule "${known.name}" is already defined with different settings.`,
+        );
+      }
+      const hit = await store.count({
+        rule: known.name,
+        userId,
+        limit: known.limit,
+        windowMs: known.windowMs,
+      });
+      // An answer the store cannot give is a fault, never an allowance (fail closed).
+      if (
+        !Number.isInteger(hit.count) ||
+        hit.count < 1 ||
+        hit.count > known.limit + 1 ||
+        !Number.isFinite(hit.resetAt) ||
+        !Number.isFinite(hit.now)
+      ) {
+        throw new TypeError(`Rate limit store gave an impossible answer for "${known.name}".`);
+      }
+      return {
+        allowed: hit.count <= known.limit,
+        limit: known.limit,
+        remaining: Math.max(0, known.limit - hit.count),
+        resetAt: hit.resetAt,
+        retryAfterSeconds: retryAfter(hit.resetAt, hit.now),
+        saturated: false,
+      };
+    },
+  };
+}
 
 export interface MemoryRateLimitStoreOptions {
   /**

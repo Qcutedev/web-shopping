@@ -24,6 +24,7 @@ import { db, type FulfilmentStatus, isUniqueIndexViolation } from "@/server/db";
 import { createOrder, createProduct } from "../../helpers/factories";
 import { diffSnapshots, snapshotDatabase } from "../../helpers/snapshot";
 import { resetProcessRateLimiter, stubAuthEnvironment } from "../auth/support";
+import { USER_RATE_LIMIT_TABLE, windowCount } from "../rate-limit/support";
 import { callProductReviews, type ListBody } from "../catalog/call";
 import { request, type CallOptions } from "../inventory/support";
 import { errorCode, json, signedIn, type SignedIn } from "../sellers/support";
@@ -65,9 +66,13 @@ async function errorOf(response: Response): Promise<ErrorData> {
   return { code: error.code, message: error.message, details: error.details };
 }
 
-/** A snapshot of everything but sessions (a request may touch its session row). */
+/**
+ * A snapshot of everything but sessions (a request may touch its session row) and the per-user
+ * rate-limit windows: a request that reaches step 5 is counted there by contract whatever its
+ * outcome (API_CONTRACTS section 6, SEC-052 option (b)); the cases assert that count themselves.
+ */
 function snapshot() {
-  return snapshotDatabase({ excludeTables: ["Session"] });
+  return snapshotDatabase({ excludeTables: ["Session", USER_RATE_LIMIT_TABLE] });
 }
 
 async function expectUnchanged(before: Awaited<ReturnType<typeof snapshot>>): Promise<void> {
@@ -216,6 +221,8 @@ describe("POST /api/v1/orders/{id}/items/{itemId}/review: refusals", () => {
     expect(response.status).toBe(401);
     expect(await errorCode(response)).toBe("UNAUTHENTICATED");
     await expectUnchanged(before);
+    // Refused at step 3: no allowance used, no window written.
+    expect(await windowCount(buyer.userId, "review-create")).toBe(0);
   });
 
   it("is 403 for a foreign Origin and 415 for a wrong content type", async () => {
@@ -256,6 +263,8 @@ describe("POST /api/v1/orders/{id}/items/{itemId}/review: refusals", () => {
       expect(await errorCode(response)).toBe("VALIDATION_ERROR");
     }
     await expectUnchanged(before);
+    // Each refused request has used one allowance (section 6), and nothing else was written.
+    expect(await windowCount(buyer.userId, "review-create")).toBe(bodies.length);
   });
 
   it("refuses productId, userId, and the other ids as unknown keys (400), never using them", async () => {
@@ -302,6 +311,9 @@ describe("POST /api/v1/orders/{id}/items/{itemId}/review: refusals", () => {
     expect(await errorOf(foreign)).toEqual(expected);
     expect(await errorOf(unknown)).toEqual(expected);
     await expectUnchanged(before);
+    // The intruder's own allowance is used; the owner's is not touched.
+    expect(await windowCount(intruder.userId, "review-create")).toBe(2);
+    expect(await windowCount(owner.userId, "review-create")).toBe(0);
   });
 
   it("is 404 for an item of another order, even of the same buyer", async () => {
@@ -350,6 +362,7 @@ describe("POST /api/v1/orders/{id}/items/{itemId}/review: refusals", () => {
       });
       await expectUnchanged(before);
     }
+    expect(await windowCount(buyer.userId, "review-create")).toBe(4);
   });
 
   it("is 409 NOT_DELIVERED for an unpaid order's item", async () => {
@@ -388,6 +401,7 @@ describe("POST /api/v1/orders/{id}/items/{itemId}/review: refusals", () => {
       details: { reason: "DUPLICATE_REVIEW" },
     });
     await expectUnchanged(before);
+    expect(await windowCount(buyer.userId, "review-create")).toBe(2);
     const stored = await db.review.findMany({ where: { orderItemId: item.id } });
     expect(stored).toHaveLength(1);
     expect(stored[0]).toMatchObject({ rating: 5, comment: "แรก" });

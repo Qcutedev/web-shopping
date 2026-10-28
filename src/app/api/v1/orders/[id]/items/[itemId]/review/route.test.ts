@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { consumeUserRateLimit } from "@/modules/rate-limit";
 import { createReview } from "@/modules/reviews/service";
 import type { Actor } from "@/server/auth/actor";
 import { requireActor } from "@/server/auth/session";
@@ -29,10 +30,12 @@ vi.mock("@/server/env", () => ({
 vi.mock("@/server/auth/session", () => ({ requireActor: vi.fn() }));
 vi.mock("@/server/auth/security-events", () => ({ recordSecurityEvent: vi.fn() }));
 vi.mock("@/modules/reviews/service", () => ({ createReview: vi.fn() }));
+vi.mock("@/modules/rate-limit", () => ({ consumeUserRateLimit: vi.fn() }));
 
 const { POST } = routeModule;
 const requireActorMock = vi.mocked(requireActor);
 const createMock = vi.mocked(createReview);
+const userLimitMock = vi.mocked(consumeUserRateLimit);
 
 function actor(role: Actor["role"]): Actor {
   return Object.freeze({
@@ -84,6 +87,15 @@ beforeEach(() => {
   consumeSpy = vi.spyOn(rateLimiter, "consume");
   consumeSpy.mockResolvedValue({
     allowed: true,
+    limit: 60,
+    remaining: 59,
+    resetAt: 0,
+    retryAfterSeconds: 1,
+    saturated: false,
+  });
+  userLimitMock.mockReset();
+  userLimitMock.mockResolvedValue({
+    allowed: true,
     limit: 10,
     remaining: 9,
     resetAt: 0,
@@ -127,12 +139,30 @@ describe("POST /api/v1/orders/{id}/items/{itemId}/review", () => {
 
   it("consumes signed-in-address on the client address, then the review-create rule on the session's user id (SEC-052)", async () => {
     await POST(post(), context());
-    expect(consumeSpy).toHaveBeenCalledTimes(2);
+    expect(consumeSpy).toHaveBeenCalledTimes(1);
     // No trusted proxy here, so SR-01 gives the shared subject `unknown`.
     expect(consumeSpy.mock.calls[0]?.[0]).toBe("unknown");
     expect(consumeSpy.mock.calls[0]?.[1]).toMatchObject({ name: "signed-in-address", limit: 60 });
-    expect(consumeSpy.mock.calls[1]?.[0]).toBe("user_me");
-    expect(consumeSpy.mock.calls[1]?.[1]).toMatchObject({ name: "review-create", limit: 10 });
+    // The per-user rule is counted in the database (option (b)) on the session's actor.
+    expect(userLimitMock.mock.calls).toEqual([
+      [actor("CUSTOMER"), { name: "review-create", limit: 10, windowMs: 3_600_000 }],
+    ]);
+    expect(consumeSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      userLimitMock.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(userLimitMock.mock.invocationCallOrder[0]).toBeLessThan(
+      createMock.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
+  it("fails closed when the per-user store fails: 500, body unread, service not called", async () => {
+    userLimitMock.mockRejectedValueOnce(new Error("connection refused"));
+    const sent = post({ rawBody: "{not json" });
+    const response = await POST(sent, context());
+    expect(response.status).toBe(500);
+    expect(await codeOf(response)).toBe("INTERNAL_ERROR");
+    expect(sent.bodyUsed).toBe(false);
+    expect(createMock).not.toHaveBeenCalled();
   });
 
   it("is 429 when signed-in-address refuses, without consuming review-create or reading the body (SEC-052)", async () => {
@@ -152,6 +182,7 @@ describe("POST /api/v1/orders/{id}/items/{itemId}/review", () => {
     expect(sent.bodyUsed).toBe(false);
     expect(consumeSpy).toHaveBeenCalledTimes(1);
     expect(consumeSpy.mock.calls[0]?.[1]).toMatchObject({ name: "signed-in-address" });
+    expect(userLimitMock).not.toHaveBeenCalled();
     expect(createMock).not.toHaveBeenCalled();
   });
 
@@ -179,7 +210,7 @@ describe("POST /api/v1/orders/{id}/items/{itemId}/review", () => {
   });
 
   it("is 429 with Retry-After over the limit, before the body is read", async () => {
-    consumeSpy.mockResolvedValue({
+    userLimitMock.mockResolvedValue({
       allowed: false,
       limit: 10,
       remaining: 0,

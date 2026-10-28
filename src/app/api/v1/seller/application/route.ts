@@ -4,10 +4,11 @@
  * GET, access `user`: 3 the session (401), then the service (404 when the caller never applied).
  * POST, access `customer-role`: 1 `Origin` (403), 2 `Content-Type` (415), 3 the session (401),
  * 4 the role `CUSTOMER` (403 FORBIDDEN for a seller or an admin), 5 the `signed-in-address` rate
- * limit on the client address, then the `seller-application` rate limit on the session's user id
- * (429, before the body is read; section 6; SEC-052), 6 the body (413),
+ * limit on the client address, then the `seller-application` rate limit on the session's user id,
+ * counted in the database (429, before the body is read; section 6; SEC-052), 6 the body (413),
  * 7 the schema (400), then the service (409 OPEN_APPLICATION). `201` with the application.
  */
+import { consumeUserRateLimit } from "@/modules/rate-limit";
 import {
   getOwnApplication,
   submitApplication,
@@ -29,7 +30,7 @@ import {
   readJsonBody,
 } from "@/server/http";
 import { logger } from "@/server/logger";
-import { RATE_LIMITS, rateLimiter } from "@/server/rate-limit";
+import { RATE_LIMITS, rateLimiter, USER_RATE_LIMITS } from "@/server/rate-limit";
 import { handleRequest } from "@/server/request-frame";
 
 export async function GET(request: Request): Promise<Response> {
@@ -47,11 +48,14 @@ export async function POST(request: Request): Promise<Response> {
     const actor = await requireActor(request);
     requireRole(actor, "CUSTOMER");
     // SEC-052: the client address first; the user's rule only when the address rule allowed it.
+    // The user's rule is counted in the database (option (b)), outside any transaction.
     const clientIp = getClientAddress(request, env.trustedProxy);
     const byAddress = await rateLimiter.consume(clientIp, RATE_LIMITS.SIGNED_IN_ADDRESS);
-    const rule = byAddress.allowed ? RATE_LIMITS.SELLER_APPLICATION : RATE_LIMITS.SIGNED_IN_ADDRESS;
+    const rule = byAddress.allowed
+      ? USER_RATE_LIMITS.SELLER_APPLICATION
+      : RATE_LIMITS.SIGNED_IN_ADDRESS;
     const limit = byAddress.allowed
-      ? await rateLimiter.consume(actor.userId, RATE_LIMITS.SELLER_APPLICATION)
+      ? await consumeUserRateLimit(actor, USER_RATE_LIMITS.SELLER_APPLICATION)
       : byAddress;
     if (!limit.allowed) {
       // SR-04: a rate-limit refusal is a security event (throttled, ids and outcome only).

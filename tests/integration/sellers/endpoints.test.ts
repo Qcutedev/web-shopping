@@ -21,6 +21,7 @@ import { db } from "@/server/db";
 import { createSellerApplication, createUpload } from "../../helpers/factories";
 import { diffSnapshots, snapshotDatabase } from "../../helpers/snapshot";
 import { resetProcessRateLimiter, stubAuthEnvironment } from "../auth/support";
+import { resetUserRateLimits, USER_RATE_LIMIT_TABLE, windowCount } from "../rate-limit/support";
 import { errorCode, json, request, signedIn } from "./support";
 
 beforeAll(() => {
@@ -67,7 +68,10 @@ describe("POST /api/v1/seller/application", () => {
   it("refuses a second application while one is PENDING with 409 OPEN_APPLICATION", async () => {
     const user = await signedIn();
     await createSellerApplication({ userId: user.userId });
-    const before = await snapshotDatabase({ excludeTables: ["Session"] });
+    // The per-user window is counted by contract whatever the outcome (section 6, SEC-052 (b)),
+    // so it is left out of the snapshot and asserted on its own.
+    const excludeTables = ["Session", USER_RATE_LIMIT_TABLE];
+    const before = await snapshotDatabase({ excludeTables });
     const response = await postApplicationRoute(
       request("POST", "/api/v1/seller/application", { cookie: user.cookie, body: APPLY }),
     );
@@ -75,9 +79,8 @@ describe("POST /api/v1/seller/application", () => {
     expect(await json(response)).toMatchObject({
       error: { code: "CONFLICT", details: { reason: "OPEN_APPLICATION" } },
     });
-    expect(diffSnapshots(before, await snapshotDatabase({ excludeTables: ["Session"] }))).toEqual(
-      [],
-    );
+    expect(diffSnapshots(before, await snapshotDatabase({ excludeTables }))).toEqual([]);
+    expect(await windowCount(user.userId, "seller-application")).toBe(1);
   });
 
   it("lets a rejected applicant apply again", async () => {
@@ -115,11 +118,13 @@ describe("POST /api/v1/seller/application", () => {
     ]) {
       // Each refused request still uses an allowance of 3 per day (section 6); start afresh.
       resetProcessRateLimiter();
+      await resetUserRateLimits(user.userId);
       const response = await postApplicationRoute(
         request("POST", "/api/v1/seller/application", { cookie: user.cookie, body }),
       );
       expect(response.status).toBe(400);
       expect(await errorCode(response)).toBe("VALIDATION_ERROR");
+      expect(await windowCount(user.userId, "seller-application")).toBe(1);
     }
     expect(
       await db.sellerApplication.count({ where: { userId: { in: [user.userId, victim.userId] } } }),

@@ -4,11 +4,13 @@
  *
  * Order of checks (section 1.8): 1 `Origin` (403), 2 `Content-Type` (415), 3 the session (401),
  * 5 the `signed-in-address` rate limit on the client address, then the `review-create` rate
- * limit on the session's user id (429, before the body is read; section 6; SEC-052), 6 the body
+ * limit on the session's user id, counted in the database (429, before the body is read; section
+ * 6; SEC-052), 6 the body
  * (413), 7 the path parameters and the body's schema (400), then the
  * service (404 for an order that is not the caller's or an item not in it; 409 CONFLICT with
  * reason `NOT_DELIVERED` or `DUPLICATE_REVIEW`). No step 4: every role may review what it bought.
  */
+import { consumeUserRateLimit } from "@/modules/rate-limit";
 import { createReview, createReviewBodySchema, reviewTargetParamsSchema } from "@/modules/reviews";
 import { recordSecurityEvent } from "@/server/auth/security-events";
 import { requireActor } from "@/server/auth/session";
@@ -24,7 +26,7 @@ import {
   readJsonBody,
 } from "@/server/http";
 import { logger } from "@/server/logger";
-import { RATE_LIMITS, rateLimiter } from "@/server/rate-limit";
+import { RATE_LIMITS, rateLimiter, USER_RATE_LIMITS } from "@/server/rate-limit";
 import { handleRequest } from "@/server/request-frame";
 
 export async function POST(
@@ -37,11 +39,12 @@ export async function POST(
     assertContentType(request, JSON_CONTENT_TYPE);
     const actor = await requireActor(request);
     // SEC-052: the client address first; the user's rule only when the address rule allowed it.
+    // The user's rule is counted in the database (option (b)), outside any transaction.
     const clientIp = getClientAddress(request, env.trustedProxy);
     const byAddress = await rateLimiter.consume(clientIp, RATE_LIMITS.SIGNED_IN_ADDRESS);
-    const rule = byAddress.allowed ? RATE_LIMITS.REVIEW_CREATE : RATE_LIMITS.SIGNED_IN_ADDRESS;
+    const rule = byAddress.allowed ? USER_RATE_LIMITS.REVIEW_CREATE : RATE_LIMITS.SIGNED_IN_ADDRESS;
     const limit = byAddress.allowed
-      ? await rateLimiter.consume(actor.userId, RATE_LIMITS.REVIEW_CREATE)
+      ? await consumeUserRateLimit(actor, USER_RATE_LIMITS.REVIEW_CREATE)
       : byAddress;
     if (!limit.allowed) {
       // SR-04: a rate-limit refusal is a security event (throttled, ids and outcome only).

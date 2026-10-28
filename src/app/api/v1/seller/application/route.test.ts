@@ -12,12 +12,13 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { consumeUserRateLimit } from "@/modules/rate-limit";
 import type { SellerApplicationDto } from "@/modules/sellers";
 import { getOwnApplication, submitApplication } from "@/modules/sellers/service";
 import type { Actor } from "@/server/auth/actor";
 import { requireActor } from "@/server/auth/session";
 import { notFound, unauthenticated } from "@/server/errors";
-import { rateLimiter } from "@/server/rate-limit";
+import { rateLimiter, type RateLimitResult } from "@/server/rate-limit";
 
 import * as routeModule from "./route";
 
@@ -39,8 +40,19 @@ vi.mock("@/modules/sellers/service", () => ({
   submitApplication: vi.fn(),
   updateOwnStore: vi.fn(),
 }));
+vi.mock("@/modules/rate-limit", () => ({ consumeUserRateLimit: vi.fn() }));
 
 const { GET, POST } = routeModule;
+const userLimitMock = vi.mocked(consumeUserRateLimit);
+
+const ALLOWED: RateLimitResult = {
+  allowed: true,
+  limit: 3,
+  remaining: 2,
+  resetAt: 0,
+  retryAfterSeconds: 1,
+  saturated: false,
+};
 const requireActorMock = vi.mocked(requireActor);
 const getMock = vi.mocked(getOwnApplication);
 const submitMock = vi.mocked(submitApplication);
@@ -101,14 +113,9 @@ beforeEach(() => {
   submitMock.mockReset();
   submitMock.mockResolvedValue(APPLICATION);
   consumeSpy = vi.spyOn(rateLimiter, "consume");
-  consumeSpy.mockResolvedValue({
-    allowed: true,
-    limit: 3,
-    remaining: 2,
-    resetAt: 0,
-    retryAfterSeconds: 1,
-    saturated: false,
-  });
+  consumeSpy.mockResolvedValue({ ...ALLOWED, limit: 60, remaining: 59 });
+  userLimitMock.mockReset();
+  userLimitMock.mockResolvedValue(ALLOWED);
 });
 
 afterEach(() => {
@@ -156,11 +163,30 @@ describe("POST /api/v1/seller/application", () => {
       description: "ขายของ",
       contactPhone: "0812345678",
     });
-    // SEC-052: the client address first (no trusted proxy here: SR-01 `unknown`), then the user.
+    // SEC-052: the client address first (no trusted proxy here: SR-01 `unknown`), then the user,
+    // whose rule is counted in the database (option (b)) on the session's actor.
     expect(consumeSpy.mock.calls).toEqual([
       ["unknown", expect.objectContaining({ name: "signed-in-address", limit: 60 })],
-      ["user_me", expect.objectContaining({ name: "seller-application" })],
     ]);
+    expect(userLimitMock.mock.calls).toEqual([
+      [actor("CUSTOMER"), { name: "seller-application", limit: 3, windowMs: 86_400_000 }],
+    ]);
+    expect(consumeSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      userLimitMock.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(userLimitMock.mock.invocationCallOrder[0]).toBeLessThan(
+      submitMock.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
+  it("5: the per-user store failing fails closed: 500, body unread, service not called", async () => {
+    userLimitMock.mockRejectedValueOnce(new Error("connection refused"));
+    const request = post({ rawBody: "{bad" });
+    const response = await POST(request);
+    expect(response.status).toBe(500);
+    expect(await codeOf(response)).toBe("INTERNAL_ERROR");
+    expect(request.bodyUsed).toBe(false);
+    expect(submitMock).not.toHaveBeenCalled();
   });
 
   it("5: signed-in-address refusing is 429 before the body is read, and seller-application is not consumed (SEC-052)", async () => {
@@ -180,6 +206,7 @@ describe("POST /api/v1/seller/application", () => {
     expect(consumeSpy.mock.calls).toEqual([
       ["unknown", expect.objectContaining({ name: "signed-in-address" })],
     ]);
+    expect(userLimitMock).not.toHaveBeenCalled();
     expect(submitMock).not.toHaveBeenCalled();
   });
 
@@ -208,11 +235,12 @@ describe("POST /api/v1/seller/application", () => {
     expect(await codeOf(response)).toBe("FORBIDDEN");
     expect(request.bodyUsed).toBe(false);
     expect(consumeSpy).not.toHaveBeenCalled();
+    expect(userLimitMock).not.toHaveBeenCalled();
     expect(submitMock).not.toHaveBeenCalled();
   });
 
   it("5: over the limit is 429 with Retry-After, before the body is read", async () => {
-    consumeSpy.mockResolvedValue({
+    userLimitMock.mockResolvedValue({
       allowed: false,
       limit: 3,
       remaining: 0,
