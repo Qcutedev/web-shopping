@@ -127,6 +127,12 @@ const WARM_POSTS = [
   "/api/v1/orders/e2e-warm-up/items/e2e-warm-up/review",
 ];
 
+function logServerError(method: string, path: string, status: number): void {
+  if (status >= 500) {
+    console.warn(`e2e setup: warm-up ${method} ${path} answered ${status}`);
+  }
+}
+
 async function warmRoutes(): Promise<void> {
   const api = await request.newContext({
     baseURL: E2E_ORIGIN,
@@ -135,10 +141,13 @@ async function warmRoutes(): Promise<void> {
   try {
     for (const path of WARM_PATHS) {
       // Only the compile matters; the status (a redirect, a not-found page) does not.
-      await api.get(path, { timeout: 170_000 });
+      // A server error is logged, because it means the route did not compile.
+      const response = await api.get(path, { timeout: 170_000 });
+      logServerError("GET", path, response.status());
     }
     for (const path of WARM_POSTS) {
-      await api.post(path, { data: {}, timeout: 170_000 });
+      const response = await api.post(path, { data: {}, timeout: 170_000 });
+      logServerError("POST", path, response.status());
     }
   } finally {
     await api.dispose();
