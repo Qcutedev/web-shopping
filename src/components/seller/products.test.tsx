@@ -326,7 +326,8 @@ describe("create product", () => {
     await fillForm(user);
     const submit = screen.getByRole("button", { name: th.seller.products.form.create });
     await user.click(submit);
-    expect((submit as HTMLButtonElement).disabled).toBe(true);
+    expect(submit.getAttribute("aria-disabled")).toBe("true");
+    await user.click(submit);
     expect(api.createProduct).toHaveBeenCalledTimes(1);
     expect(api.createProduct).toHaveBeenCalledWith({
       title: "เสื้อ",

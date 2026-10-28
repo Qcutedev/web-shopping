@@ -178,7 +178,7 @@ describe("CheckoutView submit", () => {
     render(<CheckoutView cart={cartOf()} addresses={[address({ isDefault: true })]} />);
     const button = submitButton();
     await userEvent.click(button);
-    await waitFor(() => expect(button.disabled).toBe(true));
+    await waitFor(() => expect(button.getAttribute("aria-disabled")).toBe("true"));
     expect(
       (screen.getByRole("checkbox", { name: th.checkout.failOption }) as HTMLInputElement).disabled,
     ).toBe(true);

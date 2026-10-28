@@ -138,7 +138,8 @@ describe("CartView", () => {
     render(<CartView cart={cartOf([line()])} />);
     const button = screen.getByRole("button", { name: `${th.cart.remove} ชาเขียว` });
     await userEvent.click(button);
-    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(true));
+    await waitFor(() => expect(button.getAttribute("aria-disabled")).toBe("true"));
+    await userEvent.click(button);
     expect(api.removeCartItem).toHaveBeenCalledTimes(1);
     resolve(ok);
     expect(await screen.findByText(th.cart.removed)).toBeTruthy();

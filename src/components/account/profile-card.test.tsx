@@ -71,7 +71,8 @@ describe("ProfileCard", () => {
     await user.click(screen.getByRole("button", { name: th.account.profile.edit }));
     const save = screen.getByRole("button", { name: th.account.common.save });
     await user.click(save);
-    await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(true));
+    await waitFor(() => expect(save.getAttribute("aria-disabled")).toBe("true"));
+    expect((save as HTMLButtonElement).disabled).toBe(false);
     await user.click(save);
     expect(updateProfile).toHaveBeenCalledTimes(1);
     resolve({ ok: false, status: 500, code: "INTERNAL_ERROR", fields: [], requestId: null });

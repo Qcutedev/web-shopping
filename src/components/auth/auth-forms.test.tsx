@@ -85,7 +85,8 @@ describe("SignInForm", () => {
     render(<SignInForm next="/" />);
     await fillAndSubmit(user);
     const button = screen.getByRole("button", { name: th.auth.signInSubmit }) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    await user.click(button);
     expect(signIn).toHaveBeenCalledTimes(1);
   });
 });

@@ -39,7 +39,8 @@ describe("AddToCart", () => {
     render(<AddToCart {...props} />);
     const button = screen.getByRole("button", { name: th.cart.add.submit });
     await user.click(button);
-    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    expect((button as HTMLButtonElement).disabled).toBe(false);
     await user.click(button);
     expect(addCartItem).toHaveBeenCalledTimes(1);
     resolve({ ok: true, status: 200, data: {} });

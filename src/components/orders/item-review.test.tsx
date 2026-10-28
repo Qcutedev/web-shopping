@@ -108,7 +108,9 @@ describe("ItemReview", () => {
 
     expect(api.createReview).toHaveBeenCalledWith("o1", "i1", { rating: 4, comment: "ดีมาก" });
     const submit = screen.getByRole("button", { name: text.submit }) as HTMLButtonElement;
-    expect(submit.disabled).toBe(true);
+    expect(submit.getAttribute("aria-disabled")).toBe("true");
+    await userEvent.click(submit);
+    expect(api.createReview).toHaveBeenCalledTimes(1);
 
     resolve({ ok: true, status: 201, data: { ...STORED, comment: "ดีมาก" } });
     await waitFor(() => expect(screen.getByText(text.submitted)).toBeTruthy());

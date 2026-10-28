@@ -240,7 +240,7 @@ describe("ApplicationForm", () => {
     );
     const button = screen.getByRole("button", { name: th.seller.apply.submit });
     await user.click(button);
-    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(button.getAttribute("aria-disabled")).toBe("true");
     await user.click(button);
     expect(submitApplication).toHaveBeenCalledTimes(1);
     expect(submitApplication).toHaveBeenCalledWith({
