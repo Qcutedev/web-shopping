@@ -532,11 +532,20 @@ The lowered quantity is **stored** only by a mutation: the customer's `PATCH` of
 
 ### 6.15 Review
 
-`id`, `orderItemId` FK unique, `productId` FK, `userId` FK, `rating`, `comment?`, `createdAt`. No edit path exists, so there is no `updatedAt`.
+`id`, `orderItemId` FK unique, `productId` FK, `userId` FK, `rating`, `comment?`, `createdAt`, `updatedAt`, `hiddenAt?`, `hiddenByUserId?` FK to `User`, `hiddenReason?`. The customer has no edit path; `updatedAt` exists since the admin hide (below) made rows mutable, and was backfilled to `createdAt` for rows that existed before.
 
 - `CHECK (rating BETWEEN 1 AND 5)`.
-- Index `(productId, createdAt)`.
+- Index `(productId, createdAt)`, and the partial index `(productId, createdAt) WHERE "hiddenAt" IS NULL` for the public list and the rating summary (below).
 - `productId` and `userId` repeat what the order item and its order already say, so that a product's reviews can be listed without two joins. The review service copies them from the order item and never from the request.
+
+**Admin hide (SECURITY.md SEC-092, owner chose remediation 1; migration `20261028163543_review_admin_hide`).** An admin can hide a review; nothing is deleted, and the review row, its comment, and its rating stay as written.
+
+- Public: `hiddenAt`, `hiddenByUserId`, and `hiddenReason` are all null. Hidden: `hiddenAt` and `hiddenByUserId` are set; `hiddenReason` is optional. Any other combination is refused by `Review_hidden_pair_check`. Un-hiding, if the service offers it, sets all three back to null; the history of who hid it then lives only in `AuditLog`.
+- `hiddenReason` is 1 to 500 characters (`Review_hiddenReason_check`), the length of the admin `reason` rule of API_CONTRACTS.md. The database counts characters, not bytes, and does not trim: a reason of only white space passes the check, so the service normalises and refuses blank first, as for every other admin reason.
+- `hiddenByUserId` is `Restrict`, like every other admin foreign key (`SellerApplication.reviewedById`, `MarketplaceSettings.updatedById`, `AuditLog.actorId`). Users are never deleted, so it does not fire. The relation on `User` is `hiddenReviews` (`@relation("ReviewHiddenBy")`); the author relation is now named `"ReviewAuthor"` because `Review` has two keys to `User`. The names are Prisma-only and change nothing in the database; the field names `user` and `User.reviews` are unchanged.
+- No index on `hiddenByUserId`: no query lists reviews by the admin who hid them (section 15).
+- **What reads must change (backend-api).** Every public read of reviews adds `hiddenAt: null` to its `where`: the list of a product's reviews and the aggregate behind the rating summary (`src/modules/catalog/repository.ts`). Only then does the planner use the partial index. A read that must include hidden rows (an admin view) uses `Review_productId_createdAt_idx`. The customer's own eligibility check (one review per item) must keep counting hidden rows: a hidden review still occupies its `orderItemId`, and `Review_orderItemId_key` refuses a second one either way.
+- **The hide is audited in `AuditLog`** (section 6.17), in the same transaction as the update: `targetType` `"Review"`, `targetId` the review id, an action such as `REVIEW_HIDDEN`, `metadata` with the reason and the product id. Not the comment: the review row keeps it, and copying customer text into the audit log widens where it lives (SR-04). The update is a conditional update (D-024): `WHERE id = $1 AND "hiddenAt" IS NULL`, zero rows is a conflict.
 
 ### 6.16 MarketplaceSettings
 
@@ -909,6 +918,8 @@ Consequences, all intended (REQUIREMENTS.md BR-34 says the same): after a restor
 | At most 8 pictures per product | unique `(productId, sortOrder)`, `CHECK` 0 to 7 | |
 | An order's picture outlives the product | `Restrict` foreign key to `Upload` | cleanup deletes rows before files |
 | One review per purchased item | unique `orderItemId` | eligibility check |
+| A hidden review names its time and its admin; a public one carries no hide data | `CHECK` `Review_hidden_pair_check` | conditional update with an `AuditLog` row (section 6.15) |
+| A hidden review is not public | partial index only serves it; nothing enforces it | every public read filters `hiddenAt IS NULL` (section 6.15) |
 | History survives edits | copied columns, `Restrict` foreign keys | archive instead of delete |
 | Settings within limits | `CHECK` | validation |
 | Commission is a whole number of percent | `CHECK` (multiple of 100) on `MarketplaceSettings` | validation |
@@ -938,7 +949,7 @@ Hand-written in the first migration and kept in sync here. **Every name is liste
 | `OrderItem` | quantity 1 to 99; unit price 100 to 100,000,000; line total equals unit price times quantity; the two return columns are both null or both set; `cartQuantityBeforeReturn` 0 to 99; `cartQuantityAfterReturn` 1 to 99 and at most `cartQuantityBeforeReturn + quantity` |
 | `Payment` | amount 0 to 2,000,000,000 |
 | `Shipment` | `deliveredAt` null or not before `shippedAt` |
-| `Review` | rating 1 to 5 |
+| `Review` | rating 1 to 5; the three hide columns all null, or `hiddenAt` and `hiddenByUserId` both set; `hiddenReason` 1 to 500 characters (both since migration `20261028163543_review_admin_hide`, section 6.15) |
 | `MarketplaceSettings` | `id = 1`; fee 0 to 100,000; commission 0 to 10,000; commission a multiple of 100 (`"commissionRateBps" % 100 = 0`, OQ-38) |
 
 **Partial unique indexes**
@@ -946,6 +957,10 @@ Hand-written in the first migration and kept in sync here. **Every name is liste
 - `Address (userId) WHERE "isDefault"`: one default address per user.
 - `SellerApplication (userId) WHERE status = 'PENDING'`: one open application per user.
 - `Product (storeId, sku) WHERE status <> 'ARCHIVED'` (`Product_storeId_sku_live_key`): SKU unique per store among live products. Because this is partial, the Prisma schema has **no** `@@unique([storeId, sku])`; services cannot use a compound-unique lookup on it and must catch the unique violation by index name.
+
+**Partial indexes (not unique)**
+
+- `Review (productId, createdAt) WHERE "hiddenAt" IS NULL` (`Review_productId_createdAt_visible_idx`, migration `20261028163543_review_admin_hide`): the public review list and rating summary (section 6.15). Not declared in the schema file; `migrate dev` reports no drift for it (observed 2026-10-28).
 
 **Other**
 
@@ -965,7 +980,7 @@ Hand-written in the first migration and kept in sync here. **Every name is liste
 | `CartItem.productId` | `Cascade` | A cart is not history; a hard-deleted product leaves carts (S10) |
 | `Session.userId`, `Account.userId` | `Cascade`, as the auth library defines (`prisma/schema.prisma`) | Users are never deleted by the application, so it does not fire |
 
-Named `Restrict` keys that matter: `OrderItem.productId`, `OrderItem.productImageUploadId`, `OrderItem.sellerOrderId`, `SellerOrder.orderId`, `SellerOrder.storeId`, `Order.userId`, `Payment.orderId`, `Shipment.sellerOrderId`, `Review.orderItemId`, `Review.productId`, `Review.userId`, `Product.storeId`, `Product.categoryId`, `Store.ownerId`, `Store.logoUploadId`, `ProductImage.uploadId`, `Upload.storeId`, `AuditLog.actorId`. Orders, seller orders, order items, payments, and audit entries are never reachable by a cascade.
+Named `Restrict` keys that matter: `OrderItem.productId`, `OrderItem.productImageUploadId`, `OrderItem.sellerOrderId`, `SellerOrder.orderId`, `SellerOrder.storeId`, `Order.userId`, `Payment.orderId`, `Shipment.sellerOrderId`, `Review.orderItemId`, `Review.productId`, `Review.userId`, `Review.hiddenByUserId`, `Product.storeId`, `Product.categoryId`, `Store.ownerId`, `Store.logoUploadId`, `ProductImage.uploadId`, `Upload.storeId`, `AuditLog.actorId`. Orders, seller orders, order items, payments, and audit entries are never reachable by a cascade.
 
 | Entity | Policy |
 | --- | --- |
@@ -1020,6 +1035,7 @@ Indexes are listed with their tables in section 6; each serves a query a require
 | `20261011121529_init_schema_v1` (T-013) | Every table and enum in this document, plus the raw SQL of section 13: the sequence `order_number_seq`, 31 check constraints, 3 partial unique indexes, and the `MarketplaceSettings` row. Applied to the local development and test databases only | **There is no down migration.** No shared or production database exists yet, so until one does, rolling back means resetting the local database (`prisma migrate reset`, or emptying the test container) and re-applying; there is nothing to restore. Once it has been applied to a shared database this file is never edited again, and undoing any part of it is a new hand-written migration, after a backup |
 | `20261015090000_store_name_key` (SEC-058, D-041) | Hand-written in full: function `store_name_key(text)`, generated column `Store.nameKey` (computed for every existing row by the `ADD COLUMN`, which is the backfill), renaming of colliding existing stores, unique index `Store_nameKey_key` (section 21.7). Applied to the local development database on 2026-10-15 (0 stores renamed: the two sample stores have different keys) and to the integration template database by `pnpm test:integration`. Not applied to any shared or production database | **There is no down migration; Prisma does not generate one.** To undo by hand: `DROP INDEX "Store_nameKey_key"; ALTER TABLE "Store" DROP COLUMN "nameKey"; DROP FUNCTION "store_name_key"(text);` and delete the row of this migration from `_prisma_migrations`. That drops only derived data (the key is recomputable from `name`). **The collision renames are not undone by it**: the earlier names are not stored anywhere (no `AuditLog` row, since the table needs a user as the actor). Before this migration runs on any database holding real stores, run the query in section 21.7 ("Before a shared database") and get the owner's decision on every collision; a backup is taken first |
 | `20261020090000_order_item_upload_index` (SEC-067) | Generated by Prisma from `@@index([productImageUploadId])` on `OrderItem`; no raw SQL. One statement: `CREATE INDEX "OrderItem_productImageUploadId_idx"` (section 6.12). Plain `CREATE INDEX`, not `CONCURRENTLY`, because Prisma runs a migration file as one script and `CONCURRENTLY` cannot run inside a transaction block; it blocks writes to `OrderItem` while the index is built. Applied on 2026-10-20 to a scratch database on the test server and to the integration template database by `pnpm test:integration`. Not applied to the local development database or to any shared or production database. Before a production run on a large `OrderItem` table, the owner decides whether to build the index by hand with `CREATE INDEX CONCURRENTLY` first and then mark this migration applied (`prisma migrate resolve --applied`) | **There is no down migration; Prisma does not generate one.** To undo by hand: `DROP INDEX "OrderItem_productImageUploadId_idx";` and delete the row of this migration from `_prisma_migrations`, and remove the `@@index` from the schema file in the same change. No data is lost; only the lookups become full scans again (SEC-067 reopens) |
+| `20261028163543_review_admin_hide` (SEC-092 step 1) | Prisma-generated: columns `Review.hiddenAt`, `hiddenByUserId`, `hiddenReason` (nullable) and `updatedAt` (not null, default now), foreign key `Review_hiddenByUserId_fkey` (`RESTRICT`). Hand-written: backfill `updatedAt = createdAt`, checks `Review_hidden_pair_check` and `Review_hiddenReason_check`, partial index `Review_productId_createdAt_visible_idx` (sections 6.15, 21.8). Additive: every existing review stays public. Plain `CREATE INDEX`, which blocks writes to `Review` while it is built; the table is small before launch. Applied to the local development database on 2026-10-28 and to the integration template database by `pnpm test:integration`. Not applied to any shared or production database | **There is no down migration; Prisma does not generate one.** To undo by hand, after a backup: `DROP INDEX "Review_productId_createdAt_visible_idx"; ALTER TABLE "Review" DROP CONSTRAINT "Review_hiddenReason_check", DROP CONSTRAINT "Review_hidden_pair_check", DROP CONSTRAINT "Review_hiddenByUserId_fkey", DROP COLUMN "hiddenReason", DROP COLUMN "hiddenByUserId", DROP COLUMN "hiddenAt", DROP COLUMN "updatedAt";`, delete the row of this migration from `_prisma_migrations`, and revert the schema file in the same change. **That is destructive once any review has been hidden**: every hidden review becomes public again and the hide record survives only in `AuditLog`. So it needs the sign-off of section 17 like any other destructive change. Before the undo, deploy code that no longer reads the columns |
 
 ## 18. Seed data
 
@@ -1258,7 +1274,13 @@ These must be supplied by every insert. Everything else either has a default lis
 | `SellerApplication_userId_pending_key` | `"SellerApplication" ("userId") WHERE status = 'PENDING'` |
 | `Product_storeId_sku_live_key` | `"Product" ("storeId", sku) WHERE status <> 'ARCHIVED'` |
 
-**Check constraints** (31)
+**Partial index (not unique)**
+
+| Name | Definition |
+| --- | --- |
+| `Review_productId_createdAt_visible_idx` | `"Review" ("productId", "createdAt") WHERE "hiddenAt" IS NULL` (migration `20261028163543_review_admin_hide`) |
+
+**Check constraints** (33: 31 from the first migration, 2 from `20261028163543_review_admin_hide`)
 
 | Name | Condition |
 | --- | --- |
@@ -1289,6 +1311,8 @@ These must be supplied by every insert. Everything else either has a default lis
 | `Payment_amountSatang_check` | `"amountSatang" BETWEEN 0 AND 2000000000` |
 | `Shipment_deliveredAt_check` | `"deliveredAt" IS NULL OR "deliveredAt" >= "shippedAt"` |
 | `Review_rating_check` | `rating BETWEEN 1 AND 5` |
+| `Review_hidden_pair_check` | `("hiddenAt" IS NULL AND "hiddenByUserId" IS NULL AND "hiddenReason" IS NULL) OR ("hiddenAt" IS NOT NULL AND "hiddenByUserId" IS NOT NULL)` |
+| `Review_hiddenReason_check` | `"hiddenReason" IS NULL OR char_length("hiddenReason") BETWEEN 1 AND 500` |
 | `MarketplaceSettings_id_check` | `id = 1` |
 | `MarketplaceSettings_flatShippingFeeSatang_check` | `"flatShippingFeeSatang" BETWEEN 0 AND 100000` |
 | `MarketplaceSettings_commissionRateBps_check` | `"commissionRateBps" BETWEEN 0 AND 10000` |
@@ -1316,7 +1340,7 @@ Naming rule: primary key `<Table>_pkey`; unique `<Table>_<columns>_key`; index `
 | `onDelete` | Names |
 | --- | --- |
 | `CASCADE` | `Session_userId_fkey`, `Account_userId_fkey`, `ProductImage_productId_fkey`, `CartItem_cartId_fkey`, `CartItem_productId_fkey` |
-| `RESTRICT` | `Address_userId_fkey`, `Store_ownerId_fkey`, `Store_logoUploadId_fkey`, `SellerApplication_userId_fkey`, `SellerApplication_reviewedById_fkey`, `Product_storeId_fkey`, `Product_categoryId_fkey`, `Upload_storeId_fkey`, `ProductImage_uploadId_fkey`, `Cart_userId_fkey`, `Order_userId_fkey`, `SellerOrder_orderId_fkey`, `SellerOrder_storeId_fkey`, `OrderItem_sellerOrderId_fkey`, `OrderItem_productId_fkey`, `OrderItem_productImageUploadId_fkey`, `Payment_orderId_fkey`, `Shipment_sellerOrderId_fkey`, `Review_orderItemId_fkey`, `Review_productId_fkey`, `Review_userId_fkey`, `MarketplaceSettings_updatedById_fkey`, `AuditLog_actorId_fkey` |
+| `RESTRICT` | `Address_userId_fkey`, `Store_ownerId_fkey`, `Store_logoUploadId_fkey`, `SellerApplication_userId_fkey`, `SellerApplication_reviewedById_fkey`, `Product_storeId_fkey`, `Product_categoryId_fkey`, `Upload_storeId_fkey`, `ProductImage_uploadId_fkey`, `Cart_userId_fkey`, `Order_userId_fkey`, `SellerOrder_orderId_fkey`, `SellerOrder_storeId_fkey`, `OrderItem_sellerOrderId_fkey`, `OrderItem_productId_fkey`, `OrderItem_productImageUploadId_fkey`, `Payment_orderId_fkey`, `Shipment_sellerOrderId_fkey`, `Review_orderItemId_fkey`, `Review_productId_fkey`, `Review_userId_fkey`, `Review_hiddenByUserId_fkey`, `MarketplaceSettings_updatedById_fkey`, `AuditLog_actorId_fkey` |
 
 ### 21.5 How a violation reaches a service
 
@@ -1341,6 +1365,7 @@ Rules that follow, for backend-api and auth:
   | --- | --- | --- | --- | --- |
   | Checkout | `CHECKOUT_TRANSACTION_OPTIONS` (`src/modules/checkout/repository.ts`) | 5 s | 15 s | the customer's `Cart` row, held by a concurrent checkout of the same user |
   | Payment success (`markOrderPaid`) and failure (`failOrder`, a decline or the timeout sweep) | `PAYMENT_TRANSACTION_OPTIONS` (`src/modules/orders/repository.ts`) | 5 s | 20 s | `failOrder`: the `Cart` row, held by a checkout for up to 15 s; `markOrderPaid`: the `Order` row, held by a failure |
+  | Review insert (`createReview`) | `REVIEW_TRANSACTION_OPTIONS` (`src/modules/reviews/repository.ts`) | 5 s | 10 s | the `OrderItem` row (`FOR UPDATE OF oi`), held by a concurrent review insert of the same item, which runs a few statements |
 
   A unit test in `src/modules/checkout/repository.test.ts` keeps the payment `timeout` above the checkout `timeout`, and `tests/integration/checkout/review-fixes.test.ts` shows a decline waiting 6 s behind a held cart lock and still failing the order (with Prisma's defaults it was rolled back with `P2028` after 5 s). When a payment transaction still fails after the order committed, checkout answers the order `PENDING` and the timeout sweep fails it later (docs/API_CONTRACTS.md section 5.5.5; SEC-055). Not measured under load (T-033).
 
@@ -1412,3 +1437,17 @@ ROLLBACK;
 ```
 
 An empty result means the migration renames nothing. Otherwise the owner decides each collision first; a production run needs human approval and a backup (section 17).
+
+### 21.8 Review hide (SEC-092)
+
+Added 2026-10-28 by migration `20261028163543_review_admin_hide`. Why and the rules: section 6.15. Names: sections 21.3 and 21.4.
+
+**Observed on the local development database** (PostgreSQL 18.6), on a temporary copy of `Review` with its check constraints (`CREATE TEMP TABLE t (LIKE "Review" INCLUDING CONSTRAINTS INCLUDING DEFAULTS)`, rolled back; the development database holds no reviews):
+
+- Accepted: all three hide columns null; `hiddenAt` and `hiddenByUserId` set with no reason; a reason of 500 Thai characters.
+- Refused by `Review_hidden_pair_check`: `hiddenAt` without `hiddenByUserId`; `hiddenByUserId` without `hiddenAt`; a reason on a public row.
+- Refused by `Review_hiddenReason_check`: an empty reason; 501 Thai characters.
+- `EXPLAIN SELECT id FROM "Review" WHERE "productId" = $1 AND "hiddenAt" IS NULL ORDER BY "createdAt" DESC, id DESC` (with sequential scans off, the table being empty) uses `Index Scan Backward using "Review_productId_createdAt_visible_idx"` with an incremental sort on `id`.
+- A second `prisma migrate dev` reports "Already in sync": Prisma sees no drift from the hand-written objects.
+
+A check violation reaches the service as in section 21.5: the constraint name is only in `cause.originalMessage`, and `cause.detail` holds the whole row, comment included, so `error.meta` is never logged.
