@@ -36,6 +36,7 @@ const service = {
   getSummary: vi.fn(),
   getReport: vi.fn(),
   getSettings: vi.fn(),
+  listReviews: vi.fn(),
 };
 vi.mock("@/modules/admin", () => ({
   listUsers: (...args: unknown[]) => service.listUsers(...args),
@@ -48,6 +49,7 @@ vi.mock("@/modules/admin", () => ({
   getSummary: (...args: unknown[]) => service.getSummary(...args),
   getReport: (...args: unknown[]) => service.getReport(...args),
   getSettings: (...args: unknown[]) => service.getSettings(...args),
+  listReviews: (...args: unknown[]) => service.listReviews(...args),
 }));
 vi.mock("@/lib/api-client/admin", () => ({}));
 
@@ -58,6 +60,7 @@ import { DashboardSection } from "./dashboard-section";
 import { OrdersSection } from "./orders-section";
 import { ProductsSection } from "./products-section";
 import { ReportsSection } from "./reports-section";
+import { ReviewsSection } from "./reviews-section";
 import { StoresSection } from "./stores-section";
 import { UsersSection } from "./users-section";
 
@@ -221,6 +224,67 @@ describe("UsersSection", () => {
     const { container } = render(await UsersSection({ searchParams: Promise.resolve({}) }));
     expect(container.querySelector("img")).toBeNull();
     expect(screen.getByText("<img src=x onerror=alert(1)>")).toBeTruthy();
+  });
+});
+
+describe("ReviewsSection", () => {
+  const review = {
+    id: "r1",
+    rating: 4,
+    comment: "<b>ดีมาก</b>",
+    createdAt: "2026-10-01T03:00:00.000Z",
+    product: { id: "p1", title: "เสื้อยืด", slug: "shirt" },
+    author: { id: "u9", name: "มาลี" },
+    hiddenAt: null,
+    hiddenByUserId: null,
+    hiddenReason: null,
+  };
+  const hiddenReview = {
+    ...review,
+    id: "r2",
+    hiddenAt: "2026-10-02T03:00:00.000Z",
+    hiddenByUserId: "a1",
+    hiddenReason: "ถ้อยคำไม่เหมาะสม",
+  };
+
+  it("lists reviews, passes the filters to the service, shows comment as plain text", async () => {
+    getActor.mockResolvedValue(admin);
+    service.listReviews.mockResolvedValue(page([review, hiddenReview]));
+    render(
+      await ReviewsSection({ searchParams: Promise.resolve({ productId: "p1", hidden: "false" }) }),
+    );
+    expect(service.listReviews).toHaveBeenCalledWith(admin, {
+      page: 1,
+      pageSize: 20,
+      productId: "p1",
+      hidden: false,
+    });
+    const table = screen.getByRole("table", { name: th.admin.reviews.listLabel });
+    // Both rows carry the same comment; it shows as literal text, not as markup.
+    expect(within(table).getAllByText("<b>ดีมาก</b>")).toHaveLength(2);
+    expect(table.querySelector("b")).toBeNull();
+    expect(within(table).getByText(th.admin.reviews.hidden)).toBeTruthy();
+    expect(within(table).getByText(th.admin.reviews.public)).toBeTruthy();
+    expect(within(table).getByRole("button", { name: th.admin.reviews.hide })).toBeTruthy();
+    expect(within(table).getByRole("button", { name: th.admin.reviews.unhide })).toBeTruthy();
+    expect(screen.getByLabelText(th.admin.reviews.filter.productId)).toBeTruthy();
+    expect(
+      (screen.getByLabelText(th.admin.reviews.filter.visibility) as HTMLSelectElement).value,
+    ).toBe("false");
+  });
+
+  it("shows the empty state", async () => {
+    getActor.mockResolvedValue(admin);
+    service.listReviews.mockResolvedValue(page([]));
+    render(await ReviewsSection({ searchParams: Promise.resolve({}) }));
+    expect(screen.getByText(th.admin.reviews.emptyTitle)).toBeTruthy();
+  });
+
+  it("drops a refused filter value and says so", async () => {
+    getActor.mockResolvedValue(admin);
+    service.listReviews.mockResolvedValue(page([review]));
+    render(await ReviewsSection({ searchParams: Promise.resolve({ hidden: "maybe" }) }));
+    expect(screen.getByText(th.admin.common.ignoredFilters)).toBeTruthy();
   });
 });
 

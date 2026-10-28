@@ -40,6 +40,8 @@ const api = {
   deleteCategory: vi.fn(),
   changeSellerOrderStatus: vi.fn(),
   updateSettings: vi.fn(),
+  hideReview: vi.fn(),
+  unhideReview: vi.fn(),
 };
 vi.mock("@/lib/api-client/admin", () => ({
   deactivateUser: (...args: unknown[]) => api.deactivateUser(...args),
@@ -56,6 +58,8 @@ vi.mock("@/lib/api-client/admin", () => ({
   deleteCategory: (...args: unknown[]) => api.deleteCategory(...args),
   changeSellerOrderStatus: (...args: unknown[]) => api.changeSellerOrderStatus(...args),
   updateSettings: (...args: unknown[]) => api.updateSettings(...args),
+  hideReview: (...args: unknown[]) => api.hideReview(...args),
+  unhideReview: (...args: unknown[]) => api.unhideReview(...args),
 }));
 
 import { AdminAction, AdminNoticeRegion } from "./action-button";
@@ -262,6 +266,84 @@ describe("AdminAction with a reason", () => {
     renderAction({ kind: "store.reinstate", id: "s1" });
     await user.click(screen.getByRole("button", { name: th.admin.stores.reinstate }));
     expect(document.activeElement).toBe(screen.getByLabelText(th.admin.common.reasonLabel));
+  });
+});
+
+describe("AdminAction on a review (optional reason)", () => {
+  const hideButton = () => screen.getByRole("button", { name: th.admin.reviews.hide });
+  const hideConfirm = () =>
+    screen.getByRole("button", { name: th.admin.reviews.hideConfirmAction });
+
+  it("hides with no reason: sends an empty body, confirms, refreshes", async () => {
+    const user = userEvent.setup();
+    api.hideReview.mockResolvedValue(ok({ id: "r1" }));
+    renderAction({ kind: "review.hide", id: "r1" });
+    await user.click(hideButton());
+    await user.click(hideConfirm());
+    expect(api.hideReview).toHaveBeenCalledWith("r1", {});
+    expect(await screen.findByText(th.admin.reviews.hiddenDone)).toBeTruthy();
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("sends a typed reason", async () => {
+    const user = userEvent.setup();
+    api.hideReview.mockResolvedValue(ok({ id: "r1" }));
+    renderAction({ kind: "review.hide", id: "r1" });
+    await user.click(hideButton());
+    await user.type(screen.getByLabelText(th.admin.common.reasonLabel), "ถ้อยคำไม่เหมาะสม");
+    await user.click(hideConfirm());
+    expect(api.hideReview).toHaveBeenCalledWith("r1", { reason: "ถ้อยคำไม่เหมาะสม" });
+  });
+
+  it("does not send a reason over 500 characters", async () => {
+    const user = userEvent.setup();
+    renderAction({ kind: "review.hide", id: "r1" });
+    await user.click(hideButton());
+    await user.click(screen.getByLabelText(th.admin.common.reasonLabel));
+    await user.paste("ก".repeat(501));
+    await user.click(hideConfirm());
+    expect(screen.getByText(th.admin.common.reasonErrors.tooLong)).toBeTruthy();
+    expect(api.hideReview).not.toHaveBeenCalled();
+  });
+
+  it("unhides with no reason", async () => {
+    const user = userEvent.setup();
+    api.unhideReview.mockResolvedValue(ok({ id: "r1" }));
+    renderAction({ kind: "review.unhide", id: "r1" });
+    await user.click(screen.getByRole("button", { name: th.admin.reviews.unhide }));
+    await user.click(screen.getByRole("button", { name: th.admin.reviews.unhideConfirmAction }));
+    expect(api.unhideReview).toHaveBeenCalledWith("r1", {});
+    expect(await screen.findByText(th.admin.reviews.unhiddenDone)).toBeTruthy();
+  });
+
+  it("maps 409 to Thai copy and refreshes to the stored state", async () => {
+    const user = userEvent.setup();
+    api.hideReview.mockResolvedValue(failure("INVALID_STATE_TRANSITION", 409));
+    renderAction({ kind: "review.hide", id: "r1" });
+    await user.click(hideButton());
+    await user.click(hideConfirm());
+    expect(await screen.findByText(th.admin.errors.invalidTransition)).toBeTruthy();
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("maps 404 to Thai copy and refreshes", async () => {
+    const user = userEvent.setup();
+    api.hideReview.mockResolvedValue(failure("NOT_FOUND", 404));
+    renderAction({ kind: "review.hide", id: "r1" });
+    await user.click(hideButton());
+    await user.click(hideConfirm());
+    expect(await screen.findByText(th.errors.notFound)).toBeTruthy();
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("maps 403 to Thai copy", async () => {
+    const user = userEvent.setup();
+    api.hideReview.mockResolvedValue(failure("FORBIDDEN", 403));
+    renderAction({ kind: "review.hide", id: "r1" });
+    await user.click(hideButton());
+    await user.click(hideConfirm());
+    expect(await screen.findByText(th.errors.forbidden)).toBeTruthy();
+    expect(refresh).not.toHaveBeenCalled();
   });
 });
 

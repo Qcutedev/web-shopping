@@ -13,6 +13,7 @@ export type AdminPage =
   | "products"
   | "categories"
   | "orders"
+  | "reviews"
   | "reports"
   | "settings"
   | "auditLogs";
@@ -28,6 +29,7 @@ const ITEMS: readonly AdminPage[] = [
   "products",
   "categories",
   "orders",
+  "reviews",
   "reports",
   "settings",
   "auditLogs",

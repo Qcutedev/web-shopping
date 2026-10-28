@@ -10,12 +10,14 @@ import type {
   AdminCategoryDto,
   AdminOrderDto,
   AdminProductDto,
+  AdminReviewDto,
   AdminSellerOrderStatusBody,
   AdminStoreDto,
   AdminUserDto,
   ApproveProductBody,
   CreateCategoryBody,
   ProductReasonBody,
+  ReviewModerationBody,
   SettingsDto,
   StoreReasonBody,
   UpdateCategoryBody,
@@ -155,6 +157,30 @@ export function changeSellerOrderStatus(
   fetchImpl?: Fetcher,
 ): Promise<ApiResult<AdminOrderDto>> {
   return apiRequest<AdminOrderDto>(path("seller-orders", sellerOrderId, "/status"), {
+    method: "POST",
+    body,
+    fetchImpl,
+  });
+}
+
+export function hideReview(
+  id: string,
+  body: ReviewModerationBody,
+  fetchImpl?: Fetcher,
+): Promise<ApiResult<AdminReviewDto>> {
+  return apiRequest<AdminReviewDto>(path("reviews", id, "/hide"), {
+    method: "POST",
+    body,
+    fetchImpl,
+  });
+}
+
+export function unhideReview(
+  id: string,
+  body: ReviewModerationBody,
+  fetchImpl?: Fetcher,
+): Promise<ApiResult<AdminReviewDto>> {
+  return apiRequest<AdminReviewDto>(path("reviews", id, "/unhide"), {
     method: "POST",
     body,
     fetchImpl,

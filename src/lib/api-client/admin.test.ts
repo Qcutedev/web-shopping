@@ -6,6 +6,8 @@ import {
   createCategory,
   deactivateUser,
   deleteCategory,
+  hideReview,
+  unhideReview,
   reactivateUser,
   rejectApplication,
   rejectProduct,
@@ -31,6 +33,21 @@ function call(fetchImpl: ReturnType<typeof vi.fn>): { url: string; init: Request
   const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
   return { url, init };
 }
+
+describe("admin API client, review moderation", () => {
+  it("posts hide and unhide with a JSON body to the encoded path", async () => {
+    const hide = okFetch();
+    await hideReview("r/1", { reason: "ไม่เหมาะสม" }, hide);
+    expect(call(hide).url).toBe("/api/v1/admin/reviews/r%2F1/hide");
+    expect(call(hide).init.method).toBe("POST");
+    expect(JSON.parse(call(hide).init.body as string)).toEqual({ reason: "ไม่เหมาะสม" });
+
+    const unhide = okFetch();
+    await unhideReview("r1", {}, unhide);
+    expect(call(unhide).url).toBe("/api/v1/admin/reviews/r1/unhide");
+    expect(JSON.parse(call(unhide).init.body as string)).toEqual({});
+  });
+});
 
 describe("admin API client", () => {
   it("posts a user decision without a body to the encoded path", async () => {

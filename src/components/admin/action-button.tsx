@@ -32,7 +32,9 @@ export type AdminActionSpec =
   | { kind: "category.reactivate"; id: string }
   | { kind: "category.delete"; id: string }
   | { kind: "order.cancel"; id: string }
-  | { kind: "order.deliver"; id: string };
+  | { kind: "order.deliver"; id: string }
+  | { kind: "review.hide"; id: string }
+  | { kind: "review.unhide"; id: string };
 
 export type AdminActionKind = AdminActionSpec["kind"];
 
@@ -45,6 +47,8 @@ interface ActionCopy {
   variant: ButtonVariant;
   /** The decision needs a reason (rejections, takedown, suspension, reinstatement). */
   reason: boolean;
+  /** The reason may be left blank (review moderation, API_CONTRACTS 5.9.9); blank sends no reason. */
+  reasonOptional?: boolean;
 }
 
 /** Texts of every action. The names of the keys in `th.admin` follow the kinds. */
@@ -175,6 +179,26 @@ export const ACTION_COPY: Readonly<Record<AdminActionKind, ActionCopy>> = {
     variant: "primary",
     reason: false,
   },
+  "review.hide": {
+    trigger: th.admin.reviews.hide,
+    heading: th.admin.reviews.hideConfirm,
+    note: th.admin.reviews.hideConfirmNote,
+    confirm: th.admin.reviews.hideConfirmAction,
+    done: th.admin.reviews.hiddenDone,
+    variant: "danger",
+    reason: true,
+    reasonOptional: true,
+  },
+  "review.unhide": {
+    trigger: th.admin.reviews.unhide,
+    heading: th.admin.reviews.unhideConfirm,
+    note: th.admin.reviews.unhideConfirmNote,
+    confirm: th.admin.reviews.unhideConfirmAction,
+    done: th.admin.reviews.unhiddenDone,
+    variant: "primary",
+    reason: true,
+    reasonOptional: true,
+  },
 };
 
 /** Sends the request of `spec`. Mutations go through the documented `/api/v1/admin` endpoints. */
@@ -208,6 +232,10 @@ function send(spec: AdminActionSpec, reason: string): Promise<ApiResult<unknown>
       return api.changeSellerOrderStatus(spec.id, { to: "CANCELLED" });
     case "order.deliver":
       return api.changeSellerOrderStatus(spec.id, { to: "DELIVERED" });
+    case "review.hide":
+      return api.hideReview(spec.id, reason === "" ? {} : { reason });
+    case "review.unhide":
+      return api.unhideReview(spec.id, reason === "" ? {} : { reason });
   }
 }
 
@@ -273,7 +301,7 @@ export function AdminAction({
     if (pending) return;
     setFailure(null);
     let text = "";
-    if (copy.reason) {
+    if (copy.reason && !(copy.reasonOptional && reason.trim() === "")) {
       const parsed = reviewReasonSchema.safeParse(reason);
       if (!parsed.success) {
         const code = parsed.error.issues[0]?.code ?? "custom";
@@ -352,9 +380,13 @@ export function AdminAction({
               name="reason"
               value={reason}
               onChange={(event) => setReason(event.target.value)}
-              helperText={th.admin.common.reasonHelper}
+              helperText={
+                copy.reasonOptional
+                  ? th.admin.reviews.optionalReasonHelper
+                  : th.admin.common.reasonHelper
+              }
               errorText={reasonError}
-              required
+              required={!copy.reasonOptional}
               disabled={pending}
             />
           ) : null}

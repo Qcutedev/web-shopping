@@ -16,6 +16,7 @@ import {
   listCategoriesQuerySchema,
   listOrdersQuerySchema,
   listProductsQuerySchema,
+  listReviewsQuerySchema,
   listStoresQuerySchema,
   listUsersQuerySchema,
   reportQuerySchema,
@@ -24,6 +25,7 @@ import {
   type ListCategoriesQuery,
   type ListOrdersQuery,
   type ListProductsQuery,
+  type ListReviewsQuery,
   type ListStoresQuery,
   type ListUsersQuery,
   type ReportQuery,
@@ -135,6 +137,7 @@ export const ORDER_KEYS = [
   "paidFrom",
   "paidTo",
 ] as const;
+export const REVIEW_KEYS = ["productId", "hidden"] as const;
 export const AUDIT_KEYS = ["action", "targetType", "targetId", "actorId", "from", "to"] as const;
 export const REPORT_KEYS = ["from", "to"] as const;
 
@@ -189,6 +192,10 @@ export function parseOrders(searchParams: SearchParams): ParsedList<ListOrdersQu
   return parseList(listOrdersQuerySchema, searchParams, ORDER_KEYS, daysToInstants);
 }
 
+export function parseReviews(searchParams: SearchParams): ParsedList<ListReviewsQuery> {
+  return parseList(listReviewsQuerySchema, searchParams, REVIEW_KEYS);
+}
+
 export function parseAuditLogs(searchParams: SearchParams): ParsedList<ListAuditLogsQuery> {
   return parseList(listAuditLogsQuerySchema, searchParams, AUDIT_KEYS, daysToInstants);
 }
@@ -216,5 +223,6 @@ export const ADMIN_LIST_BASE = {
   products: ADMIN_ROUTES.products,
   categories: ADMIN_ROUTES.categories,
   orders: ADMIN_ROUTES.orders,
+  reviews: ADMIN_ROUTES.reviews,
   auditLogs: ADMIN_ROUTES.auditLogs,
 } as const;

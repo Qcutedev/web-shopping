@@ -17,7 +17,7 @@ describe("AdminFrame", () => {
     );
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     const nav = screen.getByRole("navigation", { name: th.admin.navLabel });
-    expect(within(nav).getAllByRole("link")).toHaveLength(10);
+    expect(within(nav).getAllByRole("link")).toHaveLength(11);
     const current = within(nav).getByRole("link", { name: th.admin.nav.orders });
     expect(current.getAttribute("aria-current")).toBe("page");
     expect(current.getAttribute("href")).toBe("/admin/orders");

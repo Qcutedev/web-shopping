@@ -1060,6 +1060,8 @@ export const th = {
       reports: "รายงาน",
       settings: "ตั้งค่าระบบ",
       auditLogs: "บันทึกการดำเนินการ",
+      // proposal (SEC-092, session 129): owner approval pending.
+      reviews: "รีวิว",
     },
     common: {
       all: "ทั้งหมด",
@@ -1291,6 +1293,48 @@ export const th = {
       approved: "อนุมัติสินค้าแล้ว",
       rejected: "ปฏิเสธสินค้าแล้ว",
       takenDown: "ถอดสินค้าออกจากการขายแล้ว",
+    },
+    // proposal (SEC-092 review moderation, session 129): wording by the frontend agent, owner
+    // approval pending. {rating} is a whole number from 1 to 5.
+    reviews: {
+      title: "ตรวจสอบรีวิว",
+      description:
+        "ดูรีวิวทั้งหมด รวมรีวิวที่ซ่อนอยู่ การซ่อนรีวิวไม่ลบข้อมูล รีวิวจะไม่แสดงต่อสาธารณะและไม่นับในคะแนนเฉลี่ย",
+      listLabel: "รายการรีวิว",
+      emptyTitle: "ยังไม่มีรีวิว",
+      filter: {
+        formLabel: "กรองรีวิว",
+        productId: "สินค้า (รหัส)",
+        visibility: "การแสดงผล",
+        onlyHidden: "เฉพาะที่ซ่อนอยู่",
+        onlyPublic: "เฉพาะที่แสดงอยู่",
+      },
+      columns: {
+        review: "รีวิว",
+        product: "สินค้า",
+        author: "ผู้รีวิว",
+        status: "สถานะ",
+        createdAt: "รีวิวเมื่อ",
+        actions: "การดำเนินการ",
+      },
+      rating: "ให้คะแนน {rating} จาก 5",
+      noComment: "ไม่มีข้อความ",
+      public: "แสดงอยู่",
+      hidden: "ซ่อนอยู่",
+      hiddenAt: "ซ่อนเมื่อ",
+      hiddenReason: "เหตุผลที่ซ่อน",
+      hide: "ซ่อนรีวิว",
+      unhide: "แสดงรีวิว",
+      hideConfirm: "ซ่อนรีวิวนี้จากสาธารณะ",
+      hideConfirmNote:
+        "รีวิวจะไม่แสดงในหน้าสินค้าและไม่นับในคะแนนเฉลี่ย ข้อมูลรีวิวไม่ถูกลบ และแสดงกลับได้ภายหลัง ระบุเหตุผลหรือไม่ก็ได้",
+      hideConfirmAction: "ยืนยันซ่อน",
+      unhideConfirm: "แสดงรีวิวนี้อีกครั้ง",
+      unhideConfirmNote: "รีวิวจะกลับมาแสดงในหน้าสินค้าและนับในคะแนนเฉลี่ย ระบุเหตุผลหรือไม่ก็ได้",
+      unhideConfirmAction: "ยืนยันแสดง",
+      hiddenDone: "ซ่อนรีวิวแล้ว",
+      unhiddenDone: "แสดงรีวิวอีกครั้งแล้ว",
+      optionalReasonHelper: "ไม่บังคับ ไม่เกิน 500 ตัวอักษร",
     },
     categories: {
       title: "หมวดหมู่",
