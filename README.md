@@ -142,7 +142,7 @@ src/app/seller/         seller dashboard pages
 src/app/admin/          admin dashboard pages
 src/app/api/v1/         thin route handlers
 src/modules/<domain>/   business logic (admin, auth, cart, catalog, checkout, inventory,
-                        orders, payments, profile, reviews, sellers, uploads)
+                        orders, payments, profile, rate-limit, reviews, sellers, uploads)
 src/server/             env validation, logger, rate limiting, health
 src/server/auth/        sessions, guards, RBAC
 src/server/db/          Prisma client (imported only by allowed paths)
@@ -175,7 +175,7 @@ Boundaries and rules: [CLAUDE.md](CLAUDE.md) and [docs/ARCHITECTURE.md](docs/ARC
 | Shipping fee and tracking | Simulated (seller enters tracking and marks status by hand; no carrier) |
 | Reviews | Implemented |
 | Seller onboarding, products, inventory, orders | Implemented |
-| Admin: approvals, moderation, categories, users, orders, reports, settings, audit log | Implemented |
+| Admin: approvals, product moderation, categories, users, orders, review hide and unhide, reports, settings, audit log | Implemented |
 | File storage | Simulated (local disk; no object storage or CDN) |
 | End-to-end test suite | Implemented (see [docs/TEST_STRATEGY.md](docs/TEST_STRATEGY.md) for what it covers and does not) |
 | CI workflow (`.github/workflows/ci.yml`) | Implemented, never run: no GitHub remote |

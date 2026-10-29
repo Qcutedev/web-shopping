@@ -37,7 +37,7 @@ pnpm test:integration
 pnpm build
 ```
 
-These scripts are created by the scaffold task. Until then there is nothing to run, and documentation-only changes say so.
+All of these scripts exist in `package.json`. `pnpm verify` runs the first three, `pnpm test`, and `pnpm build`. `pnpm test:integration` and `pnpm test:e2e` need Docker and the `db-test` container (`docker compose up -d --wait db-test`); see the [README](README.md) for the setup. Do not run two e2e suites at once. A documentation-only change says that it ran no code check.
 
 If a check fails, fix the cause. Do not skip tests, disable lint rules, or weaken assertions to get a pass.
 

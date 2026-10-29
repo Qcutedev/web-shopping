@@ -6,7 +6,7 @@ Labels: `Implemented` works in the repository. `Simulated` works but fakes an ex
 
 ## Current state
 
-As of 2026-10-28 the application exists and runs locally (`pnpm dev` with Docker PostgreSQL). Customer, seller, and admin areas, mock checkout, reviews, uploads, an end-to-end suite, a CI workflow file, and a `Dockerfile` are in the repository. Many items are implemented but not verified (open code review, security re-check, or browser check); see [STATUS.md](STATUS.md). Nothing is deployed: there is no staging or production environment, no hosting provider, and no GitHub remote, so the CI workflow has never run.
+As of 2026-10-29 the application exists and runs locally (`pnpm dev` with Docker PostgreSQL). Customer, seller, and admin areas, mock checkout, reviews, uploads, an end-to-end suite, a CI workflow file, and a `Dockerfile` are in the repository. Many items are implemented but not verified (open code review, security re-check, or browser check); see [STATUS.md](STATUS.md). Nothing is deployed: there is no staging or production environment, no hosting provider, and no GitHub remote, so the CI workflow has never run.
 
 ## Simulated
 
@@ -14,7 +14,7 @@ As of 2026-10-28 the application exists and runs locally (`pnpm dev` with Docker
 | --- | --- | --- |
 | Payment | `MOCK` provider (`src/modules/payments/provider.ts`); no money moves; `Payment.provider` is `MOCK`, references start with `MOCK-`, responses carry `isSimulated: true`; the checkout request can ask the mock to decline; the mock is refused in a production server | A licensed payment gateway, signed and idempotent webhooks, reconciliation, refunds |
 | Shipping fee | One flat fee per seller order, read from settings | Carrier rates by weight, size, and destination |
-| Shipping and tracking | Seller types a carrier name and tracking number and moves the status by hand, including "delivered" | Carrier API integration and real status updates |
+| Shipping and tracking | Seller types a carrier name and tracking number and moves the status by hand, including "delivered" (allowed only 24 hours after shipping, SEC-072) | Carrier API integration and real status updates |
 | File storage | Local disk adapter, directory set by `UPLOAD_DIR` | Object storage with a CDN |
 | Catalog content | Seeded sample stores and products, local development only | Real sellers |
 
@@ -33,14 +33,14 @@ As of 2026-10-28 the application exists and runs locally (`pnpm dev` with Docker
 - Guest cart and guest checkout.
 - Seller staff accounts; one login per store.
 - Languages other than Thai; dark theme.
-- Review moderation: no admin hide-review action and no review images. Tracked as SEC-092 in [SECURITY.md](SECURITY.md).
+- Review images, and any review moderation beyond the admin hide and unhide action (`/admin/reviews`, `POST /api/v1/admin/reviews/{id}/hide` and `/unhide`; implemented, decision D-048 still PROPOSED). Report buttons and buyer confirmation of receipt are not built (owner options listed in [STATUS.md](STATUS.md)).
 - Deployment, backups, log collection, monitoring. See [DEPLOYMENT.md](DEPLOYMENT.md) and [RUNBOOK-STAGING.md](RUNBOOK-STAGING.md).
 
 ## Technical limits
 
 | Limit | Consequence | Path forward |
 | --- | --- | --- |
-| In-process rate limiter (`src/server/rate-limit.ts`) | Only correct on a single instance. With N instances every limit is multiplied by up to N; counters reset on restart. The payment timeout sweep schedule is also per process (safe to run twice, but N timers). The app must run as one instance; see `docs/DEPLOYMENT.md`, "Runtime requirements" (CR-T061-03) | Shared store such as Redis (post-MVP) |
+| In-process rate limiter (`src/server/rate-limit.ts`) | Only correct on a single instance. With N instances every limit is multiplied by up to N; counters reset on restart. The exceptions are the per-user `seller-application` and `review-create` rules, which count in the database table `UserRateLimitWindow` (`src/modules/rate-limit/`, SEC-052). The payment timeout sweep schedule is also per process (safe to run twice, but N timers). The app must run as one instance; see `docs/DEPLOYMENT.md`, "Runtime requirements" (CR-T061-03) | Shared store such as Redis (post-MVP) |
 | Local-disk uploads | Needs a persistent volume; no serverless or multi-instance | S3-compatible adapter behind the existing interface |
 | Search by case-insensitive substring match (Prisma `contains`) | Slow on large catalogs; no relevance ranking; no Thai word segmentation; no typo tolerance | Trigram index, then a search service |
 | Money in 32-bit satang | A single order is capped at 2,000,000,000 satang (20,000,000 THB, `MAX_ORDER_TOTAL_SATANG`) | Move totals to `BigInt` |
