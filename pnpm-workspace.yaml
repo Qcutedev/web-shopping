@@ -16,3 +16,6 @@ overrides:
   # pg 9 removes the queueing and such a transaction would fail. Keep pg on major 8 until the
   # adapter stops overlapping queries or the code follows DATA_MODEL.md section 7.8 everywhere.
   pg: "^8"
+  # D-051: @vercel/cli-config (via @vercel/blob > @vercel/oidc) pins zod 4.1.11, which has
+  # GHSA-mrhx-c7xc-m3w5. No upstream release fixes it; the adapter never reaches that code path.
+  "@vercel/cli-config>zod": "4.6.7"
