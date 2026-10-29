@@ -12,7 +12,7 @@ Done as reviews: the full code review (T-061, `reviews/T-061-code-review.md`) an
 
 ## Resume here
 
-Session 135 started. Task 1 of 3: T-063 SEC-096 fix (option a). Agent: backend-api. Paths: `src/modules/admin/repository.ts`, `tests/security/sec095-recheck.itest.ts`, `tests/security/sec094-recheck.itest.ts`. Next after it: `pnpm verify`; ask owner about PROPOSED decisions (D-001..D-015, D-048..D-050); then T-081. Docker dev+test DB up.
+Session 135 finished. Local commits, not pushed. No agent running. Done: SEC-096 fixed `1140024`, re-checked FIXED `05835d1` (negative control failed on pre-fix code as expected); `pnpm verify` exit 0 (build compiled) on that HEAD. Next: ask owner about PROPOSED decisions (D-001..D-015, D-048..D-050); optional SEC-096 remediation (b) retry on 40P01 for a reasoned residual race; then T-081. Docker dev+test DB up.
 
 ## Open owner decisions
 
@@ -71,12 +71,12 @@ Notes marked "stale?" were written while Docker was down; later sessions ran the
 | T-052 | Admin permission tests | VERIFIED | `af041eb`; 17 tests passed, admin folder 53 passed |
 | T-060 | E2E suite | IMPLEMENTED | Partial: 35 e2e passed (`3ac15fc`..`1faf422`); customer specs use sign-in and add-to-cart UI (`f475211`, 35 passed); journeys 12-16 and a11y not written; not VERIFIED |
 | T-061 | Code review | IN PROGRESS | [reviews/T-061-code-review.md](reviews/T-061-code-review.md) |
-| T-062 | Security review | IN PROGRESS | [reviews/T-062-security.md](reviews/T-062-security.md); SEC-095 FIXED, SEC-096 (Low, admin three-request deadlock) OPEN |
-| T-063 | Fixes, regression | IN PROGRESS | Next: SEC-096 fix (backend-api), flip `it.fails` in `tests/security/sec095-recheck.itest.ts` |
+| T-062 | Security review | IN PROGRESS | [reviews/T-062-security.md](reviews/T-062-security.md); SEC-095 and SEC-096 FIXED and re-checked |
+| T-063 | Fixes, regression | IN PROGRESS | SEC-096 fixed `1140024`, re-checked `05835d1`; `pnpm verify` exit 0 |
 | T-070 | CI workflow | IMPLEMENTED | `.github/workflows/ci.yml` (`a34194b`): verify, integration, e2e, audit jobs; actionlint clean; local equivalents pass (verify 5796, integration 1558, e2e 19); never run on GitHub (no remote, B-04); secret-scan job and dependabot added `4e20153` |
 | T-071 | Dockerfile, staging runbook | IMPLEMENTED | `Dockerfile`, `docs/RUNBOOK-STAGING.md`, `scripts/container-smoke.ps1`: both images build, migrate applies offline, container `/api/health` 200, headers present (local run, 2026-10-26). Not deployed; no provider chosen; no CI run |
 | T-072 | Security headers | IMPLEMENTED | next.config.ts, tests/security/headers-t072.test.ts (7 pass), D-046; dev `/` 200 with headers; not run under `next start` |
-| T-080 | Docs audit | IMPLEMENTED | Audit [reviews/T-080-docs-audit.md](reviews/T-080-docs-audit.md); drift fixed `59cedec`; README clean-checkout run passed 2026-10-29 (install, migrate, seed, bootstrap, dev 200); `pnpm verify` not run, owner decisions on PROPOSED D-001..D-015, D-048..D-050 open |
+| T-080 | Docs audit | IMPLEMENTED | Audit [reviews/T-080-docs-audit.md](reviews/T-080-docs-audit.md); drift fixed `59cedec`; README clean-checkout run passed 2026-10-29 (install, migrate, seed, bootstrap, dev 200); `pnpm verify` exit 0 (session 135), owner decisions on PROPOSED D-001..D-015, D-048..D-050 open |
 | T-081 | Final acceptance | NOT STARTED | |
 
 ## MVP acceptance checklist
