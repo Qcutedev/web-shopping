@@ -418,30 +418,56 @@ export async function deactivateUser(userId: string, adminId: string): Promise<A
 }
 
 /**
- * Reactivates a user in one transaction: lock the acting admin's row and the target row in one
- * statement (`FOR NO KEY UPDATE`, in `id` order; SEC-094), refuse unless the acting admin is an
- * active `ADMIN` (401, SEC-088), no target row is `not-found`, already active is `invalid-state`,
- * the guarded update `false` to `true`, one audit row (`USER_REACTIVATED`). The user signs in
- * again; nothing else is written (DATA_MODEL.md 4.5).
+ * Reactivates a user in one transaction: lock the acting admin's row `FOR SHARE` and the target
+ * row `FOR NO KEY UPDATE`, one statement each, in byte order of the two ids (SEC-094, SEC-095);
+ * refuse unless the acting admin is an active `ADMIN` (401, SEC-088), no target row is
+ * `not-found`, already active is `invalid-state`, the guarded update `false` to `true`, one audit
+ * row (`USER_REACTIVATED`). The user signs in again; nothing else is written (DATA_MODEL.md 4.5).
  *
- * This function does not call `assertActingAdmin`: its `FOR SHARE` on the acting admin taken
- * before the lock on the target let two admins reactivating each other lock the two rows in
- * opposite order and deadlock (SEC-094). Both rows are locked by one statement, in the same
- * `"id" COLLATE "C"` order as the `FOR UPDATE` of every active admin row in `deactivateUser`, so
- * no two of these transactions can wait on each other in a cycle. The acting admin is still
- * checked under a lock in the same transaction, as SEC-088 requires.
+ * This function does not call `assertActingAdmin`, which locks the acting admin before anything
+ * else: two admins reactivating each other then locked the two rows in opposite order and
+ * deadlocked (SEC-094). The two rows are locked in the same `"id" COLLATE "C"` order as the
+ * `FOR UPDATE` of every active admin row in `deactivateUser`, so no two reactivations, and no
+ * reactivation and admin deactivation, wait on each other in a cycle.
+ *
+ * The acting admin's row is locked `FOR SHARE`, the mode `assertActingAdmin` uses, never
+ * stronger: every other write of the same admin holds that row `FOR SHARE` and then locks a
+ * target, so a stronger mode here, taken while this transaction already holds a target whose id
+ * sorts first, deadlocked against the same admin's deactivation or approval of that user
+ * (SEC-095). `FOR SHARE` still conflicts with the `FOR UPDATE` of a deactivation of this admin,
+ * so the acting admin is checked under a lock in the same transaction, as SEC-088 requires.
+ * PostgreSQL has no single `SELECT ... FOR` clause that gives two rows different modes, hence two
+ * statements. Reactivating oneself locks the one row `FOR SHARE` only: an active admin is
+ * `invalid-state` and an inactive one is refused, so that row is never written.
  */
 export async function reactivateUser(userId: string, adminId: string): Promise<ActivationOutcome> {
   const move = activationMove("reactivate");
   return db.$transaction(async (tx) => {
-    const rows = await tx.$queryRaw<(LockedUser & { id: string })[]>`
-      SELECT "id", "role"::text AS "role", "isActive" FROM "User"
-       WHERE "id" IN (${adminId}, ${userId})
-       ORDER BY "id" COLLATE "C" ASC
-         FOR NO KEY UPDATE`;
-    const acting = rows.find((row) => row.id === adminId);
+    const lockActing = async () => {
+      const rows = await tx.$queryRaw<LockedUser[]>`
+        SELECT "role"::text AS "role", "isActive" FROM "User" WHERE "id" = ${adminId} FOR SHARE`;
+      return rows[0];
+    };
+    const lockTarget = async () => {
+      const rows = await tx.$queryRaw<LockedUser[]>`
+        SELECT "role"::text AS "role", "isActive" FROM "User" WHERE "id" = ${userId}
+           FOR NO KEY UPDATE`;
+      return rows[0];
+    };
+    let acting: LockedUser | undefined;
+    let locked: LockedUser | undefined;
+    if (userId === adminId) {
+      acting = await lockActing();
+      locked = acting;
+    } else if (Buffer.compare(Buffer.from(adminId), Buffer.from(userId)) < 0) {
+      // Byte order of UTF-8 is the order of `COLLATE "C"` (the database encoding is UTF8).
+      acting = await lockActing();
+      locked = await lockTarget();
+    } else {
+      locked = await lockTarget();
+      acting = await lockActing();
+    }
     if (acting?.role !== "ADMIN" || !acting.isActive) throw actingAdminRefused();
-    const locked = rows.find((row) => row.id === userId);
     if (locked === undefined) return { kind: "not-found" } as const;
     if (locked.isActive !== move.from) return { kind: "invalid-state" } as const;
     const { count } = await tx.user.updateMany({

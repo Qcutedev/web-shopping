@@ -12,11 +12,18 @@
  *   1. the same admin deactivating and reactivating one customer at once (two tabs, a double
  *      submit), when the customer's id sorts before the admin's. The reactivation locks the
  *      customer first and then waits for the admin row; the deactivation holds the admin row
- *      `FOR SHARE` and waits for the customer row. That is a cycle (SEC-095).
+ *      `FOR SHARE` and waits for the customer row. That was a cycle (SEC-095). The SEC-095 fix
+ *      locks the acting admin's row `FOR SHARE` in the reactivation too (still in id order), so
+ *      the reactivation no longer waits for the admin row.
  *
- * The interleaving is forced, not left to chance: a third transaction holds the admin row
- * `FOR SHARE` while the two requests queue, and the case waits on `pg_stat_activity` until each
- * request is waiting for a lock before it starts the next step.
+ * The interleaving is forced, not left to chance: a third transaction holds the customer row
+ * `FOR SHARE` while the two requests queue on it (the reactivation first), and the case waits on
+ * `pg_stat_activity` until each request is waiting for a lock before it starts the next step.
+ * When the holder ends, the reactivation is granted the customer row first and then asks for the
+ * admin row, which the deactivation already holds `FOR SHARE` while it waits for the customer row.
+ * Before the SEC-095 fix the reactivation asked `FOR NO KEY UPDATE` there: a cycle. (The first
+ * version of this case held the admin row instead; after the fix the reactivation only asks
+ * `FOR SHARE` on that row, so it no longer waits there and that forcing could not be used.)
  *
  * This file holds no character outside printable ASCII and no backslash-u escape (SEC-040).
  *
@@ -102,75 +109,72 @@ function settle(promise: Promise<unknown>): Promise<unknown> {
   );
 }
 
-// OPEN (SEC-095): the same admin deactivating and reactivating one customer whose id sorts before
-// the admin's deadlocks. Observed 2026-10-29: PostgreSQL aborts one of the two requests after
-// deadlock_timeout (a Prisma error, so a 500 at the handler).
+/**
+ * One admin reactivates and deactivates the same (active) customer at once, forced into the order
+ * described at the top of this file. Returns the two settled results, reactivation first.
+ */
+async function reactivateThenDeactivate(customerIdPrefix: "a-" | "z-") {
+  const admin = await createAdmin();
+  const customer = await createUser({
+    id: `${customerIdPrefix}sec095-${admin.id}`,
+    email: `${customerIdPrefix}sec095-${admin.id}@example.test`,
+  });
+  const actor = await actorOf(admin.id);
+
+  const holder = await holdShareLock(customer.id);
+  // The reactivation queues first for the customer row (holding the admin row FOR SHARE already
+  // when the admin's id sorts first).
+  const reactivation = settle(reactivateUser(actor, customer.id));
+  await waitForLockWaiters(1);
+  // The deactivation takes the admin row FOR SHARE (assertActingAdmin) and queues for the customer
+  // row behind the reactivation.
+  const deactivation = settle(deactivateUser(actor, customer.id));
+  await waitForLockWaiters(2);
+  holder.release();
+  await holder.done;
+
+  const results = await Promise.all([reactivation, deactivation]);
+  return { admin, customer, results };
+}
+
+// FIXED (SEC-095): before the fix the case with the customer's id sorting first deadlocked
+// (observed 2026-10-29: PostgreSQL aborted one of the two requests after deadlock_timeout, a
+// Prisma error, so a 500 at the handler). The reactivation now locks the acting admin's row
+// FOR SHARE, the mode every other write of the same admin uses.
 describe("SEC-095: reactivateUser's id-order lock against assertActingAdmin's FOR SHARE", () => {
-  it.fails(
-    "one admin deactivating and reactivating the same customer at once does not deadlock",
-    async () => {
-      const admin = await createAdmin();
-      // "a-" sorts before "user-" in byte order: the reactivation locks the customer first.
-      const customer = await createUser({
-        id: `a-sec095-${admin.id}`,
-        email: `a-sec095-${admin.id}@example.test`,
-      });
-      expect(Buffer.compare(Buffer.from(customer.id), Buffer.from(admin.id))).toBe(-1);
-      const actor = await actorOf(admin.id);
+  it("one admin deactivating and reactivating the same customer at once does not deadlock", async () => {
+    const { admin, customer, results } = await reactivateThenDeactivate("a-");
+    // "a-" sorts before "user-" in byte order: the reactivation locks the customer first.
+    expect(Buffer.compare(Buffer.from(customer.id), Buffer.from(admin.id))).toBe(-1);
 
-      const holder = await holdShareLock(admin.id);
-      // The reactivation locks the customer row, then waits for the admin row.
-      const reactivation = settle(reactivateUser(actor, customer.id));
-      await waitForLockWaiters(1);
-      // The deactivation's FOR SHARE on the admin row is compatible with the holder's; it then
-      // waits for the customer row the reactivation holds.
-      const deactivation = settle(deactivateUser(actor, customer.id));
-      await waitForLockWaiters(2);
-      holder.release();
-      await holder.done;
-
-      const results = await Promise.all([reactivation, deactivation]);
-      const deadlocks = results.filter(isDeadlock).length;
-      const other = results.filter(
-        (result) =>
-          result !== null &&
-          !isDeadlock(result) &&
-          !(result instanceof AppError && result.status === 409),
-      ).length;
-      expect({ deadlocks, other }).toEqual({ deadlocks: 0, other: 0 });
-    },
-    30_000,
-  );
+    const deadlocks = results.filter(isDeadlock).length;
+    const other = results.filter(
+      (result) =>
+        result !== null &&
+        !isDeadlock(result) &&
+        !(result instanceof AppError && result.status === 409),
+    ).length;
+    expect({ deadlocks, other }).toEqual({ deadlocks: 0, other: 0 });
+    // The reactivation was granted the customer row first and found it active (409); the
+    // deactivation then completed.
+    expect(results[0]).toBeInstanceOf(AppError);
+    expect((results[0] as AppError).status).toBe(409);
+    expect(results[1]).toBeNull();
+    expect((await db.user.findUniqueOrThrow({ where: { id: customer.id } })).isActive).toBe(false);
+  }, 30_000);
 
   // Control: with a customer whose id sorts after the admin's, the reactivation takes the admin
-  // row first and queues behind the deactivation; both requests finish. This is why the case
-  // above depends on the id order, and why the author's rounds (all ids "user-N") never hit it.
+  // row before the customer row, the same order as the deactivation, so this pair could not
+  // deadlock before the fix either. This is why the case above depends on the id order, and why
+  // the author's SEC-094 rounds (all ids "user-N") never hit it.
   it("the same two requests with the customer's id sorting after the admin's do not deadlock", async () => {
-    const admin = await createAdmin();
-    const customer = await createUser({
-      id: `z-sec095-${admin.id}`,
-      email: `z-sec095-${admin.id}@example.test`,
-    });
+    const { admin, customer, results } = await reactivateThenDeactivate("z-");
     expect(Buffer.compare(Buffer.from(customer.id), Buffer.from(admin.id))).toBe(1);
-    const actor = await actorOf(admin.id);
 
-    const holder = await holdShareLock(admin.id);
-    const reactivation = settle(reactivateUser(actor, customer.id));
-    await waitForLockWaiters(1);
-    // The deactivation's FOR SHARE is compatible with the holder's and the customer row is free,
-    // so it finishes while the reactivation still waits.
-    const deactivation = settle(deactivateUser(actor, customer.id));
-    expect(await deactivation).toBeNull();
-    holder.release();
-    await holder.done;
-
-    const results = await Promise.all([reactivation, deactivation]);
     expect(results.filter(isDeadlock)).toEqual([]);
-    expect(results.filter((result) => result !== null && !(result instanceof AppError))).toEqual(
-      [],
-    );
-    // The deactivation committed first, so the reactivation found the customer inactive.
-    expect(results).toEqual([null, null]);
-    expect((await db.user.findUniqueOrThrow({ where: { id: customer.id } })).isActive).toBe(true);
+    expect(results[0]).toBeInstanceOf(AppError);
+    expect((results[0] as AppError).status).toBe(409);
+    expect(results[1]).toBeNull();
+    expect((await db.user.findUniqueOrThrow({ where: { id: customer.id } })).isActive).toBe(false);
   }, 30_000);
 });

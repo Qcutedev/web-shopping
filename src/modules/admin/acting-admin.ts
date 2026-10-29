@@ -21,8 +21,8 @@
  *
  * `reactivateUser` does not call it either (SEC-094): a `FOR SHARE` on the acting admin followed by
  * a lock on the target let two admins reactivating each other deadlock. It locks the acting admin's
- * row and the target row in one statement, in `id` order, and refuses with `actingAdminRefused`
- * when the acting admin's row is not an active `ADMIN`.
+ * row (`FOR SHARE`, as here; SEC-095) and the target row in byte order of the two ids, and refuses
+ * with `actingAdminRefused` when the acting admin's row is not an active `ADMIN`.
  *
  * This file imports nothing of another module, so the sellers module can use it without an import
  * cycle (the admin module imports the sellers module).
