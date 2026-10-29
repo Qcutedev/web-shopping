@@ -22,6 +22,7 @@
  * invented hosts under `.invalid`, and they are refused before any connection.
  */
 import { resolve } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 
 import { describe, expect, inject, it } from "vitest";
 
@@ -313,15 +314,16 @@ describe("a global teardown that throws (CR-37)", () => {
       const control = await runTeardownFixture("end");
       expect(control.timedOut).toBe(false);
       expect(control.exitCode).toBe(0);
-      expect(control.output).toMatch(/Tests\s+1 passed/);
+      // CI forces colour (FORCE_COLOR), which puts escape codes between "Tests" and "1 passed".
+      expect(stripVTControlCharacters(control.output)).toMatch(/Tests\s+1 passed/);
 
       const run = await runTeardownFixture("throw");
 
       expect(run.timedOut).toBe(false);
       expect(run.exitCode).not.toBe(0);
       expect(run.exitCode).not.toBeNull();
-      expect(run.output).toMatch(/Tests\s+1 passed/);
-      expect(run.output).toContain("fixture teardown failed on purpose");
+      expect(stripVTControlCharacters(run.output)).toMatch(/Tests\s+1 passed/);
+      expect(stripVTControlCharacters(run.output)).toContain("fixture teardown failed on purpose");
     },
     CHILD_TIMEOUT_MS * 2 + 10_000,
   );
