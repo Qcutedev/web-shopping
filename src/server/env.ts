@@ -22,8 +22,9 @@
  * passed on.
  *
  * Variables this file does not know are ignored, except the auth library's own variables
- * (AUTH_LIBRARY_VARIABLES, SEC-045), which are refused when set. An empty string counts as
- * "not set".
+ * (AUTH_LIBRARY_VARIABLES, SEC-045), which are refused when set, and the Vercel Blob library's
+ * request overrides (BLOB_LIBRARY_VARIABLES, D-051), which are refused when NODE_ENV=production.
+ * An empty string counts as "not set".
  */
 import { isAbsolute } from "node:path";
 
@@ -59,11 +60,18 @@ export interface Env {
   /** `LOG_LEVEL`. */
   logLevel: LogLevel;
   /**
-   * `UPLOAD_DIR`: absolute directory of the local disk upload adapter (T-041). Always present when
-   * `nodeEnv` is `production`; may be absent in development and test, where the upload and file
-   * endpoints then answer 500 until it is set.
+   * `UPLOAD_DIR`: absolute directory of the local disk upload adapter (T-041). When `nodeEnv` is
+   * `production`, exactly one of it and `blobReadWriteToken` is present (D-051); in development
+   * and test both may be absent, and the upload and file endpoints then answer 500 until one is
+   * set.
    */
   uploadDir?: string;
+  /**
+   * `BLOB_READ_WRITE_TOKEN`: the Vercel Blob read-write token of the Blob upload adapter (D-051).
+   * A secret: never log it. When it is set, uploads go to Vercel Blob and `UPLOAD_DIR` must not be
+   * set; when `nodeEnv` is `production`, exactly one of the two is present.
+   */
+  blobReadWriteToken?: string;
 }
 
 /** The longest payment timeout accepted: one day. A bound against a typing error, not a product rule. */
@@ -139,6 +147,34 @@ export const AUTH_LIBRARY_VARIABLES = [
   "BETTER_AUTH_TELEMETRY_DEBUG",
 ] as const;
 
+/**
+ * D-051: the form of a Vercel Blob read-write token, `vercel_blob_rw_<store id>_<secret>`, as
+ * @vercel/blob 2.8.2 reads it (`parseStoreIdFromReadWriteToken` splits on `_` and takes the
+ * fourth part as the store id). The store id becomes part of a host name in the library
+ * (`https://<store id>.private.blob.vercel-storage.com/`), so it is letters and digits only; the
+ * secret part is printable ASCII without blanks. The upload module checks the same pattern
+ * (src/modules/uploads/config.ts), so a value that starts the server is one the module accepts.
+ */
+export const BLOB_READ_WRITE_TOKEN_PATTERN = /^vercel_blob_rw_[A-Za-z0-9]+_[!-~]+$/;
+
+/**
+ * D-051: variables the Vercel Blob library (@vercel/blob 2.8.2, `dist/chunk-*.js` and
+ * `dist/index.js`) reads by itself from the process environment and that change where or how
+ * its requests go. `VERCEL_BLOB_API_URL` sends every API request, with the read-write token in
+ * its `authorization` header, to another address; the proxy and version overrides change the
+ * request the store receives. Refused when NODE_ENV=production, where nothing but the real store
+ * may receive the token; allowed elsewhere, where a local emulator may need them. Only the name
+ * is reported. Re-list the library's `process.env` reads when it is updated.
+ */
+export const BLOB_LIBRARY_VARIABLES = [
+  "VERCEL_BLOB_API_URL",
+  "NEXT_PUBLIC_VERCEL_BLOB_API_URL",
+  "VERCEL_BLOB_PROXY_THROUGH_ALTERNATIVE_API",
+  "NEXT_PUBLIC_VERCEL_BLOB_PROXY_THROUGH_ALTERNATIVE_API",
+  "VERCEL_BLOB_API_VERSION_OVERRIDE",
+  "NEXT_PUBLIC_VERCEL_BLOB_API_VERSION_OVERRIDE",
+] as const;
+
 /** SR-01: the pattern of a header name, and the headers that may never be named. */
 const HEADER_NAME_PATTERN = /^[A-Za-z0-9-]{1,64}$/;
 const FORBIDDEN_CLIENT_IP_HEADERS: ReadonlySet<string> = new Set([
@@ -175,7 +211,14 @@ export const ENV_RULES = {
   paymentTimeoutMinutes: `must be an integer from 1 to ${MAX_PAYMENT_TIMEOUT_MINUTES}`,
   logLevel: "must be debug, info, warn, or error",
   uploadDir: "must be an absolute directory path",
-  uploadDirRequired: "must be set when NODE_ENV=production",
+  uploadDirRequired: "must be set when NODE_ENV=production, unless BLOB_READ_WRITE_TOKEN is set",
+  blobReadWriteToken: "must be a Vercel Blob read-write token (vercel_blob_rw_<store id>_<secret>)",
+  blobReadWriteTokenWithUploadDir:
+    "cannot be set together with UPLOAD_DIR; configure exactly one upload storage",
+  blobReadWriteTokenPlaceholder:
+    "must not be a placeholder from .env.example when NODE_ENV=production",
+  blobLibraryVariableInProduction:
+    "must not be set when NODE_ENV=production; it redirects or alters the upload storage requests",
   signUpRateLimit: `must be an integer from 1 to ${MAX_SIGN_UP_RATE_LIMIT}`,
   signUpRateLimitInProduction: "must not be set when NODE_ENV=production",
 } as const;
@@ -275,6 +318,11 @@ const SCHEMAS = {
     .refine((value) => value.trim() !== "" && !value.includes("\0") && isAbsolute(value), {
       error: ENV_RULES.uploadDir,
     })
+    .optional(),
+  // D-051. A secret: the rule text is the constant, never anything about the value.
+  BLOB_READ_WRITE_TOKEN: z
+    .string()
+    .regex(BLOB_READ_WRITE_TOKEN_PATTERN, { error: ENV_RULES.blobReadWriteToken })
     .optional(),
 } as const;
 
@@ -559,7 +607,19 @@ export function parseEnv(source: EnvSource): Env {
   const signUpRateLimit = read(source, "SIGN_UP_RATE_LIMIT", issues);
   const logLevel = read(source, "LOG_LEVEL", issues);
   const uploadDir = read(source, "UPLOAD_DIR", issues);
+  const blobReadWriteToken = read(source, "BLOB_READ_WRITE_TOKEN", issues);
   checkAuthLibraryVariables(source, issues);
+
+  // D-051: one upload storage. Both set is refused in every NODE_ENV, so the adapter in use is
+  // never a guess (src/modules/uploads/config.ts refuses the same combination).
+  const uploadDirSet = raw(source, "UPLOAD_DIR") !== undefined;
+  const blobTokenSet = raw(source, "BLOB_READ_WRITE_TOKEN") !== undefined;
+  if (uploadDirSet && blobTokenSet) {
+    issues.push({
+      variable: "BLOB_READ_WRITE_TOKEN",
+      rule: ENV_RULES.blobReadWriteTokenWithUploadDir,
+    });
+  }
 
   // SR-01: the two ways of trusting a proxy cannot be combined.
   if (
@@ -589,9 +649,23 @@ export function parseEnv(source: EnvSource): Env {
       issues.push({ variable: "TRUSTED_PROXY_HOPS", rule: ENV_RULES.trustedProxyHopsExplicit });
     }
     // T-041: no guessed directory in production; a wrong one may not be persistent. A value that
-    // is set but not absolute has been reported by the schema already.
-    if (raw(source, "UPLOAD_DIR") === undefined) {
+    // is set but not absolute has been reported by the schema already. D-051: the Vercel Blob
+    // token is the other accepted upload storage; exactly one of the two must be set.
+    if (!uploadDirSet && !blobTokenSet) {
       issues.push({ variable: "UPLOAD_DIR", rule: ENV_RULES.uploadDirRequired });
+    }
+    // SEC-009 for the Blob token: a throwaway value carrying the placeholder marker.
+    const token = raw(source, "BLOB_READ_WRITE_TOKEN");
+    if (token !== undefined && token.includes(PLACEHOLDER_MARKER)) {
+      issues.push({
+        variable: "BLOB_READ_WRITE_TOKEN",
+        rule: ENV_RULES.blobReadWriteTokenPlaceholder,
+      });
+    }
+    for (const variable of BLOB_LIBRARY_VARIABLES) {
+      if (raw(source, variable) !== undefined) {
+        issues.push({ variable, rule: ENV_RULES.blobLibraryVariableInProduction });
+      }
     }
   }
 
@@ -622,6 +696,7 @@ export function parseEnv(source: EnvSource): Env {
     signUpRateLimit,
     logLevel,
     ...(uploadDir === undefined ? {} : { uploadDir }),
+    ...(blobReadWriteToken === undefined ? {} : { blobReadWriteToken }),
   });
 }
 

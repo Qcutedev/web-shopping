@@ -12,6 +12,7 @@ export {
   startUploadCleanupSchedule,
   stopUploadCleanupSchedule,
 } from "./cleanup";
+export { VercelBlobStorage } from "./blob-storage";
 export { getUploadStorage, UploadStorageNotConfiguredError } from "./config";
 export { detectImageType } from "./content";
 export { readUploadRequest } from "./reader";

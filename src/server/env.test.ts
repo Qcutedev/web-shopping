@@ -7,6 +7,7 @@ import {
   AUTH_LIBRARY_VARIABLES,
   AUTH_SECRET_MIN_DISTINCT_CHARACTERS,
   AUTH_SECRET_MIN_LENGTH,
+  BLOB_LIBRARY_VARIABLES,
   DEFAULT_PAYMENT_TIMEOUT_MINUTES,
   DEFAULT_SIGN_UP_RATE_LIMIT,
   ENV_RULES,
@@ -687,7 +688,7 @@ describe("parseEnv: the error", () => {
         "- AUTH_SECRET must not be a placeholder from .env.example when NODE_ENV=production",
         "- DATABASE_URL_TEST must not be set when NODE_ENV=production",
         "- TRUSTED_PROXY_HOPS must be set explicitly when NODE_ENV=production",
-        "- UPLOAD_DIR must be set when NODE_ENV=production",
+        "- UPLOAD_DIR must be set when NODE_ENV=production, unless BLOB_READ_WRITE_TOKEN is set",
       ].join("\n"),
     );
   });
@@ -859,6 +860,136 @@ describe("parseEnv: UPLOAD_DIR (T-041)", () => {
     const error = failure(production({ UPLOAD_DIR: "Zq7canary/relative" }));
     const everything = JSON.stringify([error.message, error.issues, error.stack]);
     expect(everything).not.toContain("Zq7canary");
+  });
+});
+
+describe("parseEnv: BLOB_READ_WRITE_TOKEN (D-051)", () => {
+  // Made up, assembled at run time so no token-shaped literal is in the repository.
+  const SECRET_PART = "Zq7canaryBlobSecret0123";
+  const TOKEN = ["vercel", "blob", "rw", "TestStore01", SECRET_PART].join("_");
+
+  it("is optional and absent from the result when not set or empty", () => {
+    for (const value of [undefined, ""]) {
+      const env = parseEnv(source({ BLOB_READ_WRITE_TOKEN: value }));
+      expect("blobReadWriteToken" in env).toBe(false);
+    }
+  });
+
+  it("is returned as written in every NODE_ENV when UPLOAD_DIR is not set", () => {
+    for (const nodeEnv of ["development", "test", "production"]) {
+      const env = parseEnv(
+        production({ NODE_ENV: nodeEnv, UPLOAD_DIR: undefined, BLOB_READ_WRITE_TOKEN: TOKEN }),
+      );
+      expect(env.blobReadWriteToken).toBe(TOKEN);
+      expect(env.uploadDir).toBeUndefined();
+    }
+  });
+
+  it("production needs exactly one of UPLOAD_DIR and BLOB_READ_WRITE_TOKEN", () => {
+    expect(() => parseEnv(production())).not.toThrow();
+    expect(() =>
+      parseEnv(production({ UPLOAD_DIR: undefined, BLOB_READ_WRITE_TOKEN: TOKEN })),
+    ).not.toThrow();
+    expect(issuesOf(production({ UPLOAD_DIR: undefined }))).toEqual([
+      { variable: "UPLOAD_DIR", rule: ENV_RULES.uploadDirRequired },
+    ]);
+    expect(issuesOf(production({ BLOB_READ_WRITE_TOKEN: TOKEN }))).toEqual([
+      { variable: "BLOB_READ_WRITE_TOKEN", rule: ENV_RULES.blobReadWriteTokenWithUploadDir },
+    ]);
+  });
+
+  it("refuses both storages at once outside production too", () => {
+    for (const nodeEnv of ["development", "test"]) {
+      expect(
+        issuesOf(source({ NODE_ENV: nodeEnv, UPLOAD_DIR, BLOB_READ_WRITE_TOKEN: TOKEN })),
+      ).toEqual([
+        { variable: "BLOB_READ_WRITE_TOKEN", rule: ENV_RULES.blobReadWriteTokenWithUploadDir },
+      ]);
+    }
+  });
+
+  it.each([
+    SECRET_PART,
+    `vercel_blob_rw__${SECRET_PART}`,
+    `vercel_blob_rw_Store.evil.example_${SECRET_PART}`,
+    `vercel_blob_rw_Store01_${SECRET_PART} x`,
+    `vercel_blob_ro_Store01_${SECRET_PART}`,
+    "vercel_blob_rw_Store01_",
+  ])("refuses the malformed value %j in every NODE_ENV", (value) => {
+    for (const nodeEnv of ["development", "test", "production"]) {
+      expect(
+        issuesOf(
+          production({ NODE_ENV: nodeEnv, UPLOAD_DIR: undefined, BLOB_READ_WRITE_TOKEN: value }),
+        ),
+      ).toEqual([{ variable: "BLOB_READ_WRITE_TOKEN", rule: ENV_RULES.blobReadWriteToken }]);
+    }
+  });
+
+  it("refuses a placeholder value in production only", () => {
+    const placeholder = ["vercel", "blob", "rw", "LocalStore", "local_dev_only_not_a_secret"].join(
+      "_",
+    );
+    expect(parseEnv(source({ BLOB_READ_WRITE_TOKEN: placeholder })).blobReadWriteToken).toBe(
+      placeholder,
+    );
+    expect(
+      issuesOf(production({ UPLOAD_DIR: undefined, BLOB_READ_WRITE_TOKEN: placeholder })),
+    ).toEqual([
+      { variable: "BLOB_READ_WRITE_TOKEN", rule: ENV_RULES.blobReadWriteTokenPlaceholder },
+    ]);
+  });
+
+  it("refuses the Blob library's request overrides in production only, by name", () => {
+    for (const variable of BLOB_LIBRARY_VARIABLES) {
+      const override = { [variable]: "https://Zq7canary.example.test" };
+      expect(() => parseEnv(source(override))).not.toThrow();
+      const error = failure(
+        production({ UPLOAD_DIR: undefined, BLOB_READ_WRITE_TOKEN: TOKEN, ...override }),
+      );
+      expect(error.issues).toEqual([{ variable, rule: ENV_RULES.blobLibraryVariableInProduction }]);
+      expect(JSON.stringify([error.message, error.issues])).not.toContain("Zq7canary");
+    }
+    expect(BLOB_LIBRARY_VARIABLES).toContain("VERCEL_BLOB_API_URL");
+  });
+
+  it("never puts any part of the value into the error", () => {
+    const sources: EnvSource[] = [
+      source({ BLOB_READ_WRITE_TOKEN: `${SECRET_PART}-malformed` }),
+      source({ UPLOAD_DIR, BLOB_READ_WRITE_TOKEN: TOKEN }),
+      production({
+        UPLOAD_DIR: undefined,
+        BLOB_READ_WRITE_TOKEN: `vercel_blob_rw_Store01_${SECRET_PART}not_a_secret`,
+      }),
+    ];
+    for (const env of sources) {
+      const error = failure(env);
+      const everything = JSON.stringify([error.message, error.issues, error.stack, { ...error }]);
+      expect(everything).not.toContain("Zq7canary");
+    }
+  });
+
+  it("agrees with the upload module's own reader", async () => {
+    const { readBlobToken } = await import("../modules/uploads/config");
+    for (const value of [
+      TOKEN,
+      SECRET_PART,
+      `vercel_blob_rw_a.b_${SECRET_PART}`,
+      "vercel_blob_rw_A_ b",
+    ]) {
+      let envAccepts = true;
+      try {
+        parseEnv(source({ BLOB_READ_WRITE_TOKEN: value }));
+      } catch {
+        envAccepts = false;
+      }
+      let moduleAccepts = true;
+      try {
+        readBlobToken({ BLOB_READ_WRITE_TOKEN: value });
+      } catch {
+        moduleAccepts = false;
+      }
+      expect(envAccepts, value).toBe(moduleAccepts);
+    }
   });
 });
 

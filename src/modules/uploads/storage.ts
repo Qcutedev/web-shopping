@@ -1,7 +1,8 @@
 /**
  * Storage abstraction for uploaded files (D-010; ARCHITECTURE.md: "Validated, renamed, stored
- * through `StorageProvider`"). The MVP has one adapter, the local disk; an S3-compatible adapter
- * can replace it behind the same interface (KNOWN_LIMITATIONS.md).
+ * through `StorageProvider`"). Two adapters: the local disk (this file) and Vercel Blob with
+ * private objects (blob-storage.ts, D-051). src/modules/uploads/config.ts picks one from the
+ * environment.
  *
  * Rules every adapter keeps:
  *
@@ -68,7 +69,11 @@ export function generateStorageKey(): string {
   return randomBytes(STORAGE_KEY_RANDOM_BYTES).toString("hex");
 }
 
-function assertKey(key: string): void {
+/**
+ * Refuses a key that does not match STORAGE_KEY_PATTERN with a TypeError. Every adapter calls it
+ * first in every operation, so the same keys are refused by all of them.
+ */
+export function assertKey(key: string): void {
   if (!STORAGE_KEY_PATTERN.test(key)) {
     throw new TypeError("StorageProvider: the key does not match the storage key pattern.");
   }
