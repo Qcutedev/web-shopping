@@ -1,6 +1,6 @@
 # Architecture
 
-Owner: orchestrator. This describes the **intended** architecture. Nothing here is built yet; see [STATUS.md](STATUS.md).
+Owner: orchestrator. This describes the architecture of the repository as audited on 2026-10-29 (T-080). Each part is built unless a line says otherwise. Task and verification state are in [STATUS.md](STATUS.md) only.
 
 ## Overview
 
@@ -19,8 +19,7 @@ graph TD
   Repos --> Prisma[Prisma client]
   Auth --> Prisma
   Prisma --> PG[(PostgreSQL)]
-  Services --> Pay[PaymentProvider: Mock]
-  Services --> Ship[ShippingProvider: Manual]
+  Services --> Pay[Payment provider: Mock]
   Services --> Store[StorageProvider: LocalDisk]
 ```
 
@@ -42,30 +41,36 @@ Dependencies point downward only. Lint rules (import restrictions) enforce the h
 ```
 src/
   app/
-    (storefront)/            home, c/[slug], search, p/[slug], s/[slug],
-                             cart, checkout, account/*, login, register
-    seller/                  apply, dashboard, products, inventory, orders, settings
-    admin/                   dashboard, users, applications, stores, products,
-                             categories, orders, reports, settings, audit
+    (storefront)/            home, categories/[slug], search, products/[slug], stores/[slug],
+                             cart, checkout, orders, orders/[id], account, account/addresses,
+                             sign-in, sign-up
+    seller/                  apply, dashboard (page.tsx), store, products (list, new, [id]),
+                             orders (list, [id])
+    admin/                   dashboard (page.tsx), users, applications, stores, products
+                             (list, [id]), categories, orders (list, [id]), reviews, reports,
+                             settings, audit-logs
     api/
-      auth/[...all]/         auth library handler
       health/
-      files/[...key]/        serves stored uploads through StorageProvider
-      v1/                    see API_CONTRACTS.md
+      files/[key]/           serves stored uploads through the storage adapter
+      v1/                    auth (sign-up, sign-in, sign-out, session), me, cart, checkout,
+                             orders, products, categories, stores, seller, admin;
+                             see API_CONTRACTS.md
   modules/
-    catalog/ cart/ checkout/ orders/ inventory/ reviews/
-    payments/ shipping/ sellers/ uploads/ admin/ users/
+    catalog/ cart/ checkout/ orders/ inventory/ reviews/ payments/ sellers/ uploads/
+    profile/ auth/ admin/ rate-limit/
   server/
-    auth/ db/ env.ts logger.ts rate-limit.ts errors.ts
+    auth/ db/ env.ts logger.ts rate-limit.ts errors.ts http.ts health.ts client-address.ts ...
   components/
     ui/                      design-system primitives
-    ...                      feature components
+    ...                      feature components (account, admin, auth, cart, catalog,
+                             checkout, orders, seller, shell)
   i18n/th.ts
   lib/                       formatters, api-client
-prisma/                      schema.prisma, migrations/, seed.ts
-tests/                       integration, security, helpers
+prisma/                      schema.prisma, migrations/, seed.ts, seed/
+tests/                       unit, integration, security, helpers, e2e-support
 e2e/                         Playwright
-scripts/                     bootstrap-admin.ts and others
+scripts/                     bootstrap-admin.ts, check-import-guards.mjs, container-smoke.ps1,
+                             build-probe.ps1
 docs/
 ```
 
@@ -80,7 +85,7 @@ The order of refusals is fixed by D-031 point 4 as amended by D-032 point 1; the
 5. The service is called with `(actor, input)`. It checks role, store status, and ownership again (the check in step 2 is a refusal made sooner, never the control), opens a transaction when needed, and returns a result or throws a typed domain error.
 6. The handler maps the result to the response envelope and logs one structured line with the request id.
 
-Not implemented yet: the handler pattern in `src/server/http.ts` still reads the body before it resolves the caller (CR-09), and `src/server/auth` does not exist (T-015).
+The handler pattern is documented in the header comment of `src/server/http.ts`; `src/server/auth` exists (`requireActor` in `session.ts`, pure helpers in `actor.ts`). Whether every route handler follows the order was not re-checked in this audit; the route-handler tests under `tests/security` pin it.
 
 ## Authorization model
 
@@ -173,8 +178,8 @@ Consequences:
 
 | Integration | MVP | Later |
 | --- | --- | --- |
-| Payment | `MockPaymentProvider` (simulated) | Real gateway with signed, idempotent webhooks |
-| Shipping | `ManualShippingProvider` (seller-entered tracking) | Carrier API |
+| Payment | Mock provider, `src/modules/payments/provider.ts` (simulated) | Real gateway with signed, idempotent webhooks |
+| Shipping | No provider interface; the seller types the carrier and tracking number (simulated) | Carrier API |
 | File storage | Local disk | S3-compatible object storage |
 | Email | none | Transactional email provider |
 | Search | PostgreSQL `ILIKE` | Trigram index or search service |
