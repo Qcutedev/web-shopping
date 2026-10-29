@@ -187,7 +187,7 @@ describe("POST /api/v1/seller/uploads: accepted images", () => {
     },
   );
 
-  it("accepts a file of exactly 5 MB", async () => {
+  it("accepts a file of exactly 4 MiB", async () => {
     const seller = await signedIn("SELLER");
     const response = await postUploadRoute(
       uploadRequest(fileBody(jpegBytes(MAX_UPLOAD_FILE_BYTES)), { cookie: seller.cookie }),
@@ -289,7 +289,7 @@ describe("POST /api/v1/seller/uploads: refused files store nothing", () => {
     await storedNothing(before);
   });
 
-  it("refuses one byte over 5 MB with 413, and a declared length over the body limit unread", async () => {
+  it("refuses one byte over 4 MiB with 413, and a declared length over the body limit unread", async () => {
     const seller = await signedIn("SELLER");
     const before = await state();
     const over = await postUploadRoute(

@@ -288,7 +288,7 @@ describe("createUpload: refusals inside the transaction", () => {
     for (const image of [
       { contentType: "image/gif", bytes: jpegBytes() },
       { contentType: "image/jpeg", bytes: new Uint8Array(0) },
-      { contentType: "image/jpeg", bytes: new Uint8Array(5_242_881) },
+      { contentType: "image/jpeg", bytes: new Uint8Array(4_194_305) },
     ]) {
       await expect(
         createUpload(seller(), image as never, { storage: fakeStorage() }),

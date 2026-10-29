@@ -575,7 +575,7 @@ export async function readJsonBody(
 
 /**
  * The largest byte limit `readRawBodyBytes` accepts: 8 MiB. It exists for the upload reader
- * (src/modules/uploads), whose limit is one file of 5 MB plus the multipart framing, and stays
+ * (src/modules/uploads), whose limit is one file of 4 MiB plus the multipart framing, and stays
  * far below the 41 MiB that SR-05 item 6 allows one upload request. It also keeps every limit
  * within the seven decimal digits that `contentLengthAllows` compares.
  */

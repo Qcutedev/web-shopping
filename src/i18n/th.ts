@@ -901,13 +901,13 @@ export const th = {
     images: {
       add: "เพิ่มรูปภาพ",
       replace: "เปลี่ยนรูปภาพ",
-      helper: "ไฟล์ JPEG, PNG หรือ WebP ขนาดไม่เกิน 5 MB",
+      helper: "ไฟล์ JPEG, PNG หรือ WebP ขนาดไม่เกิน 4 MB",
       // {max} is the most pictures allowed.
       limit: "เพิ่มได้สูงสุด {max} รูป",
       firstNote: "รูปแรกเป็นรูปหลัก",
       uploading: "กำลังอัปโหลดรูปภาพ",
       uploaded: "อัปโหลดรูปภาพแล้ว กดบันทึกเพื่อใช้รูปนี้",
-      tooBig: "ไฟล์ใหญ่เกิน 5 MB",
+      tooBig: "ไฟล์ใหญ่เกิน 4 MB",
       // {count} is the number of chosen files that were left out because the limit is reached.
       skipped: "เกินจำนวนที่เพิ่มได้ จึงไม่รับอีก {count} ไฟล์",
       wrongType: "รองรับเฉพาะไฟล์ JPEG, PNG และ WebP",

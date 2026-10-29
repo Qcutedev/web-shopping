@@ -6,7 +6,8 @@
  *
  * Order, the first failure gives the answer:
  *
- *   1. the body is read under MAX_UPLOAD_BODY_BYTES (one 5 MB file plus 16 KiB of framing), by
+ *   1. the body is read under MAX_UPLOAD_BODY_BYTES (one 4 MiB file plus 16 KiB of framing, under
+ *      the 4.5 MB request body limit of a Vercel function), by
  *      `Content-Length` first and then on the bytes as they arrive: 413. A body that stops
  *      arriving is a client error (provisional, item 8.2-13);
  *   2. the framing: the boundary of the content type, the delimiters, the part headers, exactly

@@ -9,8 +9,13 @@
  */
 import type { ImageRef } from "@/modules/catalog/schema";
 
-/** REQ-S-05: at most 5 MB per file. A file of exactly this many bytes is accepted. */
-export const MAX_UPLOAD_FILE_BYTES = 5_242_880;
+/**
+ * REQ-S-05: at most 4 MiB per file (4,194,304 bytes). A file of exactly this many bytes is
+ * accepted. Lowered from 5 MiB by the owner on 2026-10-29 so that one upload request, file and
+ * multipart framing, fits under the request body limit of a Vercel function
+ * (PLATFORM_REQUEST_BODY_LIMIT_BYTES; D-051).
+ */
+export const MAX_UPLOAD_FILE_BYTES = 4_194_304;
 
 /**
  * Room for the multipart framing around the one file: the boundary lines, the part headers, and
@@ -18,8 +23,19 @@ export const MAX_UPLOAD_FILE_BYTES = 5_242_880;
  */
 export const MULTIPART_OVERHEAD_BYTES = 16_384;
 
-/** The most bytes of a request body the upload reader reads (SR-05 items 3 and 6). */
+/**
+ * The most bytes of a request body the upload reader reads (SR-05 items 3 and 6): 4,210,688.
+ * It must stay below PLATFORM_REQUEST_BODY_LIMIT_BYTES (a unit test holds it there), so that a
+ * body the reader would accept is never cut off by the platform first.
+ */
 export const MAX_UPLOAD_BODY_BYTES = MAX_UPLOAD_FILE_BYTES + MULTIPART_OVERHEAD_BYTES;
+
+/**
+ * The request body limit of a Vercel function, 4.5 MB, taken as 4,500,000 bytes (the smaller
+ * reading of "MB"; D-051, docs/DEPLOYMENT.md "Deploying to Vercel"). Not enforced by this
+ * application: it is the ceiling MAX_UPLOAD_BODY_BYTES is checked against.
+ */
+export const PLATFORM_REQUEST_BODY_LIMIT_BYTES = 4_500_000;
 
 /** The longest header block of one multipart part, in bytes. */
 export const MAX_PART_HEADER_BYTES = 8_192;
@@ -77,7 +93,7 @@ export const ORPHAN_GRACE_PERIOD_SECONDS = 24 * 60 * 60;
  * **Provisional (SEC-065, owner to rule).** The most uploads that nothing references one store
  * may hold, whatever their age: an orphan past the grace period counts until the cleanup has
  * deleted it, so the disk one store can fill without attaching anything is bounded by this
- * number times MAX_UPLOAD_FILE_BYTES (250 MiB) even when no cleanup runs. One more upload is
+ * number times MAX_UPLOAD_FILE_BYTES (200 MiB) even when no cleanup runs. One more upload is
  * refused with `409 CONFLICT`, reason UPLOAD_LIMIT_REASON. Attaching an upload, or the cleanup,
  * frees the allowance.
  */

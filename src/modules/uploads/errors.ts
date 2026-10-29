@@ -11,7 +11,7 @@
  *   separators) or is empty or longer than 255 characters: `400`, path `file`, code
  *   `invalid_format`. The name is never used either way; refusing it keeps such names out of
  *   every log and every later consumer.
- * - A file over 5 MB: `413 PAYLOAD_TOO_LARGE`.
+ * - A file over 4 MiB (MAX_UPLOAD_FILE_BYTES): `413 PAYLOAD_TOO_LARGE`.
  * - A declared type, an extension, or leading bytes that are not one allowed type, or that do not
  *   agree with each other: `415 UNSUPPORTED_MEDIA_TYPE`.
  * - The store is not `APPROVED` when the row is written: `403 SELLER_NOT_APPROVED`.

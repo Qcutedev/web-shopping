@@ -3,7 +3,12 @@ import { describe, expect, it } from "vitest";
 import type { AppError } from "@/server/errors";
 
 import { checkImage, extensionOf, readUploadRequest } from "./reader";
-import { MAX_UPLOAD_BODY_BYTES, MAX_UPLOAD_FILE_BYTES } from "./schema";
+import {
+  MAX_UPLOAD_BODY_BYTES,
+  MAX_UPLOAD_FILE_BYTES,
+  MULTIPART_OVERHEAD_BYTES,
+  PLATFORM_REQUEST_BODY_LIMIT_BYTES,
+} from "./schema";
 import {
   ascii,
   fileBody,
@@ -31,6 +36,19 @@ function uploadRequest(body: BodyInit, headers: Record<string, string> = {}): Re
   } as RequestInit);
 }
 
+describe("upload size limits (owner decision 2026-10-29, D-051)", () => {
+  it("is 4 MiB per file", () => {
+    expect(MAX_UPLOAD_FILE_BYTES).toBe(4 * 1024 * 1024);
+  });
+
+  it("keeps the whole request body, file plus framing, under the platform's body limit", () => {
+    expect(MAX_UPLOAD_BODY_BYTES).toBe(MAX_UPLOAD_FILE_BYTES + MULTIPART_OVERHEAD_BYTES);
+    expect(MAX_UPLOAD_BODY_BYTES).toBe(4_210_688);
+    expect(PLATFORM_REQUEST_BODY_LIMIT_BYTES).toBe(4_500_000);
+    expect(MAX_UPLOAD_BODY_BYTES).toBeLessThan(PLATFORM_REQUEST_BODY_LIMIT_BYTES);
+  });
+});
+
 describe("extensionOf", () => {
   it("is the lower-cased text after the last dot, or empty", () => {
     expect(extensionOf("a.b.JPG")).toBe("jpg");
@@ -55,7 +73,7 @@ describe("checkImage", () => {
     ).toMatchObject({ contentType: "image/webp" });
   });
 
-  it("accepts a file of exactly 5 MB and refuses one byte more with 413", () => {
+  it("accepts a file of exactly 4 MiB and refuses one byte more with 413", () => {
     const exact = jpegBytes(MAX_UPLOAD_FILE_BYTES);
     expect(
       checkImage({ filename: "a.jpg", declaredType: "image/jpeg", bytes: exact }).bytes,
@@ -150,7 +168,7 @@ describe("readUploadRequest", () => {
     expect(error.status).toBe(413);
   });
 
-  it("answers 413 for a file just over 5 MB that fits the body limit", async () => {
+  it("answers 413 for a file just over 4 MiB that fits the body limit", async () => {
     const error = await refusal(
       readUploadRequest(uploadRequest(fileBody(jpegBytes(MAX_UPLOAD_FILE_BYTES + 1)))),
     );

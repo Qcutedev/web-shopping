@@ -611,7 +611,7 @@ describe("T-041 review: size and streaming (SR-05 items 3, 6, 8, 9)", () => {
     );
   });
 
-  it("a file one byte over 5 MB inside a body under the body limit is 413; exactly 5 MB is accepted", async () => {
+  it("a file one byte over 4 MiB inside a body under the body limit is 413; exactly 4 MiB is accepted", async () => {
     expect(await statusOf(request(fileBody(jpegBytes(MAX_UPLOAD_FILE_BYTES + 1))))).toBe(413);
     expect(await statusOf(request(fileBody(jpegBytes(MAX_UPLOAD_FILE_BYTES))))).toBe(200);
   });
