@@ -137,11 +137,11 @@ jobs:
       - name: Enable pnpm (Corepack)
         run: corepack enable
 
+      # No cache here: this job installs nothing, so there is no pnpm store to save.
       - name: Set up Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
 
       # Unfiltered on purpose (D-034): no advisory is ignored. Needs network access to the
       # registry audit endpoint; a registry outage fails the job instead of passing it.
