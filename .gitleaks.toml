@@ -1,0 +1,108 @@
+# gitleaks configuration (T-070). Used by the `secret-scan` job in .github/workflows/ci.yml.
+#
+# The default rules stay on. The entries below suppress only findings that were checked by hand
+# and are test fixtures or canary values: each entry names the file AND the exact line content
+# (condition = "AND"), for the `generic-api-key` rule only. A new file, or a new value in an
+# existing file, is still reported. Do not add a directory or a wildcard here.
+#
+# To add an entry: confirm the value is a fixture (not read by any deployed environment), then
+# add the narrowest path and line regex that matches it.
+
+title = "web-shopping gitleaks config"
+
+[extend]
+useDefault = true
+
+# Auth-secret canary: a well-formed 32 character value used to prove that validation accepts a
+# good secret. Not used by any environment.
+[[allowlists]]
+description = "AUTH_SECRET canary Kd2Xw9... in tests"
+condition = "AND"
+targetRules = ["generic-api-key"]
+regexTarget = "line"
+paths = [
+  '''^tests/security/cr-s116-14-sign-up-limit-node-env\.test\.ts$''',
+  '''^tests/security/s116-sign-up-limit\.test\.ts$''',
+  '''^tests/security/s116-signup-limit-header-session\.test\.ts$''',
+  '''^tests/security/cr083-request-frame-recheck\.test\.ts$''',
+  '''^tests/security/sec048-recheck\.test\.ts$''',
+  '''^src/server/env\.test\.ts$''',
+]
+regexes = ['''Kd2Xw9Lm4Rt6Pn3bYc5''']
+
+# The secret the integration suite gives to the auth library; it is also listed in the
+# validator's reject list (src/server/env.ts), so it is refused in production.
+[[allowlists]]
+description = "integration-test-secret fixture"
+condition = "AND"
+targetRules = ["generic-api-key"]
+regexTarget = "line"
+paths = [
+  '''^tests/integration/auth/support\.ts$''',
+  '''^tests/security/sec046-047-recheck\.test\.ts$''',
+  '''^tests/security/sec043-045-recheck\.test\.ts$''',
+  '''^src/server/env\.test\.ts$''',
+]
+regexes = ['''(?i)integration-test-secret-0123456789-abcdefghij''']
+
+# Too-short canary that must be rejected, and library-default secrets that must be rejected.
+[[allowlists]]
+description = "rejected-secret samples in env and auth tests"
+condition = "AND"
+targetRules = ["generic-api-key"]
+regexTarget = "line"
+paths = [
+  '''^src/server/env\.test\.ts$''',
+  '''^src/server/auth/config\.test\.ts$''',
+  '''^tests/security/sec049-recheck\.test\.ts$''',
+]
+regexes = ['''Zq7canary-short''', '''better-auth-secret-0''']
+
+# Password of the second seller account the e2e suite creates in its own throwaway database.
+[[allowlists]]
+description = "e2e account password"
+condition = "AND"
+targetRules = ["generic-api-key"]
+regexTarget = "line"
+paths = ['''^e2e/support/accounts\.ts$''']
+regexes = ['''password: "e2e-SellerTwo-pass-1234"''']
+
+# Idempotency keys (UUIDs) and storage keys (32 hex characters) in unit tests.
+[[allowlists]]
+description = "idempotency key and storage key fixtures"
+condition = "AND"
+targetRules = ["generic-api-key"]
+regexTarget = "line"
+paths = [
+  '''^tests/security/t034-checkout-ui\.test\.ts$''',
+  '''^tests/security/t032-checkout\.test\.ts$''',
+  '''^src/app/api/v1/checkout/route\.test\.ts$''',
+  '''^src/modules/checkout/service\.test\.ts$''',
+  '''^src/modules/orders/seller-mapping\.test\.ts$''',
+  '''^src/modules/uploads/service\.test\.ts$''',
+]
+regexes = [
+  '''"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"''',
+  '''"0123456789abcdef0123456789abcdef"''',
+]
+
+# Marker strings that a seller-isolation test looks for in responses to prove no data leaks.
+[[allowlists]]
+description = "seller isolation victim markers"
+condition = "AND"
+targetRules = ["generic-api-key"]
+regexTarget = "line"
+paths = ['''^tests/integration/seller-isolation/endpoints\.test\.ts$''']
+regexes = ['''SECRET-VICTIM-(SKU|CARRIER)-7d3f''']
+
+# Fake token text used to prove that the logger redacts a token.
+[[allowlists]]
+description = "logger redaction sample"
+condition = "AND"
+targetRules = ["generic-api-key"]
+regexTarget = "line"
+paths = [
+  '''^src/server/logger\.test\.ts$''',
+  '''^tests/security/t019-server-utilities\.test\.ts$''',
+]
+regexes = ['''api\.token\.v1:12345SECRETPW''']

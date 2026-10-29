@@ -179,8 +179,9 @@ jobs:
           echo "${RUNNER_TEMP}/gitleaks" >> "$GITHUB_PATH"
 
       # --redact keeps a found value out of the log. Any finding exits 1 and fails the job.
+      # .gitleaks.toml extends the default rules and allowlists reviewed test fixtures only.
       - name: Scan history for secrets
-        run: gitleaks git --redact --no-banner --verbose .
+        run: gitleaks git --config .gitleaks.toml --redact --no-banner --verbose .
 
   # End-to-end tests (Playwright). The suite starts its own `next dev` on 127.0.0.1:3100 and
   # uses the database `marketplace_e2e`, created by e2e/global-setup.ts on the db-test server.
