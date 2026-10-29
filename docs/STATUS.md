@@ -12,7 +12,7 @@ Done as reviews: the full code review (T-061, `reviews/T-061-code-review.md`) an
 
 ## Resume here
 
-Session 136: T-081 started by orchestrator (no agent running, docs and one e2e spec touched). Docker dev+test DB up. Ran `pnpm verify` (exit 0), integration (1682 passed), e2e (67 passed, 1 stale spec fixed). Next: owner decides which unrun checks (a11y, browser check 360/768/1280 px, CI run) are excepted or must run before T-081 closes; optional SEC-096 remediation (b).
+Session 136: T-081 started by orchestrator (no agent running, docs and one e2e spec touched). Docker dev+test DB up. Ran `pnpm verify` (exit 0), integration (1682 passed), e2e (67 passed, 1 stale spec fixed). Next: owner decides which unrun checks (a11y, browser check 360/768/1280 px, CI run) are excepted or must run before T-081 closes; optional SEC-096 remediation (b). Owner chose (2026-10-29): add `@axe-core/playwright`, scan customer/seller/admin pages at 360/768/1280. Started: qa agent writing `e2e/a11y.spec.ts`; touches `package.json`, `pnpm-lock.yaml`, `e2e/**`; findings fixed in a separate step.
 
 ## Open owner decisions
 
