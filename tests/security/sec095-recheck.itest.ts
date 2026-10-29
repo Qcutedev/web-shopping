@@ -203,19 +203,15 @@ async function threeWrites(customerPrefix: "0a-" | "0bz-") {
 describe("SEC-096: reactivateUser's id order against the acting-admin-first order of the others", () => {
   // OPEN (SEC-096). Observed 2026-10-29 on c2b631b: PostgreSQL aborts one of the three after
   // deadlock_timeout (a Prisma error, so a 500 at the handler).
-  it.fails(
-    "a reactivation, a customer deactivation, and an admin deactivation by two or more admins do not deadlock",
-    async () => {
-      const { customer, adminB, results } = await threeWrites("0a-");
-      expect(before(customer.id, adminB.id)).toBe(true);
-      const deadlocks = results.filter(isDeadlock).length;
-      const other = results.filter(
-        (result) => result !== null && !isDeadlock(result) && !isConflict(result),
-      ).length;
-      expect({ deadlocks, other }).toEqual({ deadlocks: 0, other: 0 });
-    },
-    30_000,
-  );
+  it("a reactivation, a customer deactivation, and an admin deactivation by two or more admins do not deadlock", async () => {
+    const { customer, adminB, results } = await threeWrites("0a-");
+    expect(before(customer.id, adminB.id)).toBe(true);
+    const deadlocks = results.filter(isDeadlock).length;
+    const other = results.filter(
+      (result) => result !== null && !isDeadlock(result) && !isConflict(result),
+    ).length;
+    expect({ deadlocks, other }).toEqual({ deadlocks: 0, other: 0 });
+  }, 30_000);
 
   // Control: with the customer's id after B's, the reactivation takes B first, like every other
   // write, and the three requests queue without a cycle.

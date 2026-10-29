@@ -19,10 +19,8 @@
  * deactivating each other deadlock. It refuses with `actingAdminRefused` when the acting admin is
  * not among the rows it locked.
  *
- * `reactivateUser` does not call it either (SEC-094): a `FOR SHARE` on the acting admin followed by
- * a lock on the target let two admins reactivating each other deadlock. It locks the acting admin's
- * row (`FOR SHARE`, as here; SEC-095) and the target row in byte order of the two ids, and refuses
- * with `actingAdminRefused` when the acting admin's row is not an active `ADMIN`.
+ * `reactivateUser` calls it first too (SEC-096). To keep two admins reactivating each other from
+ * deadlocking (SEC-094), it answers an already active admin target before it locks the target.
  *
  * This file imports nothing of another module, so the sellers module can use it without an import
  * cycle (the admin module imports the sellers module).
