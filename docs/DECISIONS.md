@@ -401,7 +401,7 @@ Context: the owner chose SEC-092 remediation (1), an admin hide with an audit ro
 6. **Public reads** (the product's review list, its `total`, and the rating summary) filter `hiddenAt: null`. The customer's own order view (`GET /orders`, `GET /orders/{id}`) still shows the buyer's own review, hidden or not, and the one-review-per-item rule still counts hidden reviews.
 7. `hiddenAt` is the database clock (`now()`), not the application clock.
 
-Status: PROPOSED by backend-api; the owner may change points 1 to 4 without a data model change.
+Status: ACCEPTED by the owner (2026-10-29), as built.
 
 ### D-049 Correction to D-011: there is no shipping provider (T-080 drift audit, 2026-10-29)
 
