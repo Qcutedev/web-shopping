@@ -402,3 +402,11 @@ Context: the owner chose SEC-092 remediation (1), an admin hide with an audit ro
 7. `hiddenAt` is the database clock (`now()`), not the application clock.
 
 Status: PROPOSED by backend-api; the owner may change points 1 to 4 without a data model change.
+
+### D-049 Correction to D-011: there is no shipping provider (T-080 drift audit, 2026-10-29)
+
+D-011 names a `ShippingProvider` interface and a `ManualShippingProvider`. Neither exists in `src`. As built: `PaymentProvider` and the mock implementation are in `src/modules/payments/provider.ts`, and `StorageProvider` with `LocalDiskStorage` is in `src/modules/uploads/storage.ts`. Shipping is not a provider: the seller types the carrier and tracking number when moving a seller order to `SHIPPED`, and no carrier is called ("simulated shipping", [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md)). D-011 itself is not rewritten. Status: PROPOSED; this entry records a fact found in code, and the owner decides whether to keep the manual design or ask for a shipping interface.
+
+### D-050 Correction to D-012: two rate-limit rules count in the database (T-080 drift audit, 2026-10-29)
+
+D-012 describes an in-process fixed-window limiter. As built, the in-process limiter is still used for the other rules (`RATE_LIMITS`), and the per-user rules `seller-application` and `review-create` count in PostgreSQL (`UserRateLimitWindow`, SEC-052; `src/server/rate-limit.ts`, `src/modules/rate-limit`). The in-process part is correct for a single instance only, as D-012 says. Status: PROPOSED; records current code, the owner may change it.

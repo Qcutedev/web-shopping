@@ -320,119 +320,200 @@ Q7 to Q41 are answered and are listed under [Confirmed decisions](#confirmed-dec
 
 ## Traceability
 
-**The "Test files" column of the tables below is out of date (T-080 audit, 2026-10-29) and is not evidence.** It was last written while only unit tests existed. Today integration, security, and end-to-end suites exist (`tests/integration/`, `tests/security/`, `e2e/`), so "none yet", "never run", and "the end-to-end suite does not exist yet" in the cells below are wrong for most rows. The product-requirements owner must rebuild the column or remove it. Until then use [TEST_STRATEGY.md](TEST_STRATEGY.md) for what is tested and [STATUS.md](STATUS.md) for what ran. The "Tasks" columns are still the reverse index of [PROJECT_PLAN.md](PROJECT_PLAN.md), which is authoritative for what each task covers.
+The tables below map requirements to tasks only. The old "Test files" column was written while only unit tests existed and was removed on 2026-10-29 (T-080); it is in git history. The last table lists test files that cite a requirement or rule id in their text. A citation shows that a file names the id; it does not show that the id is fully covered. For what is tested and what ran, use [TEST_STRATEGY.md](TEST_STRATEGY.md) and [STATUS.md](STATUS.md). The "Tasks" columns are the reverse index of [PROJECT_PLAN.md](PROJECT_PLAN.md), which is authoritative for what each task covers.
 
-| Requirement | Tasks | Test files |
-| --- | --- | --- |
-| REQ-C-01, REQ-C-02 | T-015 | none yet |
-| REQ-C-03, REQ-C-04 | T-030 | none yet |
-| REQ-C-05 to REQ-C-09, shared evidence (per-requirement rows follow) | T-020, T-021 | Code: API read side `src/modules/catalog/` (T-020, route handlers under `src/app/api/v1/products`, `categories`, `stores`); pages (T-021, commit `506646b`, IMPLEMENTED, not VERIFIED, not code-reviewed) under `src/app/(storefront)/` with components in `src/components/catalog/`. Shared evidence. Unit: `src/modules/catalog/schema.test.ts` (pagination, price filter, sort, search text, slugs), `src/modules/catalog/service.test.ts` (list and detail shapes, sold-out mark, no hidden fields), `src/modules/catalog/visibility.test.ts`, `src/modules/catalog/repository.test.ts`. Route handlers, mocked: `src/app/api/v1/products/route.test.ts`, `src/app/api/v1/products/[slug]/route.test.ts`, `src/app/api/v1/products/[slug]/reviews/route.test.ts`, `src/app/api/v1/categories/route.test.ts`, `src/app/api/v1/stores/[slug]/route.test.ts`, `src/app/api/v1/stores/[slug]/products/route.test.ts`. Security, with a mocked database: `tests/security/t020-t018-catalog-shell.test.ts`. Integration, never run against PostgreSQL because Docker is down: `tests/integration/catalog/endpoints.test.ts`, `tests/integration/catalog/visibility.test.ts`. Component level (pages' views, jsdom): `src/components/catalog/catalog-views.test.tsx`, `src/components/catalog/list-query.test.ts`, `src/components/catalog/list-href.test.ts`. No test renders a page file under `src/app/(storefront)/`, no browser check ran (360, 768, 1280 widths), and no e2e test exists; so no cell below shows a page behaving correctly against real data. |
-| REQ-C-05 | T-020, T-021 | partial. Covered: newest products via API (`tests/integration/catalog/endpoints.test.ts`, never run); card shows sold-out and "ข้อมูลตัวอย่าง" sample label (`catalog-views.test.tsx` "ProductCard" marks); list success, empty state with one next action, past-last-page link back, pager (`catalog-views.test.tsx` "ProductListView"); loading and error states with retry (same file, "loading and error states"); category chips listed and current one marked, nothing rendered when empty (same file, "SortLinks and CategoryChipsView"). Code exists, no test: `src/app/(storefront)/page.tsx` (h1 and newest list, category chips, link to all products). NOT COVERED: the homepage page itself (no page test, no e2e); that a seeded database shows the sample label on the homepage |
-| REQ-C-06 | T-020, T-021 | partial. Covered: keyword, category, price, sort, paging at API (`src/modules/catalog/schema.test.ts`, `service.test.ts`, integration never run); page query parsing: defaults, trimmed `q`, repeated parameter / bad page / unknown sort refused, `storeId` ignored (`list-query.test.ts`); link building keeps `q` and `sort`, encodes text (`list-href.test.ts`); sort links mark current (`catalog-views.test.tsx`); empty state; hidden cases give 404 at API (`visibility.test.ts`, mocked and integration). NOT COVERED: price-range filter UI (`src/app/(storefront)/search/page.tsx` passes only `q` and `sort`, and `parseListQuery` in `src/components/catalog/list-query.ts` does not read `minPriceSatang` or `maxPriceSatang`, so a price range in the page URL is ignored; the API filter works, the page cannot use it); category filter control on the search page; page-level search test |
-| REQ-C-07 | T-020, T-021 | partial. Covered: unknown or inactive category gives 404 at API and service (`visibility.test.ts` "categories (BR-23)", "brings back the products of a category switched on again", integration never run; `tests/security/t020-t018-catalog-shell.test.ts` same 404 for hidden and unknown); category path replaces query category (`list-query.test.ts`); invalid slug calls `notFound()` in `src/app/(storefront)/categories/[slug]/page.tsx`, no test. NOT COVERED: the category page h1 shows the generic label `th.catalog.categories.label`, not the category name, because there is no `getCategory` service function (gap in T-020/T-021); page 404 behaviour; cart and checkout refusal for an inactive category (BR-23, T-031, T-032) |
-| REQ-C-08 | T-020, T-021 | partial. Covered: detail API, slug 404 for hidden and unknown (`src/app/api/v1/products/[slug]/route.test.ts`, `visibility.test.ts`); view shows h1, price, labels, store link, rating summary (`catalog-views.test.tsx` "shows h1, price, labels, store link, and the rating summary"); description rendered as text, not markup; sold-out mark and no rating row when no reviews; placeholder when no picture; reviews list with rating, plain-text comment, date, and empty message ("ReviewsView"). NOT COVERED: add-to-cart and quantity control (`product-detail-view.tsx` leaves it to T-034); lowered-quantity message (BR-30, OQ-46, T-034); low-stock mark (OQ-12 unanswered, nothing built); image gallery with more than one image (image URLs 404 until T-041); page-level 404 via `notFound()` in `product-detail-section.tsx`, no test |
-| REQ-C-09 | T-020, T-021 | partial. Covered: store page and store products API, non-approved store and deactivated owner give 404 (`src/app/api/v1/stores/[slug]/route.test.ts`, `.../products/route.test.ts`, `visibility.test.ts` "store pages (BR-27)", integration never run); sample label on store header exists in `store-section.tsx`; product cards in the store list reuse `ProductCard` (sold-out mark covered, see REQ-C-05). NOT COVERED: `store-section.tsx` view has no component test (header, logo, description, 404 via `notFound()`, empty state); store logo until T-041; page-level test |
-| REQ-C-10 | T-031, T-034 | none yet |
-| REQ-C-11 to REQ-C-13 | T-032, T-034 | none yet |
-| REQ-C-14 | T-035 | none yet |
-| REQ-S-01, REQ-S-02, REQ-S-09 | T-040, T-044 | none yet |
-| REQ-S-03 | T-043, T-044 | none yet |
-| REQ-S-04, REQ-S-06 | T-042, T-044 | none yet |
-| REQ-S-05 | T-041, T-044 | none yet |
-| REQ-S-07, REQ-S-08 | T-043, T-044 | none yet |
-| REQ-A-01 to REQ-A-10 | T-050, T-051 | none yet |
-| REQ-A-11 | T-016 | none yet |
-| REQ-N-01 | T-017, T-018 | partial: `src/lib/format.test.ts` (THB amounts, and dates and times shown in Asia/Bangkok: "shows the Bangkok day, not the UTC day", "shows the Bangkok time of day", "display time zone"), `src/components/ui/price.test.tsx` (THB and `th-TH` formatting of the price primitive); Thai text on pages: none yet |
-| REQ-N-02 | T-017, T-018 | none yet |
-| REQ-N-03 | T-017, T-021, T-034, T-044, T-051 | partial: `src/components/ui/tokens.test.ts` (contrast of the colour tokens), `src/components/ui/input.test.tsx`, `src/components/ui/field.test.tsx` (labels and error text of the form primitives), `src/components/ui/button.test.tsx` (focus ring), `src/components/ui/quantity-stepper.test.tsx` (keyboard stepping); primitives only. Storefront views: `src/components/catalog/catalog-views.test.tsx` checks text marks (sold out, sample), the alert role on errors, and the loading announcement ("skeleton announces loading"), but no check of heading order, keyboard operation, or contrast on a rendered storefront page. NOT COVERED: any axe or browser check of a page; seller and admin pages |
-| REQ-N-04 | T-015, T-045, T-052 | none yet |
-| REQ-N-05 | T-023, T-033 | none yet |
-| REQ-N-06 | T-020, T-050 | partial, catalog lists only: `src/modules/catalog/schema.test.ts` (page size 1 to 50, 51 refused, default 20), `tests/security/t020-t018-catalog-shell.test.ts` (page size 50 is the most rows one request asks for); integration, never run against PostgreSQL because Docker is down: `tests/integration/catalog/endpoints.test.ts` ("caps the page size at 50: 50 is served, 51 is 400", reviews and categories "paginates and refuses pageSize 51"). Admin lists (T-050): none yet |
-| REQ-N-07 | T-011, T-019 | partial: `src/server/logger.test.ts`, `tests/security/t019-server-utilities.test.ts` (structured log lines and redaction only; health endpoint and environment validation: none yet) |
-| REQ-N-08 | T-011 | none yet |
-| REQ-N-09 | T-014, T-032, T-034 | none yet |
-| REQ-N-10 | T-010, T-012 | none yet |
-| REQ-N-12 | T-018 | `src/i18n/site-name.test.ts` ("is defined once, in src/i18n/th.ts", "is not an empty string") |
-| BR-01 to BR-16 | T-013 (schema) | none yet |
-| BR-03, BR-04 | T-032 | none yet |
-| BR-05 | T-020 | partial, read side: `src/modules/catalog/visibility.test.ts`, `tests/security/t020-t018-catalog-shell.test.ts` (mocked database); integration, never run against PostgreSQL because Docker is down: `tests/integration/catalog/visibility.test.ts` ("hidden case %s"). Cart and checkout use of the rule: none yet |
-| BR-06 | T-040 | none yet |
-| BR-07 to BR-15 | T-032 | none yet |
-| BR-16 | T-013, T-031, T-032 | none yet |
+| Requirement | Tasks |
+| --- | --- |
+| REQ-C-01, REQ-C-02 | T-015 |
+| REQ-C-03, REQ-C-04 | T-030 |
+| REQ-C-05 to REQ-C-09, shared evidence (per-requirement rows follow) | T-020, T-021 |
+| REQ-C-05 | T-020, T-021 |
+| REQ-C-06 | T-020, T-021 |
+| REQ-C-07 | T-020, T-021 |
+| REQ-C-08 | T-020, T-021 |
+| REQ-C-09 | T-020, T-021 |
+| REQ-C-10 | T-031, T-034 |
+| REQ-C-11 to REQ-C-13 | T-032, T-034 |
+| REQ-C-14 | T-035 |
+| REQ-S-01, REQ-S-02, REQ-S-09 | T-040, T-044 |
+| REQ-S-03 | T-043, T-044 |
+| REQ-S-04, REQ-S-06 | T-042, T-044 |
+| REQ-S-05 | T-041, T-044 |
+| REQ-S-07, REQ-S-08 | T-043, T-044 |
+| REQ-A-01 to REQ-A-10 | T-050, T-051 |
+| REQ-A-11 | T-016 |
+| REQ-N-01 | T-017, T-018 |
+| REQ-N-02 | T-017, T-018 |
+| REQ-N-03 | T-017, T-021, T-034, T-044, T-051 |
+| REQ-N-04 | T-015, T-045, T-052 |
+| REQ-N-05 | T-023, T-033 |
+| REQ-N-06 | T-020, T-050 |
+| REQ-N-07 | T-011, T-019 |
+| REQ-N-08 | T-011 |
+| REQ-N-09 | T-014, T-032, T-034 |
+| REQ-N-10 | T-010, T-012 |
+| REQ-N-12 | T-018 |
+| BR-01 to BR-16 | T-013 (schema) |
+| BR-03, BR-04 | T-032 |
+| BR-05 | T-020 |
+| BR-06 | T-040 |
+| BR-07 to BR-15 | T-032 |
+| BR-16 | T-013, T-031, T-032 |
 
 BR-17 to BR-30 were added on 2026-10-11 from D-025. The tasks below are the ones STATUS.md names as blocked by the corresponding owner question, plus the task that already covers the story the rule is stated in.
 
-| Requirement | Tasks (from the STATUS.md "Blocks" column) | Test files |
-| --- | --- | --- |
-| BR-17 (OQ-04) | T-013, T-042, T-050 | none yet |
-| BR-18 (OQ-05) | T-013, T-042 | none yet |
-| BR-19 (OQ-06) | T-013, T-042, T-050 | none yet |
-| BR-20 (OQ-07) | T-013, T-032, T-034 | none yet |
-| BR-21 (OQ-08) | T-013, T-032, T-043, T-050 | none yet |
-| BR-22 (OQ-09) | T-031, T-032, T-034 | none yet |
-| BR-23 (OQ-10) | T-020 | partial, integration only, never run against PostgreSQL because Docker is down: `tests/integration/catalog/visibility.test.ts` ("categories (BR-23)", "brings back the products of a category switched on again"). Cart and checkout refusal: none yet |
-| BR-24 (OQ-11) | T-020, T-021 | partial: `src/modules/catalog/visibility.test.ts` ("isSoldOut (BR-24)"), `src/modules/catalog/service.test.ts` (stock 0 marked sold out); integration, never run against PostgreSQL because Docker is down: `tests/integration/catalog/visibility.test.ts` ("keeps a sold-out product listed and readable, marked soldOut (BR-24)"); component level, `src/components/catalog/catalog-views.test.tsx` (card: "marks a sold-out product with text and a sample product with the sample label"; detail: "marks sold out, and omits the rating row when there are no reviews"). NOT COVERED: the mark on a rendered page against real data, the mark in the store page list as a page, and refusal to buy at stock 0 (T-031, T-032) |
-| BR-25 (OQ-12) | T-021, T-042, T-043 | none yet |
-| BR-26 (OQ-13) | T-016, T-050 | none yet |
-| BR-27 (OQ-14) | T-020, T-050 | partial, public store page only (admin side T-050: none yet); integration, never run against PostgreSQL because Docker is down: `tests/integration/catalog/visibility.test.ts` ("store pages (BR-27)") |
-| BR-28 (OQ-16) | T-013, T-050 | none yet |
-| BR-29 (OQ-17) | T-013, T-043 | none yet |
-| BR-30 (OQ-23) | T-021, T-031, T-034 | none yet |
-| BR-09 store name snapshot (OQ-18) | T-013 | none yet |
-| REQ-N-12 placeholder name (OQ-15) | T-018 | `src/i18n/site-name.test.ts` |
+| Requirement | Tasks (from the STATUS.md "Blocks" column) |
+| --- | --- |
+| BR-17 (OQ-04) | T-013, T-042, T-050 |
+| BR-18 (OQ-05) | T-013, T-042 |
+| BR-19 (OQ-06) | T-013, T-042, T-050 |
+| BR-20 (OQ-07) | T-013, T-032, T-034 |
+| BR-21 (OQ-08) | T-013, T-032, T-043, T-050 |
+| BR-22 (OQ-09) | T-031, T-032, T-034 |
+| BR-23 (OQ-10) | T-020 |
+| BR-24 (OQ-11) | T-020, T-021 |
+| BR-25 (OQ-12) | T-021, T-042, T-043 |
+| BR-26 (OQ-13) | T-016, T-050 |
+| BR-27 (OQ-14) | T-020, T-050 |
+| BR-28 (OQ-16) | T-013, T-050 |
+| BR-29 (OQ-17) | T-013, T-043 |
+| BR-30 (OQ-23) | T-021, T-031, T-034 |
+| BR-09 store name snapshot (OQ-18) | T-013 |
+| REQ-N-12 placeholder name (OQ-15) | T-018 |
 
 BR-31 to BR-38 were added, and BR-12, BR-18 to BR-20, BR-22, BR-23, BR-25 to BR-28, and BR-30 were refined, on 2026-10-11 from D-026. The "Covers" columns in PROJECT_PLAN.md list BR-17 to BR-38 against the same tasks as the D-025, D-026, and D-028 tables here; no gap is open for these rules. The tasks below are the ones STATUS.md names as blocked by the corresponding owner question, plus the task that already covers the story the rule is stated in.
 
-| Requirement | Tasks (from the STATUS.md "Blocks" column) | Test files |
-| --- | --- | --- |
-| BR-20 failed order stays visible, timeout (OQ-25, OQ-27) | T-032, T-034, T-050 | none yet |
-| BR-32 (OQ-26) | T-032 | none yet |
-| BR-31 (OQ-28) | T-031 | none yet |
-| BR-38 (OQ-29) | T-031, T-034 | none yet |
-| BR-22, BR-30 checkout stops for re-confirmation (OQ-30) | T-031, T-032, T-034 | none yet |
-| BR-30 message wording (OQ-46) | T-021, T-034 | none yet |
-| BR-23, BR-27 return on reactivation (OQ-31) | T-020, T-050 | partial, catalog side; integration, never run against PostgreSQL because Docker is down: `tests/integration/catalog/visibility.test.ts` ("return on reactivation (D-026, OQ-31)"). Admin side (T-050): none yet |
-| BR-27 paid orders of a deactivated owner (OQ-32) | T-050 | none yet |
-| BR-25 (OQ-33) | T-042, T-043 | none yet |
-| BR-33 (OQ-34) | T-043, T-050 | none yet |
-| BR-18 picture order (OQ-35) | T-042 | none yet |
-| BR-19 automatic resubmission (OQ-36) | T-042 | none yet |
-| BR-26 script may run again (OQ-37) | T-016 | none yet |
-| BR-28 whole-percent commission (OQ-38) | T-050 | none yet |
-| BR-23 inactive category refused for sellers (OQ-39) | T-042 | none yet |
-| BR-34 (OQ-40) | T-042 | none yet |
-| BR-35 (OQ-41) | T-043 | none yet |
-| BR-36 (OQ-42) | T-050 | none yet |
-| BR-12 deleted product leaves carts (OQ-43) | T-031, T-042 | none yet |
-| BR-37 (OQ-44) | T-013 | none yet |
+| Requirement | Tasks (from the STATUS.md "Blocks" column) |
+| --- | --- |
+| BR-20 failed order stays visible, timeout (OQ-25, OQ-27) | T-032, T-034, T-050 |
+| BR-32 (OQ-26) | T-032 |
+| BR-31 (OQ-28) | T-031 |
+| BR-38 (OQ-29) | T-031, T-034 |
+| BR-22, BR-30 checkout stops for re-confirmation (OQ-30) | T-031, T-032, T-034 |
+| BR-30 message wording (OQ-46) | T-021, T-034 |
+| BR-23, BR-27 return on reactivation (OQ-31) | T-020, T-050 |
+| BR-27 paid orders of a deactivated owner (OQ-32) | T-050 |
+| BR-25 (OQ-33) | T-042, T-043 |
+| BR-33 (OQ-34) | T-043, T-050 |
+| BR-18 picture order (OQ-35) | T-042 |
+| BR-19 automatic resubmission (OQ-36) | T-042 |
+| BR-26 script may run again (OQ-37) | T-016 |
+| BR-28 whole-percent commission (OQ-38) | T-050 |
+| BR-23 inactive category refused for sellers (OQ-39) | T-042 |
+| BR-34 (OQ-40) | T-042 |
+| BR-35 (OQ-41) | T-043 |
+| BR-36 (OQ-42) | T-050 |
+| BR-12 deleted product leaves carts (OQ-43) | T-031, T-042 |
+| BR-37 (OQ-44) | T-013 |
 
 Rules refined on 2026-10-11 from D-028 and D-029. D-028 names no blocked task for most of its points, so the tasks below are the ones that already cover the story each rule is stated in.
 
-| Requirement | Tasks | Test files |
-| --- | --- | --- |
-| BR-19 price counts as a correction (Q31) | T-042 | none yet |
-| BR-25 figures by the product's own statuses (Q32, DM-Q10) | T-042, T-043 | none yet |
-| BR-20, BR-32 items of a part cancelled earlier do not return (Q33) | T-032 | none yet |
-| BR-32 no later notice after a timeout (Q34) | T-032, T-034 | none yet |
-| BR-20, BR-31, BR-32 Thai texts (Q35) | T-018, T-034, T-051 | none yet |
-| BR-38 hidden cart line (Q36) | T-031, T-034 | none yet |
-| BR-26 script and an existing account (Q37) | T-016 | none yet |
-| BR-14 view-only access while suspended | T-040, T-041, T-042, T-043, T-044 | none yet |
-| BR-41 admin reads product pictures (SEC-090), REQ-A-05 criteria (a) to (g) | T-041 (file endpoint), T-050, T-051 | covered: `tests/integration/uploads/endpoints.test.ts` describe "BR-41" (a) to (g), `tests/security/sec090-recheck.itest.ts`, `tests/security/sec068-recheck.itest.ts`, `tests/security/t051-admin-ui.itest.ts`; security re-check passed (SEC-090 FIXED) |
-| REQ-A-01 dashboard figures | T-050, T-051 | none yet |
-| REQ-S-02 contact phone | T-040, T-044 | none yet |
-| BR-20 payment timeout of 15 minutes | T-032 | none yet |
-| REQ-A-08 report range by paid date | T-013, T-050 | none yet |
-| BR-36 queue order; no decision on an unpublished product | T-013, T-050 | none yet |
-| BR-22, BR-30 a read stores nothing; the stopped checkout stores the lowered quantity (D-029) | T-031, T-032, T-034 | none yet |
+| Requirement | Tasks |
+| --- | --- |
+| BR-19 price counts as a correction (Q31) | T-042 |
+| BR-25 figures by the product's own statuses (Q32, DM-Q10) | T-042, T-043 |
+| BR-20, BR-32 items of a part cancelled earlier do not return (Q33) | T-032 |
+| BR-32 no later notice after a timeout (Q34) | T-032, T-034 |
+| BR-20, BR-31, BR-32 Thai texts (Q35) | T-018, T-034, T-051 |
+| BR-38 hidden cart line (Q36) | T-031, T-034 |
+| BR-26 script and an existing account (Q37) | T-016 |
+| BR-14 view-only access while suspended | T-040, T-041, T-042, T-043, T-044 |
+| BR-41 admin reads product pictures (SEC-090), REQ-A-05 criteria (a) to (g) | T-041 (file endpoint), T-050, T-051 |
+| REQ-A-01 dashboard figures | T-050, T-051 |
+| REQ-S-02 contact phone | T-040, T-044 |
+| BR-20 payment timeout of 15 minutes | T-032 |
+| REQ-A-08 report range by paid date | T-013, T-050 |
+| BR-36 queue order; no decision on an unpublished product | T-013, T-050 |
+| BR-22, BR-30 a read stores nothing; the stopped checkout stores the lowered quantity (D-029) | T-031, T-032, T-034 |
 
 BR-39 and BR-40 were added, and BR-14, BR-38, and REQ-A-01 were settled, on 2026-10-12 from D-033 points 2 to 5. D-033 names no blocked task, so the tasks below are the ones that already cover the story each rule is stated in. Gap: the "Covers" columns in PROJECT_PLAN.md do not list BR-39 and BR-40 yet; the tasks named here are the proposal for them. Q39 and Q41 changed no rule: their tasks are in the D-028 table above ("BR-14 view-only access while suspended", "REQ-A-01 dashboard figures").
 
-| Requirement | Tasks | Test files |
-| --- | --- | --- |
-| BR-38 Thai text of the mark on a hidden cart line (Q38) | T-034 | none yet |
-| BR-39 paid time recorded once, none on an unpaid order | T-013, T-032 | partial: `tests/integration/schema/check-constraints.test.ts`, as TEST_STRATEGY.md records it (the database ties `paidAt` to payment status `PAID`; recorded once and never changed, and nothing shown for an unpaid order: none yet) |
-| BR-39 paid time on the customer's order detail page (Q40) | T-032, T-034 | none yet |
-| BR-39 paid time on the seller's order detail page (Q40) | T-043, T-044 | none yet |
-| BR-39 paid time on the admin's order detail page (Q40) | T-050, T-051 | none yet |
-| BR-40 admin order list filtered by paid date (Q40) | T-013, T-050, T-051 | none yet |
+| Requirement | Tasks |
+| --- | --- |
+| BR-38 Thai text of the mark on a hidden cart line (Q38) | T-034 |
+| BR-39 paid time recorded once, none on an unpaid order | T-013, T-032 |
+| BR-39 paid time on the customer's order detail page (Q40) | T-032, T-034 |
+| BR-39 paid time on the seller's order detail page (Q40) | T-043, T-044 |
+| BR-39 paid time on the admin's order detail page (Q40) | T-050, T-051 |
+| BR-40 admin order list filtered by paid date (Q40) | T-013, T-050, T-051 |
+
+### Test files that cite an id (generated by search on 2026-10-29)
+
+Search: every `*.test.*`, `*.spec.*`, and `*.itest.*` file under `src/`, `tests/`, and `e2e/` for `REQ-x-nn` and `BR-nn`. Ids that appear in this document and in no test file: `BR-01`, `BR-10`, `BR-18`, `REQ-C-05`, `REQ-C-06`, `REQ-C-07`, `REQ-C-08`, `REQ-C-09`, `REQ-C-15`, `REQ-C-16`, `REQ-N-01`, `REQ-N-07`, `REQ-N-08`, `REQ-N-10`, `REQ-N-11`, `REQ-S-10`.
+
+| Id | Test files citing it |
+| --- | --- |
+| BR-02 | `src/modules/inventory/schema.test.ts`, `tests/security/t042-inventory.test.ts` |
+| BR-03 | `src/modules/cart/schema.test.ts`, `tests/integration/cart/endpoints.test.ts` |
+| BR-04 | `src/modules/checkout/pricing.test.ts`, `src/modules/checkout/service.test.ts`, `tests/integration/checkout/endpoints.test.ts` |
+| BR-05 | `src/modules/catalog/visibility.test.ts`, `tests/integration/catalog/visibility.test.ts`, `tests/security/t020-t018-catalog-shell.test.ts` |
+| BR-06 | `src/modules/sellers/service.test.ts`, `tests/integration/sellers/decisions.test.ts`, `tests/integration/sellers/endpoints.test.ts`, `tests/security/t040-sellers.itest.ts` |
+| BR-07 | `src/modules/checkout/pricing.test.ts`, `tests/integration/checkout/endpoints.test.ts` |
+| BR-08 | `src/modules/checkout/pricing.test.ts` |
+| BR-09 | `tests/integration/checkout/endpoints.test.ts`, `tests/integration/seller-orders/endpoints.test.ts` |
+| BR-11 | `src/modules/reviews/eligibility.test.ts`, `tests/integration/reviews/endpoints.test.ts`, `tests/security/sec072-delivery-delay.itest.ts`, `tests/security/t035-reviews.itest.ts`, `tests/security/t035-reviews.test.ts` |
+| BR-12 | `tests/integration/inventory/endpoints.test.ts`, `tests/integration/schema/foreign-keys.test.ts` |
+| BR-13 | `src/modules/checkout/pricing.test.ts`, `src/modules/orders/mapping.test.ts` |
+| BR-14 | `e2e/suspended-seller.spec.ts`, `src/app/api/v1/seller/orders/route.test.ts`, `src/app/api/v1/seller/store/route.test.ts`, `tests/integration/inventory/endpoints.test.ts`, `tests/integration/seller-orders/delivery-delay.test.ts`, `tests/integration/seller-orders/endpoints.test.ts`, `tests/integration/sellers/decisions.test.ts`, `tests/integration/sellers/endpoints.test.ts`, `tests/integration/uploads/endpoints.test.ts`, `tests/security/sec068-recheck.itest.ts`, `tests/security/t041-uploads.itest.ts`, `tests/security/t043-seller-orders.test.ts` |
+| BR-15 | `tests/integration/admin/concurrency.test.ts`, `tests/integration/checkout/endpoints.test.ts`, `tests/integration/seller-orders/endpoints.test.ts` |
+| BR-16 | `src/modules/cart/service.test.ts`, `src/modules/checkout/pricing.test.ts`, `tests/integration/cart/endpoints.test.ts`, `tests/integration/checkout/endpoints.test.ts`, `tests/security/t031-cart.test.ts` |
+| BR-17 | `src/modules/admin/schema.test.ts`, `src/modules/inventory/state.test.ts`, `tests/integration/admin/endpoints.test.ts`, `tests/integration/inventory/endpoints.test.ts`, `tests/security/t050-admin.test.ts` |
+| BR-19 | `src/modules/inventory/state.test.ts`, `tests/integration/admin/endpoints.test.ts`, `tests/integration/inventory/endpoints.test.ts` |
+| BR-20 | `src/components/admin/actions.test.tsx`, `src/modules/admin/mapping.test.ts`, `src/modules/admin/service.test.ts`, `src/modules/orders/service.test.ts`, `tests/integration/admin/concurrency.test.ts`, `tests/integration/admin/endpoints.test.ts`, `tests/integration/checkout/endpoints.test.ts`, `tests/integration/seller-orders/endpoints.test.ts`, `tests/security/t032-checkout.itest.ts` |
+| BR-21 | `src/modules/admin/mapping.test.ts`, `src/modules/orders/mapping.test.ts`, `src/modules/orders/seller-mapping.test.ts`, `tests/integration/admin/endpoints.test.ts`, `tests/integration/seller-orders/endpoints.test.ts` |
+| BR-22 | `src/modules/cart/pricing.test.ts`, `src/modules/checkout/pricing.test.ts`, `src/modules/checkout/service.test.ts`, `tests/integration/cart/endpoints.test.ts`, `tests/integration/checkout/endpoints.test.ts`, `tests/security/t032-checkout.itest.ts` |
+| BR-23 | `tests/integration/admin/endpoints.test.ts`, `tests/integration/catalog/visibility.test.ts`, `tests/integration/inventory/endpoints.test.ts` |
+| BR-24 | `src/modules/catalog/visibility.test.ts`, `tests/integration/catalog/visibility.test.ts` |
+| BR-25 | `src/modules/inventory/service.test.ts`, `tests/integration/inventory/endpoints.test.ts`, `tests/integration/seller-orders/endpoints.test.ts` |
+| BR-26 | `tests/integration/admin/endpoints.test.ts`, `tests/integration/admin/permissions.test.ts`, `tests/integration/auth/bootstrap-admin.test.ts`, `tests/integration/profile/endpoints.test.ts`, `tests/security/t050-admin.test.ts` |
+| BR-27 | `tests/integration/admin/endpoints.test.ts`, `tests/integration/catalog/visibility.test.ts` |
+| BR-28 | `src/components/admin/form-model.test.ts`, `src/modules/admin/schema.test.ts`, `tests/integration/admin/endpoints.test.ts`, `tests/security/t050-admin.test.ts` |
+| BR-29 | `src/components/admin/actions.test.tsx`, `src/modules/admin/service.test.ts`, `src/modules/orders/seller-service.test.ts`, `src/modules/orders/state.test.ts`, `tests/integration/admin/endpoints.test.ts`, `tests/integration/seller-orders/endpoints.test.ts`, `tests/security/t043-seller-orders.test.ts` |
+| BR-30 | `src/modules/cart/pricing.test.ts`, `tests/integration/cart/endpoints.test.ts`, `tests/integration/checkout/endpoints.test.ts` |
+| BR-31 | `src/modules/cart/pricing.test.ts`, `src/modules/cart/service.test.ts`, `tests/integration/cart/endpoints.test.ts` |
+| BR-32 | `src/modules/orders/mapping.test.ts`, `tests/integration/cart/return-race.test.ts`, `tests/integration/checkout/endpoints.test.ts`, `tests/security/t032-checkout.itest.ts` |
+| BR-33 | `tests/integration/admin/endpoints.test.ts`, `tests/integration/seller-orders/endpoints.test.ts` |
+| BR-34 | `src/modules/inventory/schema.test.ts`, `src/modules/inventory/service.test.ts`, `tests/integration/inventory/endpoints.test.ts`, `tests/integration/schema/check-constraints.test.ts` |
+| BR-35 | `tests/integration/seller-orders/endpoints.test.ts` |
+| BR-36 | `src/modules/admin/repository.test.ts`, `src/modules/admin/schema.test.ts`, `src/modules/admin/state.test.ts`, `tests/integration/admin/concurrency.test.ts`, `tests/integration/admin/endpoints.test.ts`, `tests/integration/inventory/queue-position.test.ts` |
+| BR-37 | `tests/security/t032-checkout.itest.ts` |
+| BR-38 | `src/modules/cart/pricing.test.ts`, `src/modules/cart/service.test.ts`, `src/modules/checkout/pricing.test.ts`, `tests/integration/cart/endpoints.test.ts` |
+| BR-39 | `src/components/admin/actions.test.tsx`, `src/modules/admin/mapping.test.ts`, `src/modules/admin/repository.test.ts`, `src/modules/orders/mapping.test.ts`, `src/modules/orders/seller-mapping.test.ts`, `tests/integration/admin/endpoints.test.ts`, `tests/integration/checkout/endpoints.test.ts`, `tests/integration/seller-orders/endpoints.test.ts` |
+| BR-40 | `src/components/admin/days.test.ts`, `src/components/admin/lists.test.tsx`, `src/modules/admin/repository.test.ts`, `src/modules/admin/schema.test.ts`, `tests/integration/admin/endpoints.test.ts` |
+| BR-41 | `src/modules/uploads/service.test.ts`, `tests/integration/uploads/endpoints.test.ts`, `tests/security/sec068-recheck.itest.ts`, `tests/security/sec090-recheck.itest.ts`, `tests/security/t051-admin-ui.itest.ts` |
+| REQ-A-01 | `src/app/api/v1/admin/admin-routes.test.ts`, `tests/integration/admin/endpoints.test.ts`, `tests/integration/admin/permissions.test.ts`, `tests/integration/admin/reviews.test.ts`, `tests/security/t051-admin-ui.test.ts` |
+| REQ-A-02 | `tests/integration/admin/endpoints.test.ts`, `tests/integration/auth/guards-and-escalation.test.ts`, `tests/security/t050-admin.itest.ts` |
+| REQ-A-03 | `tests/integration/admin/endpoints.test.ts`, `tests/integration/sellers/decisions.test.ts` |
+| REQ-A-04 | `tests/integration/admin/endpoints.test.ts` |
+| REQ-A-05 | `tests/integration/admin/endpoints.test.ts`, `tests/integration/uploads/endpoints.test.ts`, `tests/security/sec090-recheck.itest.ts` |
+| REQ-A-06 | `tests/integration/admin/endpoints.test.ts`, `tests/integration/schema/foreign-keys.test.ts` |
+| REQ-A-07 | `src/components/admin/days.test.ts`, `src/modules/admin/service.test.ts`, `tests/integration/admin/endpoints.test.ts` |
+| REQ-A-08 | `src/modules/admin/schema.test.ts`, `tests/integration/admin/endpoints.test.ts` |
+| REQ-A-09 | `src/modules/admin/schema.test.ts`, `tests/integration/admin/endpoints.test.ts` |
+| REQ-A-10 | `tests/integration/admin/endpoints.test.ts`, `tests/integration/sellers/decisions.test.ts`, `tests/security/t050-admin.itest.ts`, `tests/security/t050-admin.test.ts`, `tests/security/t051-admin-ui.test.ts` |
+| REQ-A-11 | `tests/integration/auth/bootstrap-admin.test.ts` |
+| REQ-C-01 | `src/modules/auth/bootstrap-admin.test.ts`, `tests/integration/auth/bootstrap-admin.test.ts`, `tests/integration/auth/sign-up-sign-in.test.ts` |
+| REQ-C-02 | `tests/integration/auth/sign-up-sign-in.test.ts` |
+| REQ-C-03 | `src/app/api/v1/me/route.test.ts`, `src/modules/profile/schema.test.ts`, `tests/integration/profile/endpoints.test.ts` |
+| REQ-C-04 | `src/app/api/v1/me/addresses/route.test.ts`, `src/modules/profile/schema.test.ts`, `tests/integration/profile/endpoints.test.ts` |
+| REQ-C-10 | `tests/integration/cart/endpoints.test.ts` |
+| REQ-C-11 | `tests/integration/checkout/endpoints.test.ts` |
+| REQ-C-12 | `src/modules/orders/mapping.test.ts`, `src/modules/payments/provider.test.ts` |
+| REQ-C-13 | `src/modules/orders/service.test.ts`, `tests/integration/checkout/endpoints.test.ts` |
+| REQ-C-14 | `src/app/api/v1/products/[slug]/reviews/route.test.ts`, `src/modules/reviews/schema.test.ts`, `tests/integration/reviews/endpoints.test.ts`, `tests/security/t035-reviews.test.ts` |
+| REQ-N-02 | `e2e/viewports.spec.ts` |
+| REQ-N-03 | `e2e/keyboard.spec.ts` |
+| REQ-N-04 | `tests/integration/admin/permissions.test.ts`, `tests/integration/seller-isolation/endpoints.test.ts` |
+| REQ-N-05 | `tests/integration/cart/checkout-race.test.ts`, `tests/integration/checkout/races.test.ts` |
+| REQ-N-06 | `src/app/api/v1/admin/admin-routes.test.ts`, `src/modules/admin/schema.test.ts`, `src/modules/orders/service.test.ts`, `tests/integration/admin/endpoints.test.ts` |
+| REQ-N-09 | `src/modules/payments/provider.test.ts` |
+| REQ-N-12 | `src/i18n/site-name.test.ts` |
+| REQ-S-01 | `tests/integration/sellers/decisions.test.ts`, `tests/integration/sellers/endpoints.test.ts` |
+| REQ-S-02 | `src/app/api/v1/seller/store/route.test.ts`, `tests/integration/sellers/endpoints.test.ts` |
+| REQ-S-03 | `tests/integration/seller-orders/endpoints.test.ts` |
+| REQ-S-04 | `tests/integration/inventory/endpoints.test.ts` |
+| REQ-S-05 | `src/modules/inventory/schema.test.ts`, `tests/integration/uploads/endpoints.test.ts` |
+| REQ-S-06 | `tests/integration/inventory/endpoints.test.ts` |
+| REQ-S-07 | `tests/integration/seller-orders/endpoints.test.ts` |
+| REQ-S-08 | `tests/integration/seller-orders/endpoints.test.ts` |
+| REQ-S-09 | `src/app/api/v1/seller/store/route.test.ts`, `tests/integration/inventory/endpoints.test.ts`, `tests/integration/sellers/decisions.test.ts`, `tests/integration/sellers/endpoints.test.ts` |

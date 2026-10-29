@@ -2,13 +2,13 @@
 
 The only place task status is recorded. Owner: orchestrator. Task definitions are in [PROJECT_PLAN.md](PROJECT_PLAN.md).
 
-Last updated: 2026-10-22 (trimmed after the ninety-seventh session). The per-session history, the old change log, the answered owner questions (OQ-01 to OQ-50, answers in [DECISIONS.md](DECISIONS.md) D-025 to D-028), and the old test-result table were removed from this file on purpose. They are in git: run `git log --oneline -- docs/STATUS.md` and `git show <commit>:docs/STATUS.md`. Review findings live in [reviews/](reviews/) and [SECURITY.md](SECURITY.md).
+Last updated: 2026-10-29 (header and Summary corrected in session 134; the sections below were trimmed after session 97). The per-session history, the old change log, the answered owner questions (OQ-01 to OQ-50, answers in [DECISIONS.md](DECISIONS.md) D-025 to D-028), and the old test-result table were removed from this file on purpose. They are in git: run `git log --oneline -- docs/STATUS.md` and `git show <commit>:docs/STATUS.md`. Review findings live in [reviews/](reviews/) and [SECURITY.md](SECURITY.md).
 
 ## Summary
 
 Implemented locally (see the Tasks table for each state): foundation, schema, auth, catalog, storefront, profile and addresses, cart, checkout with mock payment, orders, reviews, uploads, seller onboarding, products, inventory and orders, admin module and UI, security headers, e2e suite (partial), CI workflow file, Dockerfile. Many are IMPLEMENTED but not VERIFIED (code review, security re-check, or browser check open).
 
-Not done: a11y checks, the final code review, security review, and fix pass (T-061 to T-063), docs audit (T-080), final acceptance (T-081). CI has never run (no GitHub remote). Nothing has been deployed.
+Done as reviews: the full code review (T-061, `reviews/T-061-code-review.md`) and the full security review (T-062, `reviews/T-062-security.md`). Not done: a11y checks, the fix pass and regression run (T-063, in progress), docs audit acceptance (T-080: the clean-checkout README run is open), final acceptance (T-081). CI has never run (no GitHub remote). Nothing has been deployed.
 
 ## Resume here
 

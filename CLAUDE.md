@@ -6,7 +6,7 @@ Project instructions for Claude Code and every subagent working in this reposito
 
 A Thai-language multi-vendor e-commerce marketplace (Shopee/Lazada style) with three roles: customer, seller, admin. Modular monolith. Correctness and security take priority over feature count.
 
-Current state: **early build; most features do not exist yet.** See [docs/STATUS.md](docs/STATUS.md) before assuming anything exists.
+Current state: customer, seller, and admin areas, checkout with a mock payment, orders, reviews, and uploads are implemented locally; most tasks are IMPLEMENTED but not VERIFIED, nothing is deployed, and CI has never run. See [docs/STATUS.md](docs/STATUS.md) for the state of each task before assuming anything works.
 
 ## Where the truth lives
 
@@ -29,13 +29,13 @@ Do not duplicate status or requirements into other files. Link instead.
 - Currency: THB, formatted with `Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB' })`.
 - Dates: `th-TH` locale, Asia/Bangkok timezone for display; store UTC.
 
-## Stack (proposed, see DECISIONS.md)
+## Stack (installed; choices in DECISIONS.md)
 
-Next.js (App Router) + TypeScript strict, React, Tailwind CSS, shadcn/ui, PostgreSQL, Prisma, Better Auth, Zod, Vitest, Playwright, GitHub Actions. Exact versions are pinned when the project is scaffolded and recorded in DECISIONS.md.
+Next.js (App Router) + TypeScript strict, React, Tailwind CSS, shadcn/ui, PostgreSQL, Prisma, Better Auth, Zod, Vitest, Playwright, GitHub Actions. Exact versions are pinned in `package.json` (Node 24 or later, pnpm 12.11.2, Next.js 16.4.3, React 19.3.0, Prisma 7.10.0, Better Auth 1.7.7). shadcn/ui is not installed (no `components.json`); the primitives in `src/components/ui/` are written in the repository. Several decisions in DECISIONS.md are still `PROPOSED`; the owner has not confirmed them.
 
 ## Commands
 
-All script names below exist in `package.json` (T-010). `test:integration`, `test:e2e`, `db:migrate`, `db:seed`, and `admin:bootstrap` fail until their tooling lands (T-012 to T-016, T-060); see [docs/STATUS.md](docs/STATUS.md). `pnpm verify` runs format check, lint, type check, unit tests, and build.
+All script names below exist in `package.json`. `test:integration`, `test:e2e`, `db:migrate`, `db:seed`, and `admin:bootstrap` need the Docker databases running; see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and the README. `pnpm verify` runs format check, lint, type check, unit tests, and build.
 
 Next.js 16 differs from older versions (Cache Components are on). Read the relevant guide in `node_modules/next/dist/docs/` before writing framework code; see [AGENTS.md](AGENTS.md).
 
@@ -43,6 +43,8 @@ Next.js 16 differs from older versions (Cache Components are on). Read the relev
 | --- | --- |
 | Install | `pnpm install --frozen-lockfile` |
 | Dev server | `pnpm dev` |
+| Start built app | `pnpm start` |
+| Format (writes files) | `pnpm format` |
 | Format check | `pnpm format:check` |
 | Lint | `pnpm lint` |
 | Type check | `pnpm typecheck` |
@@ -51,6 +53,7 @@ Next.js 16 differs from older versions (Cache Components are on). Read the relev
 | E2E tests | `pnpm test:e2e` |
 | Production build | `pnpm build` |
 | Migrate (dev) | `pnpm db:migrate` |
+| Migrate (apply existing migrations) | `pnpm db:migrate:deploy` |
 | Seed | `pnpm db:seed` |
 | Create first admin | `pnpm admin:bootstrap` |
 | All pre-merge checks | `pnpm verify` |
