@@ -12,7 +12,7 @@ Done as reviews: the full code review (T-061, `reviews/T-061-code-review.md`) an
 
 ## Resume here
 
-Session 136: T-081 started by orchestrator (no agent running, docs and one e2e spec touched). Docker dev+test DB up. Ran `pnpm verify` (exit 0), integration (1682 passed), e2e (67 passed, 1 stale spec fixed). Next: owner decides which unrun checks (a11y, browser check 360/768/1280 px, CI run) are excepted or must run before T-081 closes; optional SEC-096 remediation (b). Owner chose (2026-10-29): add `@axe-core/playwright`, scan customer/seller/admin pages at 360/768/1280. Started: qa agent writing `e2e/a11y.spec.ts`; touches `package.json`, `pnpm-lock.yaml`, `e2e/**`; findings fixed in a separate step.
+Session 136 finished. No agent running. T-081 checks run 2026-10-29: `pnpm verify` exit 0, integration 1682 passed, full e2e 92 passed (incl. new `e2e/a11y.spec.ts`, axe 24 tests, 0 violations, `5709719`). Not done: manual a11y pass (image contrast, reading order), CI run (B-04), uncovered pages (seller order detail, seller product edit, admin order/product detail), open menus and error states. Next: owner decides exceptions to close T-081; optional SEC-096 remediation (b).
 
 ## Open owner decisions
 
@@ -77,7 +77,7 @@ Notes marked "stale?" were written while Docker was down; later sessions ran the
 | T-071 | Dockerfile, staging runbook | IMPLEMENTED | `Dockerfile`, `docs/RUNBOOK-STAGING.md`, `scripts/container-smoke.ps1`: both images build, migrate applies offline, container `/api/health` 200, headers present (local run, 2026-10-26). Not deployed; no provider chosen; no CI run |
 | T-072 | Security headers | IMPLEMENTED | next.config.ts, tests/security/headers-t072.test.ts (7 pass), D-046; dev `/` 200 with headers; not run under `next start` |
 | T-080 | Docs audit | IMPLEMENTED | Audit [reviews/T-080-docs-audit.md](reviews/T-080-docs-audit.md); drift fixed `59cedec`; README clean-checkout run passed 2026-10-29 (install, migrate, seed, bootstrap, dev 200); `pnpm verify` exit 0 (session 135), owner accepted all decisions |
-| T-081 | Final acceptance | IN PROGRESS | 2026-10-29 session 136: `pnpm verify` exit 0, integration 1682 passed (81 files), e2e 67 passed + 1 stale spec fixed (`cart-unbuyable` taken-down test, SEC-054 removed the title) and re-run 2 passed; full e2e not re-run after the fix. Open: a11y checks, browser check at 360/768/1280 px, CI never run (B-04) |
+| T-081 | Final acceptance | IN PROGRESS | 2026-10-29 session 136: `pnpm verify` exit 0, integration 1682 passed (81 files), e2e 67 passed + 1 stale spec fixed (`cart-unbuyable` taken-down test, SEC-054 removed the title) and re-run 2 passed; full e2e 92 passed after a11y spec added. Open: manual a11y pass, CI never run (B-04) |
 
 ## MVP acceptance checklist
 
