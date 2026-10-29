@@ -1,0 +1,56 @@
+# Scheduled maintenance trigger (D-051). Calls POST /api/v1/internal/maintenance on the deployed
+# app so the payment timeout sweep, session purge, and upload orphan cleanup run on a host that
+# does not keep a process alive (docs/DEPLOYMENT.md, "Scheduled work").
+#
+# Needs two repository secrets: MAINTENANCE_URL (base URL of the deployment, no path) and
+# CRON_SECRET (the same value the app has in its CRON_SECRET variable). With either unset the
+# job logs a notice and exits 0, so the repository stays green before anything is deployed.
+#
+# GitHub may delay or skip scheduled runs, and disables schedules after 60 days without
+# repository activity. Not exact to the minute.
+
+name: Maintenance
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+# No token permissions: the job does not touch the repository or the GitHub API.
+permissions: {}
+
+# One run at a time. A run still going when the next one starts makes the next one wait.
+concurrency:
+  group: maintenance
+  cancel-in-progress: false
+
+jobs:
+  trigger:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Call the maintenance endpoint
+        shell: bash
+        env:
+          MAINTENANCE_URL: ${{ secrets.MAINTENANCE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MAINTENANCE_URL}" ] || [ -z "${CRON_SECRET}" ]; then
+            echo "::notice::MAINTENANCE_URL or CRON_SECRET is not set; skipping (nothing deployed yet)."
+            exit 0
+          fi
+          case "${MAINTENANCE_URL}" in
+            https://*) ;;
+            *)
+              echo "::error::MAINTENANCE_URL must start with https://"
+              exit 1
+              ;;
+          esac
+          url="${MAINTENANCE_URL%/}/api/v1/internal/maintenance"
+          # The secret goes in a header read from stdin so it is not in the process arguments.
+          printf 'header = "Authorization: Bearer %s"\n' "${CRON_SECRET}" | curl --silent --show-error \
+            --fail-with-body --max-time 60 --retry 2 -X POST \
+            --config - "${url}"
+          echo
+          echo "Maintenance call finished."

@@ -576,6 +576,16 @@ No candidate has been built or tried. "Free" and "paid" below are to be checked 
 
 Not recommended as a fix for a sleeping host: an outside uptime monitor that requests a page every few minutes to keep the container awake. It makes the two rules depend on a third-party service that can stop without notice, and it is not what the provider's idle rule intends.
 
+### Scheduled GitHub workflow for hosts without a long-lived process (D-051)
+
+**Written, not yet run against a deployment. Nothing is deployed.** `.github/workflows/maintenance.yml` is candidate C for a serverless host such as Vercel (see "Deploying to Vercel"). It runs every 10 minutes (`schedule`) and on demand (`workflow_dispatch`) and sends `POST {MAINTENANCE_URL}/api/v1/internal/maintenance` with `Authorization: Bearer <CRON_SECRET>` through plain `curl` (no third-party action). The endpoint is added by the backend-api agent and is enabled in the app by `MAINTENANCE_VIA_HTTP=true`; its secret is the app variable `CRON_SECRET`.
+
+- **Secrets to set** (repository Settings, Secrets and variables, Actions): `MAINTENANCE_URL`, the base URL of the deployment with no path (it must start with `https://`), and `CRON_SECRET`, the same value as the app's `CRON_SECRET`. Set them only after a deployment exists and its health endpoint was checked.
+- **Before the secrets are set** the job logs a notice and exits 0, so the repository's checks stay green. After they are set, a non-2xx answer, a timeout (60 s, 2 retries), or a network error fails the run.
+- **Safety**: no token permissions (`permissions: {}`), the secrets reach the script only through `env:`, the bearer header is passed to `curl` on standard input so it is not in the process arguments, and runs never overlap (`concurrency`).
+- **Limits of GitHub schedules**: runs may start late or be skipped under load, especially on free accounts, and GitHub disables scheduled workflows after 60 days without repository activity (re-enable them in the Actions tab). So the 10-minute interval is a target, not a guarantee. The payment timeout sweep, whose owner rule is "failed within about 16 minutes" (D-033 point 12), is not guaranteed on this mechanism; the check queries below are what show whether it holds.
+- **Verify after the first real run**: the run is green in the Actions tab, the endpoint's JSON counts show in that run's log, and the two check queries below return 0. **Manual**, not done.
+
 ### Check queries (written, not yet run against a deployment)
 
 Both must return `0`. They are what release procedure step 10 refers to. They prove a breach; they prevent nothing.
