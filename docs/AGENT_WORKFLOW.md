@@ -8,7 +8,7 @@ How the agent team is organised, who owns which files, and how work is handed ov
 - Subagents **cannot launch other subagents**. `orchestrator.md` exists as the written playbook for the main session, not as something to spawn.
 - A subagent starts with no memory of the conversation. Every task brief must be self-contained (see template below).
 - Parallel subagents share one working tree unless launched with worktree isolation. Worktrees require a git repository with at least one commit.
-- Delegation has not yet been exercised in this repository. Task T-003 verifies it; until then treat it as unverified.
+- Delegation has been exercised in this repository: task T-003 is VERIFIED in [STATUS.md](STATUS.md), and later tasks ran as subagents. Agents running in parallel share one working tree, so each stages only its own files.
 
 ## The team
 
