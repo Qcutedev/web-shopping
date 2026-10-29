@@ -67,7 +67,7 @@ These need legal advice; none are addressed by the software alone.
 - Automated scanners passing does not establish that the application is secure.
 - No load or performance testing has been done.
 - No accessibility audit has run; the axe dependency awaits owner approval. Keyboard-only checks exist for part of the e2e suite (`e2e/keyboard.spec.ts`).
-- CI has never run: there is no GitHub remote (blocker B-04 in [STATUS.md](STATUS.md)).
+- CI has run once green on GitHub (run 40889555775, 2026-10-29); it does not build images or deploy.
 - The container images were built and run locally only (`scripts/container-smoke.ps1`).
 
 ## Environment limits

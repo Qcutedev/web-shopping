@@ -31,7 +31,7 @@ The image has a `HEALTHCHECK` that requests `GET /api/health` on the container's
 
 Placeholders: `<registry>/marketplace` is the image name of the chosen registry, `<tag>` the commit hash, `<staging-url>` the https origin. None exists yet.
 
-1. **Checks pass on the commit.** `pnpm verify`, `pnpm test:integration`, `pnpm test:e2e`, and the CI run (`.github/workflows/ci.yml`: jobs `verify`, `integration`, `e2e`, `audit`, `secret-scan`). The workflow has never run on GitHub (no remote, B-04); until a real run is green, the local commands are the evidence. CI does not build or push images. Check [SECURITY.md](SECURITY.md) for open Critical or High findings (**Manual**).
+1. **Checks pass on the commit.** `pnpm verify`, `pnpm test:integration`, `pnpm test:e2e`, and the CI run (`.github/workflows/ci.yml`: jobs `verify`, `integration`, `e2e`, `audit`, `secret-scan`). The workflow ran green on GitHub (run 40889555775, 2026-10-29); check that the run for the commit being deployed is green too. CI does not build or push images. Check [SECURITY.md](SECURITY.md) for open Critical or High findings (**Manual**).
 2. **Build both images from a clean checkout**, with the staging origin:
 
    ```powershell

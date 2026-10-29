@@ -2,7 +2,7 @@
 
 A Thai-language multi-vendor e-commerce marketplace: customers buy from many independent sellers through one storefront, sellers manage their own store, and administrators govern the platform.
 
-> **Project state: early build, local development only.** The application runs on a developer machine against a local PostgreSQL. Nothing is deployed: there is no staging or production environment, no hosting provider, and no GitHub remote, so the CI workflow has never run. Payment is a mock and shipping is entered by hand. Task status is recorded only in [docs/STATUS.md](docs/STATUS.md); many items there are implemented but not yet verified.
+> **Project state: early build, local development only.** The application runs on a developer machine against a local PostgreSQL. Nothing is deployed: there is no staging or production environment and no hosting provider. The CI workflow has run green on GitHub (run 40889555775). Payment is a mock and shipping is entered by hand. Task status is recorded only in [docs/STATUS.md](docs/STATUS.md); many items there are implemented but not yet verified.
 
 ## สรุปสั้น ๆ (ภาษาไทย)
 
@@ -178,7 +178,7 @@ Boundaries and rules: [CLAUDE.md](CLAUDE.md) and [docs/ARCHITECTURE.md](docs/ARC
 | Admin: approvals, product moderation, categories, users, orders, review hide and unhide, reports, settings, audit log | Implemented |
 | File storage | Simulated (local disk; no object storage or CDN) |
 | End-to-end test suite | Implemented (see [docs/TEST_STRATEGY.md](docs/TEST_STRATEGY.md) for what it covers and does not) |
-| CI workflow (`.github/workflows/ci.yml`) | Implemented, never run: no GitHub remote |
+| CI workflow (`.github/workflows/ci.yml`) | Implemented; green on GitHub run 40889555775 (2026-10-29) |
 | Container images (`Dockerfile`) | Implemented, built and run locally only |
 | Deployment (staging, production) | Planned; no environment exists |
 | Password recovery, email verification, notifications | Planned |

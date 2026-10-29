@@ -6,7 +6,7 @@ Project instructions for Claude Code and every subagent working in this reposito
 
 A Thai-language multi-vendor e-commerce marketplace (Shopee/Lazada style) with three roles: customer, seller, admin. Modular monolith. Correctness and security take priority over feature count.
 
-Current state: customer, seller, and admin areas, checkout with a mock payment, orders, reviews, and uploads are implemented locally; most tasks are IMPLEMENTED but not VERIFIED, nothing is deployed, and CI has never run. See [docs/STATUS.md](docs/STATUS.md) for the state of each task before assuming anything works.
+Current state: customer, seller, and admin areas, checkout with a mock payment, orders, reviews, and uploads are implemented locally; most tasks are IMPLEMENTED but not VERIFIED, nothing is deployed, and CI ran green once on GitHub (run 40889555775). See [docs/STATUS.md](docs/STATUS.md) for the state of each task before assuming anything works.
 
 ## Where the truth lives
 

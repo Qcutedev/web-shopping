@@ -8,11 +8,11 @@ Last updated: 2026-10-29 (header and Summary corrected in session 134; the secti
 
 Implemented locally (see the Tasks table for each state): foundation, schema, auth, catalog, storefront, profile and addresses, cart, checkout with mock payment, orders, reviews, uploads, seller onboarding, products, inventory and orders, admin module and UI, security headers, e2e suite (partial), CI workflow file, Dockerfile. Many are IMPLEMENTED but not VERIFIED (code review, security re-check, or browser check open).
 
-Done as reviews: the full code review (T-061, `reviews/T-061-code-review.md`) and the full security review (T-062, `reviews/T-062-security.md`). Not done: a11y checks, the fix pass and regression run (T-063, in progress), docs audit acceptance (T-080: the clean-checkout README run is open), final acceptance (T-081). CI has never run (no GitHub remote). Nothing has been deployed.
+Done as reviews: the full code review (T-061, `reviews/T-061-code-review.md`) and the full security review (T-062, `reviews/T-062-security.md`). Not done: a11y checks, the fix pass and regression run (T-063, in progress), docs audit acceptance (T-080: the clean-checkout README run is open), final acceptance (T-081). CI ran green on GitHub (run 40889555775, all 5 jobs). Nothing has been deployed.
 
 ## Resume here
 
-Session 136 stopped by owner for a new session. No agent running. Repo https://github.com/Qcutedev/web-shopping (public), `origin/main` at `3bf29ed`, `gh` logged in as Qcutedev with `workflow` scope. CI run 40889555775 (after the 4 CI fixes `530cd3b`, `608cc21`, `4197e1d`, `3bf29ed`): verify, audit, integration, gitleaks all success; e2e was still running when the session stopped: check `gh run view 40889555775`. First run 40884137487 had e2e success and the 4 other jobs failed (causes fixed). Local: `pnpm verify` exit 0, integration 1682 passed, e2e 92 passed (incl. `e2e/a11y.spec.ts`, axe 0 violations). Next: (1) read the e2e result of run 40889555775; if green, B-04 is resolved: update B-04, T-070 row, `ci.yml` header comment (still says NOT YET RUN), `docs/DEPLOYMENT.md`; push that STATUS commit. (2) Owner decides T-081 exceptions: manual a11y pass (image contrast, reading order), uncovered pages (seller order detail, seller product edit, admin order and product detail), open menus and error states. (3) Optional: SEC-096 remediation (b). Owner note: commit author email is public in history; rewriting history needs an explicit owner order.
+No agent running. Repo https://github.com/Qcutedev/web-shopping (public), `gh` logged in as Qcutedev with `workflow` scope. CI run 40889555775 on `3bf29ed`: all 5 jobs success (verify, audit, integration, e2e, gitleaks); B-04 closed, T-070 VERIFIED. Local: `pnpm verify` exit 0, integration 1682 passed, e2e 92 passed (incl. axe, 0 violations). Next: (1) Owner decides T-081 exceptions: manual a11y pass (image contrast, reading order), uncovered pages (seller order detail, seller product edit, admin order and product detail), open menus and error states. (2) Optional: SEC-096 remediation (b). Owner note: commit author email is public in history; rewriting history needs an explicit owner order.
 
 ## Open owner decisions
 
@@ -25,7 +25,7 @@ Session 136 stopped by owner for a new session. No agent running. Repo https://g
 
 | Id | Blocker | Blocks | Next step |
 | --- | --- | --- | --- |
-| B-04 | Remote created 2026-10-29; CI ran on GitHub, e2e result of run 40889555775 not yet read | T-070 is verified only when that run is green | Read the run result in the next session, then close B-04 |
+| none | | | |
 
 ## Environment
 
@@ -73,11 +73,11 @@ Notes marked "stale?" were written while Docker was down; later sessions ran the
 | T-061 | Code review | IN PROGRESS | [reviews/T-061-code-review.md](reviews/T-061-code-review.md) |
 | T-062 | Security review | IN PROGRESS | [reviews/T-062-security.md](reviews/T-062-security.md); SEC-095 and SEC-096 FIXED and re-checked |
 | T-063 | Fixes, regression | IN PROGRESS | SEC-096 fixed `1140024`, re-checked `05835d1`; `pnpm verify` exit 0 |
-| T-070 | CI workflow | IMPLEMENTED | `.github/workflows/ci.yml` (`a34194b`): verify, integration, e2e, audit jobs; actionlint clean; local equivalents pass (verify 5796, integration 1558, e2e 19); never run on GitHub (no remote, B-04); secret-scan job and dependabot added `4e20153` |
+| T-070 | CI workflow | VERIFIED | `.github/workflows/ci.yml` (`a34194b`): verify, integration, e2e, audit jobs; actionlint clean; GitHub run 40889555775 (2026-10-29, commit `3bf29ed`): verify, integration, e2e, audit, secret-scan all success; secret-scan job and dependabot added `4e20153` |
 | T-071 | Dockerfile, staging runbook | IMPLEMENTED | `Dockerfile`, `docs/RUNBOOK-STAGING.md`, `scripts/container-smoke.ps1`: both images build, migrate applies offline, container `/api/health` 200, headers present (local run, 2026-10-26). Not deployed; no provider chosen; no CI run |
 | T-072 | Security headers | IMPLEMENTED | next.config.ts, tests/security/headers-t072.test.ts (7 pass), D-046; dev `/` 200 with headers; not run under `next start` |
 | T-080 | Docs audit | IMPLEMENTED | Audit [reviews/T-080-docs-audit.md](reviews/T-080-docs-audit.md); drift fixed `59cedec`; README clean-checkout run passed 2026-10-29 (install, migrate, seed, bootstrap, dev 200); `pnpm verify` exit 0 (session 135), owner accepted all decisions |
-| T-081 | Final acceptance | IN PROGRESS | 2026-10-29 session 136: `pnpm verify` exit 0, integration 1682 passed (81 files), e2e 67 passed + 1 stale spec fixed (`cart-unbuyable` taken-down test, SEC-054 removed the title) and re-run 2 passed; full e2e 92 passed after a11y spec added. Open: manual a11y pass, CI never run (B-04) |
+| T-081 | Final acceptance | IN PROGRESS | 2026-10-29 session 136: `pnpm verify` exit 0, integration 1682 passed (81 files), e2e 67 passed + 1 stale spec fixed (`cart-unbuyable` taken-down test, SEC-054 removed the title) and re-run 2 passed; full e2e 92 passed after a11y spec added. Open: manual a11y pass |
 
 ## MVP acceptance checklist
 
@@ -95,7 +95,7 @@ Statuses come from the Tasks table and the recorded runs above; the documentatio
 | 8 | Admins approve sellers and moderate listings | IMPLEMENTED | T-050, T-051, T-052; no browser check of T-051; review moderation absent (SEC-092) |
 | 9 | Server-side price, stock, and permission validation | IMPLEMENTED | T-032, T-033, T-045, T-052 tests; security review open items in SECURITY.md |
 | 10 | App builds and runs from documented instructions | VERIFIED | README clean-checkout run passed 2026-10-29; `pnpm verify` exit 0 (session 136) |
-| 11 | Automated tests run with truthful results | IN PROGRESS | Session 136: verify exit 0, integration 1682 passed, e2e 67 passed + fixed spec 2 passed; CI never run (B-04) |
+| 11 | Automated tests run with truthful results | IN PROGRESS | Session 136: verify exit 0, integration 1682 passed, e2e 92 passed; GitHub CI run 40889555775 green (all 5 jobs) |
 | 12 | Deployment and security limitations documented | IN PROGRESS | [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) rewritten 2026-10-28; no deployment exists |
 
 ## Deployment

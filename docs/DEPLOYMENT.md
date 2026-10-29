@@ -27,7 +27,7 @@ The tools and versions that were checked on the developer machine are listed in 
 - Windows 11 with PowerShell. Commands below are written for PowerShell; do not chain them with `&&`.
 - Node.js and pnpm (through Corepack) at the versions in D-020. `package.json` pins the pnpm version.
 - Docker Desktop with Compose, running on WSL. It must be started before any `docker` command.
-- The git repository is on `main` with local commits only. There is no remote, and the GitHub CLI is installed but not logged in, so nothing has been pushed and no CI run exists (blocker B-04 in [STATUS.md](STATUS.md)).
+- The git repository is on `main` and is pushed to the public GitHub repository `Qcutedev/web-shopping`. CI ran there; the first green run is 40889555775 (see "CI pipeline"). Nothing is deployed.
 
 Check the tools:
 
@@ -387,9 +387,9 @@ Whichever option is chosen must be able to meet the owner's rules. None of the o
 | Are backups encrypted where they are stored and on the way there, and stored somewhere other than the database host? If that needs a paid plan, it is a paid addition and needs approval | "Database backups" (SECURITY.md SR-07; D-032 point 3) |
 | Does the server process keep running with no traffic, or can a scheduled command be run without a paid add-on? | "Scheduled work" (OQ-49) |
 
-## CI pipeline (Implemented, NOT RUN: T-070)
+## CI pipeline (T-070)
 
-**Status: the workflow file exists and its YAML parses. It has never run: the repository has no remote, so no GitHub Actions run, passing or failing, has been observed.** T-070 is acceptable only after a real run on a push or pull request (PROJECT_PLAN.md). Everything below describes what the file does, not what a run showed.
+**Status: the workflow ran on GitHub (public repository `Qcutedev/web-shopping`). Run 40889555775 on commit `3bf29ed` (2026-10-29) finished with all five jobs successful: verify, integration, e2e, audit, secret-scan. Earlier runs failed on four causes that were fixed in `530cd3b`, `608cc21`, `4197e1d`, `3bf29ed`.** Everything below describes what the file does.
 
 `.github/workflows/ci.yml` runs on pull requests and on pushes to `main`, with `permissions: contents: read`, one concurrency group per ref (a newer push to a pull request cancels the older run; runs on `main` finish), and every action pinned by full commit SHA with the version in a comment (`actions/checkout`, `actions/setup-node`, `actions/upload-artifact`). Node is exactly 24.20.0 and pnpm is taken from `packageManager` through Corepack (D-020). Five jobs:
 
@@ -415,7 +415,7 @@ Not in the workflow: any deployment (needs human approval recorded in DECISIONS.
 
 Dependency audit: `pnpm audit --prod` must exit 0 and is run without an exception list. The unused optional peer `mysql2` of `better-auth` is removed from the tree by an override in `pnpm-workspace.yaml` (SEC-036, D-034), so it no longer reports. `pnpm audit` over development dependencies still reports advisories (SEC-010); they are not in the production tree.
 
-The workflow file exists, and no CI job has ever run: there is no remote repository to run a workflow on (blocker B-04). A workflow can be written before the remote exists, but it cannot be reported as working until it has run there.
+The workflow has run on GitHub: run 40889555775 was green on all five jobs (blocker B-04 closed 2026-10-29).
 
 The checks the workflow will run can be run locally today:
 

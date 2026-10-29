@@ -1,7 +1,7 @@
 # CI for pull requests and pushes to main (T-070).
 #
-# NOT YET RUN: this repository has no remote, so this file has been syntax-checked only
-# (docs/DEPLOYMENT.md, "CI pipeline"). The first real run is the acceptance check of T-070.
+# First green run: GitHub Actions run 40889555775 (2026-10-29), all five jobs success
+# (docs/DEPLOYMENT.md, "CI pipeline").
 #
 # Not in this workflow, on purpose:
 # - Deployment of any kind: needs human approval recorded in docs/DECISIONS.md.
