@@ -12,7 +12,7 @@ Done as reviews: the full code review (T-061, `reviews/T-061-code-review.md`) an
 
 ## Resume here
 
-Session 135 finished. Local commits, not pushed. No agent running. Done: SEC-096 fixed `1140024`, re-checked FIXED `05835d1` (negative control failed on pre-fix code as expected); `pnpm verify` exit 0 (build compiled) on that HEAD. Owner accepted D-001..D-015, D-048..D-050 (2026-10-29); no PROPOSED decision left. Next: start T-081 in a new session (owner asked for a new session); optional SEC-096 remediation (b) retry on 40P01 for a reasoned residual race; T-081 first. Docker dev+test DB up.
+Session 136: T-081 started by orchestrator (no agent running, docs and one e2e spec touched). Docker dev+test DB up. Ran `pnpm verify` (exit 0), integration (1682 passed), e2e (67 passed, 1 stale spec fixed). Next: owner decides which unrun checks (a11y, browser check 360/768/1280 px, CI run) are excepted or must run before T-081 closes; optional SEC-096 remediation (b).
 
 ## Open owner decisions
 
@@ -77,7 +77,7 @@ Notes marked "stale?" were written while Docker was down; later sessions ran the
 | T-071 | Dockerfile, staging runbook | IMPLEMENTED | `Dockerfile`, `docs/RUNBOOK-STAGING.md`, `scripts/container-smoke.ps1`: both images build, migrate applies offline, container `/api/health` 200, headers present (local run, 2026-10-26). Not deployed; no provider chosen; no CI run |
 | T-072 | Security headers | IMPLEMENTED | next.config.ts, tests/security/headers-t072.test.ts (7 pass), D-046; dev `/` 200 with headers; not run under `next start` |
 | T-080 | Docs audit | IMPLEMENTED | Audit [reviews/T-080-docs-audit.md](reviews/T-080-docs-audit.md); drift fixed `59cedec`; README clean-checkout run passed 2026-10-29 (install, migrate, seed, bootstrap, dev 200); `pnpm verify` exit 0 (session 135), owner accepted all decisions |
-| T-081 | Final acceptance | NOT STARTED | |
+| T-081 | Final acceptance | IN PROGRESS | 2026-10-29 session 136: `pnpm verify` exit 0, integration 1682 passed (81 files), e2e 67 passed + 1 stale spec fixed (`cart-unbuyable` taken-down test, SEC-054 removed the title) and re-run 2 passed; full e2e not re-run after the fix. Open: a11y checks, browser check at 360/768/1280 px, CI never run (B-04) |
 
 ## MVP acceptance checklist
 
@@ -94,8 +94,8 @@ Statuses come from the Tasks table and the recorded runs above; the documentatio
 | 7 | Sellers manage only their own orders and inventory | IMPLEMENTED | T-043, T-045 isolation tests |
 | 8 | Admins approve sellers and moderate listings | IMPLEMENTED | T-050, T-051, T-052; no browser check of T-051; review moderation absent (SEC-092) |
 | 9 | Server-side price, stock, and permission validation | IMPLEMENTED | T-032, T-033, T-045, T-052 tests; security review open items in SECURITY.md |
-| 10 | App builds and runs from documented instructions | IN PROGRESS | README rewritten (session 122); a clean-machine run not done; `pnpm verify` not run in session 123 |
-| 11 | Automated tests run with truthful results | IN PROGRESS | `pnpm test:e2e` 68 passed (session 123); full `pnpm test` times out under load; CI never run |
+| 10 | App builds and runs from documented instructions | VERIFIED | README clean-checkout run passed 2026-10-29; `pnpm verify` exit 0 (session 136) |
+| 11 | Automated tests run with truthful results | IN PROGRESS | Session 136: verify exit 0, integration 1682 passed, e2e 67 passed + fixed spec 2 passed; CI never run (B-04) |
 | 12 | Deployment and security limitations documented | IN PROGRESS | [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) rewritten 2026-10-28; no deployment exists |
 
 ## Deployment

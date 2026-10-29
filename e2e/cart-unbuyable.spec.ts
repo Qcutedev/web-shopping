@@ -90,7 +90,8 @@ test("a line whose product was taken down is marked and excluded, and blocks che
 
     await page.goto("/cart");
     const summary = page.getByRole("region", { name: th.cart.summaryTitle });
-    const goneLine = page.getByRole("listitem").filter({ hasText: gone.title });
+    // A taken-down line carries no title (SEC-054), so it is found by the fixed label.
+    const goneLine = page.getByRole("listitem").filter({ hasText: th.cart.unavailableLine });
     const keptLine = page.getByRole("listitem").filter({ hasText: kept.title });
     // Marked: the line has no quantity control, carries the "not available" mark and a note
     // (role "note", no class name involved); the other line has the control and neither. The
