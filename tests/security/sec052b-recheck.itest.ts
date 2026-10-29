@@ -232,3 +232,72 @@ describe("SEC-052 (b): the purge against concurrent counts", () => {
     expect((PURGE_BATCH_SIZE * 3_600_000) / PURGE_INTERVAL_MS).toBe(6_000);
   }, 60_000);
 });
+
+// Re-check of commit e22d739 (2026-10-29): the count and the purge run in a batch transaction
+// that sets a 2 s statement_timeout. The author's cases (tests/integration/rate-limit/
+// user-windows.test.ts) show the cancellation at the repository and service level. These show
+// the endpoint's answer: fail closed, nothing leaked, and Retry-After never longer than the window.
+describe("SEC-052 (b): the 2 s statement timeout at the endpoint", () => {
+  it("a count stuck behind a row lock is a generic 500 after about 2 s: body unread, nothing written", async () => {
+    const user = await signedIn();
+    await consumeUserRateLimit(
+      { userId: user.userId, role: "CUSTOMER", storeId: null, storeStatus: null },
+      APPLICATION,
+    );
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let locked!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      locked = resolve;
+    });
+    const holder = db.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`
+          SELECT "id" FROM "UserRateLimitWindow" WHERE "userId" = ${user.userId} FOR UPDATE`;
+        locked();
+        await gate;
+      },
+      { maxWait: 5_000, timeout: 20_000 },
+    );
+    await ready;
+    const probe = apply(user.cookie);
+    const started = Date.now();
+    const answered = await applicationRoute(probe);
+    const elapsedMs = Date.now() - started;
+    release();
+    await holder;
+
+    expect(answered.status).toBe(500);
+    expect(probe.bodyUsed).toBe(false);
+    const text = await answered.text();
+    // The generic error envelope: no SQLSTATE, no statement, no table, no timeout wording.
+    expect(text).not.toMatch(/57014|statement|timeout|UserRateLimitWindow|cancel/i);
+    expect(elapsedMs).toBeGreaterThanOrEqual(1_900);
+    expect(elapsedMs).toBeLessThan(5_000);
+    expect(await db.sellerApplication.count({ where: { userId: user.userId } })).toBe(0);
+    expect((await windowOf(user.userId, APPLICATION.name))?.count).toBe(1);
+  }, 30_000);
+
+  it("the first refusal's Retry-After is at most the window, and at least 1 s", async () => {
+    const user = await signedIn();
+    const actor = {
+      userId: user.userId,
+      role: "CUSTOMER" as const,
+      storeId: null,
+      storeStatus: null,
+    };
+    for (let round = 0; round < 3; round += 1) {
+      await db.userRateLimitWindow.deleteMany({ where: { userId: user.userId } });
+      for (let i = 0; i < REVIEW.limit; i += 1) await consumeUserRateLimit(actor, REVIEW);
+      resetProcessRateLimiter();
+      const refused = await review(user.cookie);
+      expect(refused.status).toBe(429);
+      const retryAfter = Number(refused.headers.get("Retry-After"));
+      expect(Number.isInteger(retryAfter)).toBe(true);
+      expect(retryAfter).toBeGreaterThanOrEqual(1);
+      expect(retryAfter).toBeLessThanOrEqual(REVIEW.windowMs / 1000);
+    }
+  }, 30_000);
+});
