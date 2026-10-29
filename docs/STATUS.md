@@ -12,7 +12,7 @@ Done as reviews: the full code review (T-061, `reviews/T-061-code-review.md`) an
 
 ## Resume here
 
-Session 136 finished. No agent running. T-081 checks run 2026-10-29: `pnpm verify` exit 0, integration 1682 passed, full e2e 92 passed (incl. new `e2e/a11y.spec.ts`, axe 24 tests, 0 violations, `5709719`). Not done: manual a11y pass (image contrast, reading order), CI run (B-04), uncovered pages (seller order detail, seller product edit, admin order/product detail), open menus and error states. Next: owner decides exceptions to close T-081; optional SEC-096 remediation (b).
+Session 136 (cont.): repo pushed to https://github.com/Qcutedev/web-shopping (public, `origin/main`); first CI run 40884137487: e2e success, 4 jobs failed: (1) verify: `tests/unit/e2e/server-environment.test.ts` needs `DATABASE_URL_TEST`; (2) integration: assertion `/Tests\s+1 passed/` fails on CI; (3) gitleaks: 27 `generic-api-key` hits, all test fixtures/canaries (checked by orchestrator; local `.env` differs); (4) audit: no vulnerabilities, job fails on setup-node cache post step. Started: devops agent fixing the four; touches `.github/workflows/ci.yml`, `.gitleaks.toml`, `tests/unit/e2e/server-environment.test.ts`, the integration test with the `Tests 1 passed` assertion. Owner approved fixing (2026-10-29). Not done: manual a11y pass, uncovered pages, SEC-096 remediation (b). Commit author email is public in history (owner informed).
 
 ## Open owner decisions
 
