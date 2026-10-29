@@ -72,6 +72,19 @@ export interface Env {
    * set; when `nodeEnv` is `production`, exactly one of the two is present.
    */
   blobReadWriteToken?: string;
+  /**
+   * `MAINTENANCE_VIA_HTTP`: `true` when the scheduled work (payment timeout sweep, upload orphan
+   * cleanup, session purge) is triggered from outside through `POST /api/v1/internal/maintenance`
+   * instead of by the in-process timers of src/instrumentation.ts (owner decision 2026-10-29,
+   * D-051: a serverless host keeps no timer alive). `false` unless set to exactly `true`.
+   */
+  maintenanceViaHttp: boolean;
+  /**
+   * `CRON_SECRET`: the bearer secret of `POST /api/v1/internal/maintenance`. A secret: never log
+   * it. Absent means the endpoint refuses every request. Required in production when
+   * `maintenanceViaHttp` is true.
+   */
+  cronSecret?: string;
 }
 
 /** The longest payment timeout accepted: one day. A bound against a typing error, not a product rule. */
@@ -97,6 +110,17 @@ const LOCAL_PLACEHOLDER_PASSWORDS = [
 
 /** `AUTH_SECRET`: Better Auth itself asks for at least 32 characters. */
 export const AUTH_SECRET_MIN_LENGTH = 32;
+
+/** `CRON_SECRET`: at least 32 characters, as `AUTH_SECRET`. */
+export const CRON_SECRET_MIN_LENGTH = 32;
+
+/**
+ * `CRON_SECRET` travels in an `Authorization` header, so it is printable ASCII without blanks
+ * (U+0021 to U+007E), at most 256 characters. The maintenance endpoint bounds the header it
+ * compares by the same length (src/modules/maintenance/authorization.ts).
+ */
+export const CRON_SECRET_MAX_LENGTH = 256;
+export const CRON_SECRET_PATTERN = /^[!-~]+$/;
 
 /**
  * The marker every throwaway value of `.env.example` carries (SEC-009). An `AUTH_SECRET` that
@@ -221,6 +245,13 @@ export const ENV_RULES = {
     "must not be set when NODE_ENV=production; it redirects or alters the upload storage requests",
   signUpRateLimit: `must be an integer from 1 to ${MAX_SIGN_UP_RATE_LIMIT}`,
   signUpRateLimitInProduction: "must not be set when NODE_ENV=production",
+  maintenanceViaHttp: "must be true or false",
+  cronSecret: `must be ${CRON_SECRET_MIN_LENGTH} to ${CRON_SECRET_MAX_LENGTH} printable ASCII characters without blanks`,
+  cronSecretRequired: "must be set when NODE_ENV=production and MAINTENANCE_VIA_HTTP=true",
+  cronSecretPlaceholder: "must not be a placeholder from .env.example when NODE_ENV=production",
+  cronSecretWeak:
+    "must be a randomly generated value when NODE_ENV=production: enough distinct characters, no repeated or sequential pattern, and not a published value",
+  cronSecretSameAsAuthSecret: "must not be the same value as AUTH_SECRET",
 } as const;
 
 const KNOWN_RULES: ReadonlySet<string> = new Set(Object.values(ENV_RULES));
@@ -323,6 +354,18 @@ const SCHEMAS = {
   BLOB_READ_WRITE_TOKEN: z
     .string()
     .regex(BLOB_READ_WRITE_TOKEN_PATTERN, { error: ENV_RULES.blobReadWriteToken })
+    .optional(),
+  // Exactly `true` or `false`, so that "1", "yes", and "TRUE" are refused rather than guessed.
+  MAINTENANCE_VIA_HTTP: z
+    .enum(["true", "false"], { error: ENV_RULES.maintenanceViaHttp })
+    .transform((value) => value === "true")
+    .default(false),
+  // A secret: the rule text is the constant, never anything about the value.
+  CRON_SECRET: z
+    .string()
+    .min(CRON_SECRET_MIN_LENGTH, { error: ENV_RULES.cronSecret })
+    .max(CRON_SECRET_MAX_LENGTH, { error: ENV_RULES.cronSecret })
+    .regex(CRON_SECRET_PATTERN, { error: ENV_RULES.cronSecret })
     .optional(),
 } as const;
 
@@ -608,7 +651,14 @@ export function parseEnv(source: EnvSource): Env {
   const logLevel = read(source, "LOG_LEVEL", issues);
   const uploadDir = read(source, "UPLOAD_DIR", issues);
   const blobReadWriteToken = read(source, "BLOB_READ_WRITE_TOKEN", issues);
+  const maintenanceViaHttp = read(source, "MAINTENANCE_VIA_HTTP", issues);
+  const cronSecret = read(source, "CRON_SECRET", issues);
   checkAuthLibraryVariables(source, issues);
+
+  // One secret per purpose: a leaked cron secret must not also sign session cookies.
+  if (cronSecret !== undefined && authSecret !== undefined && cronSecret === authSecret) {
+    issues.push({ variable: "CRON_SECRET", rule: ENV_RULES.cronSecretSameAsAuthSecret });
+  }
 
   // D-051: one upload storage. Both set is refused in every NODE_ENV, so the adapter in use is
   // never a guess (src/modules/uploads/config.ts refuses the same combination).
@@ -667,6 +717,7 @@ export function parseEnv(source: EnvSource): Env {
         issues.push({ variable, rule: ENV_RULES.blobLibraryVariableInProduction });
       }
     }
+    checkCronSecretForProduction(source, maintenanceViaHttp, cronSecret, issues);
   }
 
   if (
@@ -677,7 +728,8 @@ export function parseEnv(source: EnvSource): Env {
     authSecret === undefined ||
     paymentTimeoutMinutes === undefined ||
     signUpRateLimit === undefined ||
-    logLevel === undefined
+    logLevel === undefined ||
+    maintenanceViaHttp === undefined
   ) {
     throw new EnvValidationError(issues);
   }
@@ -697,7 +749,33 @@ export function parseEnv(source: EnvSource): Env {
     logLevel,
     ...(uploadDir === undefined ? {} : { uploadDir }),
     ...(blobReadWriteToken === undefined ? {} : { blobReadWriteToken }),
+    maintenanceViaHttp,
+    ...(cronSecret === undefined ? {} : { cronSecret }),
   });
+}
+
+/**
+ * `CRON_SECRET` when NODE_ENV=production (owner decision 2026-10-29). Required when the scheduled
+ * work is triggered over HTTP (`MAINTENANCE_VIA_HTTP=true`), since otherwise nothing would run it.
+ * A value that is set is judged whether or not the flag is on: the placeholder marker of
+ * `.env.example` and the weak-value rules of `AUTH_SECRET` (SEC-044, SEC-047, SEC-049) refuse it.
+ * Only a value that passed the form rule is looked at; only the name is reported.
+ */
+function checkCronSecretForProduction(
+  source: EnvSource,
+  maintenanceViaHttp: boolean | undefined,
+  cronSecret: string | undefined,
+  issues: EnvIssue[],
+): void {
+  if (maintenanceViaHttp === true && raw(source, "CRON_SECRET") === undefined) {
+    issues.push({ variable: "CRON_SECRET", rule: ENV_RULES.cronSecretRequired });
+  }
+  if (cronSecret === undefined) return;
+  if (cronSecret.includes(PLACEHOLDER_MARKER)) {
+    issues.push({ variable: "CRON_SECRET", rule: ENV_RULES.cronSecretPlaceholder });
+  } else if (isWeakAuthSecret(cronSecret)) {
+    issues.push({ variable: "CRON_SECRET", rule: ENV_RULES.cronSecretWeak });
+  }
 }
 
 /**

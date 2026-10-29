@@ -83,6 +83,7 @@ describe("parseEnv: a valid environment", () => {
       paymentTimeoutMinutes: 15,
       signUpRateLimit: 5,
       logLevel: "info",
+      maintenanceViaHttp: false,
     });
     expect(DEFAULT_PAYMENT_TIMEOUT_MINUTES).toBe(15);
   });
@@ -116,6 +117,7 @@ describe("parseEnv: a valid environment", () => {
       "authSecret",
       "databaseUrl",
       "logLevel",
+      "maintenanceViaHttp",
       "nodeEnv",
       "paymentTimeoutMinutes",
       "signUpRateLimit",
@@ -989,6 +991,100 @@ describe("parseEnv: BLOB_READ_WRITE_TOKEN (D-051)", () => {
         moduleAccepts = false;
       }
       expect(envAccepts, value).toBe(moduleAccepts);
+    }
+  });
+});
+
+describe("parseEnv: MAINTENANCE_VIA_HTTP and CRON_SECRET (D-051)", () => {
+  // Made up, assembled at run time; random-looking so the production weak-value rules pass it.
+  const CRON_SECRET = ["Zq7canary", "Cr0nS3cr", "Kd2Xw9Lm", "4Rt6Pn3b", "Vy8Hq1Jf"].join("");
+
+  it("defaults to timers in-process and no secret", () => {
+    for (const value of [undefined, ""]) {
+      const env = parseEnv(source({ MAINTENANCE_VIA_HTTP: value, CRON_SECRET: value }));
+      expect(env.maintenanceViaHttp).toBe(false);
+      expect("cronSecret" in env).toBe(false);
+    }
+  });
+
+  it("accepts exactly true or false", () => {
+    expect(parseEnv(source({ MAINTENANCE_VIA_HTTP: "true" })).maintenanceViaHttp).toBe(true);
+    expect(parseEnv(source({ MAINTENANCE_VIA_HTTP: "false" })).maintenanceViaHttp).toBe(false);
+    for (const value of ["TRUE", "1", "yes", " true", "true "]) {
+      expect(issuesOf(source({ MAINTENANCE_VIA_HTTP: value }))).toEqual([
+        { variable: "MAINTENANCE_VIA_HTTP", rule: ENV_RULES.maintenanceViaHttp },
+      ]);
+    }
+  });
+
+  it("is optional outside production, even with MAINTENANCE_VIA_HTTP=true", () => {
+    for (const nodeEnv of ["development", "test"]) {
+      const env = parseEnv(source({ NODE_ENV: nodeEnv, MAINTENANCE_VIA_HTTP: "true" }));
+      expect(env.cronSecret).toBeUndefined();
+    }
+  });
+
+  it("is returned as written when valid", () => {
+    expect(parseEnv(source({ CRON_SECRET })).cronSecret).toBe(CRON_SECRET);
+    expect(parseEnv(production({ MAINTENANCE_VIA_HTTP: "true", CRON_SECRET })).cronSecret).toBe(
+      CRON_SECRET,
+    );
+  });
+
+  it("is required in production only when MAINTENANCE_VIA_HTTP=true", () => {
+    expect(() => parseEnv(production())).not.toThrow();
+    expect(() => parseEnv(production({ MAINTENANCE_VIA_HTTP: "false" }))).not.toThrow();
+    expect(issuesOf(production({ MAINTENANCE_VIA_HTTP: "true" }))).toEqual([
+      { variable: "CRON_SECRET", rule: ENV_RULES.cronSecretRequired },
+    ]);
+  });
+
+  it.each([
+    ["shorter than 32 characters", "Zq7canary-short"],
+    ["a blank inside", `${CRON_SECRET} x`],
+    ["a character outside printable ASCII", `${CRON_SECRET}é`],
+    ["longer than 256 characters", `Zq7canary${"aB3".repeat(90)}`],
+  ])("refuses a value %s in every NODE_ENV", (_label, value) => {
+    for (const nodeEnv of ["development", "test", "production"]) {
+      expect(issuesOf(production({ NODE_ENV: nodeEnv, CRON_SECRET: value }))).toEqual([
+        { variable: "CRON_SECRET", rule: ENV_RULES.cronSecret },
+      ]);
+    }
+  });
+
+  it("refuses a placeholder and a weak value in production only", () => {
+    const placeholder = "local_dev_only_not_a_secret_Zq7canary0";
+    const weak = "Zq7canaryZq7canaryZq7canaryZq7canary";
+    for (const value of [placeholder, weak]) {
+      expect(parseEnv(source({ CRON_SECRET: value })).cronSecret).toBe(value);
+    }
+    expect(issuesOf(production({ CRON_SECRET: placeholder }))).toEqual([
+      { variable: "CRON_SECRET", rule: ENV_RULES.cronSecretPlaceholder },
+    ]);
+    expect(issuesOf(production({ CRON_SECRET: weak }))).toEqual([
+      { variable: "CRON_SECRET", rule: ENV_RULES.cronSecretWeak },
+    ]);
+  });
+
+  it("refuses the value of AUTH_SECRET in every NODE_ENV", () => {
+    for (const nodeEnv of ["development", "test", "production"]) {
+      expect(
+        issuesOf(production({ NODE_ENV: nodeEnv, AUTH_SECRET: CRON_SECRET, CRON_SECRET })),
+      ).toEqual([{ variable: "CRON_SECRET", rule: ENV_RULES.cronSecretSameAsAuthSecret }]);
+    }
+  });
+
+  it("never puts any part of the value into the error", () => {
+    for (const env of [
+      source({ CRON_SECRET: "Zq7canary-short" }),
+      source({ CRON_SECRET: `${CRON_SECRET} x` }),
+      production({ CRON_SECRET: "Zq7canaryZq7canaryZq7canaryZq7canary" }),
+      production({ CRON_SECRET: "local_dev_only_not_a_secret_Zq7canary0" }),
+      source({ AUTH_SECRET: CRON_SECRET, CRON_SECRET }),
+    ]) {
+      const error = failure(env);
+      const everything = JSON.stringify([error.message, error.issues, error.stack, { ...error }]);
+      expect(everything).not.toContain("Zq7canary");
     }
   });
 });

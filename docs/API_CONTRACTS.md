@@ -1,6 +1,6 @@
 # API Contracts
 
-Owner: backend-api agent. This is the contract, written as a plan and corrected on 2026-10-11 after the T-004 planning review ([reviews/T-004-findings.md](reviews/T-004-findings.md)) the owner answers in [DECISIONS.md](DECISIONS.md) D-025, D-026, and D-028, and the technical rulings in D-029, and corrected again the same day after the cross-document check, for the technical rulings in D-031, and on 2026-10-12 for D-032 (the store status is judged before the body is read; SECURITY.md SR-05 item 5). **State on 2026-10-29: every endpoint in this document is implemented.** The 62 `route.ts` files under `src/app/api` were compared with this document by method and path, and all are documented. The "as built" subsections record when and how each group was built; review state is in [STATUS.md](STATUS.md) and [SECURITY.md](SECURITY.md), not here. Once an endpoint is built, the Zod schemas in `src/modules/<domain>/schema.ts` are authoritative for it and this document must match them.
+Owner: backend-api agent. This is the contract, written as a plan and corrected on 2026-10-11 after the T-004 planning review ([reviews/T-004-findings.md](reviews/T-004-findings.md)) the owner answers in [DECISIONS.md](DECISIONS.md) D-025, D-026, and D-028, and the technical rulings in D-029, and corrected again the same day after the cross-document check, for the technical rulings in D-031, and on 2026-10-12 for D-032 (the store status is judged before the body is read; SECURITY.md SR-05 item 5). **State on 2026-10-29: every endpoint in this document is implemented.** The 62 `route.ts` files under `src/app/api` were compared with this document by method and path, and all are documented; the 63rd, `POST /api/v1/internal/maintenance`, was added on 2026-10-29 ([section 5.11](#511-internal-scheduled-maintenance)). The "as built" subsections record when and how each group was built; review state is in [STATUS.md](STATUS.md) and [SECURITY.md](SECURITY.md), not here. Once an endpoint is built, the Zod schemas in `src/modules/<domain>/schema.ts` are authoritative for it and this document must match them.
 
 What this document must agree with, and which one wins when a name or value is in question:
 
@@ -26,7 +26,7 @@ All open points are collected in [section 8](#8-open-points).
 ### 1.1 Transport
 
 - Base path: `/api/v1`. JSON request and response bodies, `Content-Type: application/json` (the upload endpoint uses `multipart/form-data`).
-- Authentication: session cookie set by the auth handler at `/api/auth/*`. No bearer tokens in the MVP.
+- Authentication: session cookie set by the auth handler at `/api/auth/*`. No bearer tokens in the MVP, with one exception: the machine-to-machine endpoint `POST /api/v1/internal/maintenance` takes `Authorization: Bearer <CRON_SECRET>` and ignores cookies ([section 5.11](#511-internal-scheduled-maintenance)); the `Origin` and `Content-Type` rules below do not apply to it.
 - Mutations (`POST`, `PATCH`, `PUT`, `DELETE`) require an `Origin` header matching the application origin.
 - Mutation bodies reject unknown keys (strict objects). A body that carries `userId`, `storeId`, `sellerId`, `role`, `isActive`, `isSample`, `slug`, `status`, `moderationStatus`, a price, a total, a discount, or a fee where the endpoint's schema does not list that key is therefore rejected with `400 VALIDATION_ERROR`, and nothing is created or changed (D-029 point 3 for `storeId`; D-031 point 3 for amounts). An amount sent by a client is never used, and it is not silently dropped either: the request that carries it is refused.
 - Unknown query parameters are not interpreted. A `storeId`, `userId`, or `role` in a query string never widens or changes what the caller may see.
@@ -1393,7 +1393,7 @@ Implemented: `POST /api/v1/seller/uploads` (`src/app/api/v1/seller/uploads/route
 - **Storage check first** (SEC-073). Before the first batch the run calls `storage.assertReady()`: the local disk root must exist, be a directory, and hold the marker file `.marketplace-uploads` (`UPLOAD_ROOT_MARKER`), which every `put` creates when it is missing. Otherwise, or when the adapter has no check, no row is deleted and the run throws `UploadStorageNotReadyError` (message names no path). A root that existed before the marker gets it at its next upload; until then the cleanup refuses to run there. A file already missing is counted as `filesMissing`, not `filesDeleted`, with one warn line per run holding only the count.
 - Safe against a concurrent attach: the candidates are locked `FOR UPDATE ... SKIP LOCKED` (a row whose reference is being written is skipped), and the delete repeats every condition in a second statement, so an attach committed in between keeps its row. An attach that waited on the lock fails its foreign key once the row is gone. The `Restrict` foreign keys stay the backstop.
 - `runUploadCleanup()` is one run with one log line (`info` with `rowsDeleted`, `filesDeleted`, `filesMissing`, `filesFailed`; `error` with the error class and code only). `startUploadCleanupSchedule()` runs it at once and then every `ORPHAN_CLEANUP_INTERVAL_MS` (one hour), one schedule per process.
-- **Not scheduled yet.** Nothing calls `startUploadCleanupSchedule`: the start-up hook `src/instrumentation.ts`, which already starts the session purge and the payment timeout sweep, belongs to devops. Until it is wired, orphans are not served but their rows and bytes stay, and they keep counting against the store's cap, which bounds what one store can keep on disk to 50 files of at most 4 MiB.
+- **Scheduled.** The start-up hook `src/instrumentation.ts` starts `startUploadCleanupSchedule` beside the session purge and the payment timeout sweep, unless `MAINTENANCE_VIA_HTTP=true`; then `POST /api/v1/internal/maintenance` runs it instead ([section 5.11](#511-internal-scheduled-maintenance)). Until a run deletes them, orphans are not served but their rows and bytes stay and keep counting against the store's cap, which bounds what one store can keep to 50 files of at most 4 MiB.
 
 **`GET /api/files/{key}`** (public, the owning seller (SEC-068), or an admin for a file attached to a product as a picture (BR-41, SEC-090); no rate limit). One path segment, decoded by the framework.
 
@@ -1726,6 +1726,46 @@ An admin can hide a review from the public and un-hide it. Nothing is deleted: t
 - **Headers, on both statuses:** `Cache-Control: no-store` and `X-Request-Id`. The response is never cached and never prerendered: every request runs the check.
 - **The request id is always generated by the server** (a UUID). An `X-Request-Id` sent by the caller is never reused here, **even behind a trusted proxy**: this endpoint does not apply the exception of [section 1.1](#11-transport) ("Request id") and SECURITY.md SR-03, because it is public. The id is in the header only.
 - Public, no session, no `Origin` or content-type check (a `GET`), no rate limit, and no request body is read. How an outage is logged is not part of this contract (SECURITY.md SEC-026; DEPLOYMENT.md, "Health endpoint").
+
+### 5.11 Internal: scheduled maintenance
+
+Owner decision 2026-10-29 (D-051, DEPLOYMENT.md "Deploying to Vercel" and "Scheduled work"): on a serverless host the in-process timers of `src/instrumentation.ts` cannot run, so a scheduler (a GitHub Actions cron, every 10 minutes) calls this endpoint. **Machine to machine only**; no page or browser calls it.
+
+| Method | Path | Access | Notes |
+| --- | --- | --- | --- |
+| POST | `/api/v1/internal/maintenance` | `Authorization: Bearer <CRON_SECRET>` | No body (none is read). No session. No `Origin` or `Content-Type` check. No rate limit. `200` with counts, `401`, or `500`. |
+
+**Configuration** (`src/server/env.ts`):
+
+| Variable | Rule |
+| --- | --- |
+| `CRON_SECRET` | 32 to 256 printable ASCII characters without blanks, in every `NODE_ENV`. Optional outside production. In production required when `MAINTENANCE_VIA_HTTP=true`; when set in production, a value carrying the `.env.example` placeholder marker or failing the weak-value rules of `AUTH_SECRET` (SEC-044, SEC-047, SEC-049) is refused. Must differ from `AUTH_SECRET`. A secret: never logged; validation errors name the variable only. Not set: the endpoint answers `401` to every request. |
+| `MAINTENANCE_VIA_HTTP` | Exactly `true` or `false`; `false` when unset. `true`: the start-up hook starts **no** timer (session purge, payment timeout sweep, upload cleanup), so the jobs run only through this endpoint and never twice on their own. `false`: the timers run as before (local and long-lived hosting); the endpoint still works when `CRON_SECRET` is set, and running both is safe (see "Overlap"). |
+
+**Authorization** (`src/modules/maintenance/authorization.ts`):
+
+- The request must carry `Authorization: Bearer <secret>`: scheme in any letter case, one space, the secret as printable ASCII; a header longer than 263 characters is not looked at. The secret is compared in constant time (both sides hashed with SHA-256, digests compared with `crypto.timingSafeEqual`), so neither the content nor the length of `CRON_SECRET` shows in the response time.
+- **Cookies are ignored entirely**: no session is read, no role is judged. A request that carries a `Cookie` or an `Origin` header is refused even with the right secret: a scheduler sends neither, a browser always sends `Origin` on a `POST`. The bearer header is the CSRF control: a browser cannot attach it cross-site without a CORS preflight that this application never answers.
+- Every refusal is the same `401 UNAUTHENTICATED` envelope with `details: {}`: no header, a malformed header, a wrong secret, a browser marker, and no configured secret are not told apart. A refusal writes one `warn` line (`component: "maintenance"`) without the header or the reason, and runs no job.
+- No rate limit: the per-address limiter would need a trusted client address (SR-01), and without one a flood of wrong secrets would exhaust the scheduler's own allowance. A secret of 32 or more random characters is not guessable at any request rate.
+
+**What a run does** (`src/modules/maintenance/service.ts`, jobs built in `src/server/maintenance-jobs.ts` from the functions the timers call, with the same options):
+
+1. Payment timeout sweep: `runPaymentTimeoutSweep(PAYMENT_TIMEOUT_MINUTES)`; fails unpaid orders past the timeout through the guarded failure transaction only (SEC-055, D-028).
+2. Upload orphan cleanup: `runUploadCleanup` with the volume-alert logger; checks the storage first (`storage.assertReady`, SEC-073) and deletes no row when the check fails; at most 1,000 rows per run ([section 5.8.1](#581-as-built-t-041-2026-10-19), "Orphan cleanup").
+3. Expired session purge: `runSessionPurge()` (SECURITY.md SR-07 item 5).
+
+- **Isolation.** The jobs run one after the other. A job that fails (including the SEC-073 refusal) is reported as `{ "ok": false }`, writes its own error line (class name and code only), and does not stop the next job. Nothing about a cause reaches the response.
+- **Overlap.** Safe within one process, across instances, and next to the timers: the sweep fails an order only through the guarded transaction (an order already failed or paid is skipped), the cleanup takes rows `FOR UPDATE ... SKIP LOCKED`, and the purge deletes expired rows only. In addition one process runs one maintenance run at a time; a request that arrives during a run waits for it and receives the same report.
+- Route segment `maxDuration = 60` seconds.
+
+**Response** (Zod schema `maintenanceReportSchema` in `src/modules/maintenance/schema.ts`; every response `Cache-Control: no-store` and `X-Request-Id`):
+
+| Status | Body | When |
+| --- | --- | --- |
+| `200` | `{ "data": { "ok": true, "jobs": { "paymentTimeoutSweep": { "ok": true, "found": 0, "failed": 0, "errored": 0 }, "uploadCleanup": { "ok": true, "rowsDeleted": 0, "filesDeleted": 0, "filesMissing": 0, "filesFailed": 0 }, "sessionPurge": { "ok": true, "removedSessions": 0, "removedVerifications": 0 } } } }` | Every job succeeded. Counts only: no id, key, or text |
+| `401` | `UNAUTHENTICATED` envelope, `details: {}` | See "Authorization" |
+| `500` | `INTERNAL_ERROR` envelope (fixed message, `details: {}`) | At least one job failed. The jobs that succeeded have done their work; the per-job outcome is in the log line `Maintenance run finished with a failed job` with the request id (fields `paymentSweepOk`, `uploadCleanupOk`, `authPurgeOk`). A scheduler that fails on a non-2xx status (`curl --fail`) therefore reports it |
 
 ## 6. Rate limits (initial values, tune after testing)
 

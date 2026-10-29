@@ -8,7 +8,9 @@
  * Then, and only with a valid environment, it starts the scheduled removal of expired sessions
  * (T-015, src/server/auth/session-purge.ts) and the payment timeout sweep (T-032,
  * src/modules/orders/timeout-sweep.ts) and the upload orphan cleanup (SEC-065,
- * src/modules/uploads/cleanup.ts); none starts in a process with NODE_ENV=test.
+ * src/modules/uploads/cleanup.ts); none starts in a process with NODE_ENV=test, and none starts
+ * when MAINTENANCE_VIA_HTTP=true, where a scheduler runs the same jobs through
+ * `POST /api/v1/internal/maintenance` instead (owner decision 2026-10-29, D-051).
  *
  * Where it does not run:
  *
@@ -52,7 +54,10 @@ export async function register(): Promise<void> {
       // T-015 (SECURITY.md SR-07 item 5): removes expired sessions once now and every hour.
       // Not in a test process: tests call the purge directly, and the unit tests of this hook
       // must not reach a database.
-      if (env.nodeEnv !== "test") {
+      // Owner decision 2026-10-29 (D-051): with MAINTENANCE_VIA_HTTP=true a scheduler triggers the
+      // same three jobs through POST /api/v1/internal/maintenance, so no timer starts here and no
+      // job runs twice on its own. Unset or `false`: the timers run as before.
+      if (env.nodeEnv !== "test" && !env.maintenanceViaHttp) {
         const { startSessionPurgeSchedule } = await import("./server/auth/session-purge");
         startSessionPurgeSchedule();
         // SEC-055 (D-028, D-033 point 12): fails orders still unpaid after the timeout, once now

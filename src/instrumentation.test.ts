@@ -29,6 +29,8 @@ function stubEnvironment(overrides: Record<string, string | undefined> = {}): vo
     TRUSTED_CLIENT_IP_HEADER: undefined,
     PAYMENT_TIMEOUT_MINUTES: undefined,
     LOG_LEVEL: undefined,
+    MAINTENANCE_VIA_HTTP: undefined,
+    CRON_SECRET: undefined,
     ...overrides,
   };
   for (const [name, value] of Object.entries(values)) vi.stubEnv(name, value);
@@ -254,6 +256,43 @@ describe("register: scheduled work", () => {
     record("at once");
     const { purge, sweep, cleanup } = mockSchedules();
     expect(await run()).toBeUndefined();
+    expect(purge).not.toHaveBeenCalled();
+    expect(sweep).not.toHaveBeenCalled();
+    expect(cleanup).not.toHaveBeenCalled();
+  });
+
+  it("starts no schedule when MAINTENANCE_VIA_HTTP is true (D-051)", async () => {
+    stubEnvironment({ NODE_ENV: "development", MAINTENANCE_VIA_HTTP: "true" });
+    const { exit } = record("at once");
+    const { purge, sweep, cleanup } = mockSchedules();
+    expect(await run()).toBeUndefined();
+    expect(exit).not.toHaveBeenCalled();
+    expect(purge).not.toHaveBeenCalled();
+    expect(sweep).not.toHaveBeenCalled();
+    expect(cleanup).not.toHaveBeenCalled();
+  });
+
+  it("starts every schedule when MAINTENANCE_VIA_HTTP is false or unset", async () => {
+    for (const value of ["false", undefined]) {
+      stubEnvironment({ NODE_ENV: "development", MAINTENANCE_VIA_HTTP: value });
+      record("at once");
+      const { purge, sweep, cleanup } = mockSchedules();
+      expect(await run()).toBeUndefined();
+      expect(purge).toHaveBeenCalledTimes(1);
+      expect(sweep).toHaveBeenCalledTimes(1);
+      expect(cleanup).toHaveBeenCalledTimes(1);
+      vi.restoreAllMocks();
+      vi.resetModules();
+    }
+  });
+
+  it("ends the process for an invalid MAINTENANCE_VIA_HTTP and starts nothing", async () => {
+    stubEnvironment({ NODE_ENV: "development", MAINTENANCE_VIA_HTTP: "yes" });
+    const { exit } = record("at once");
+    const { purge, sweep, cleanup } = mockSchedules();
+    const thrown = await run();
+    expect((thrown as Error).name).toBe("EnvValidationError");
+    expect(exit.mock.calls).toEqual([[1]]);
     expect(purge).not.toHaveBeenCalled();
     expect(sweep).not.toHaveBeenCalled();
     expect(cleanup).not.toHaveBeenCalled();
