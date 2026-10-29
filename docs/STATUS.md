@@ -12,7 +12,7 @@ Done as reviews: the full code review (T-061, `reviews/T-061-code-review.md`) an
 
 ## Resume here
 
-Session 134 finished. Local commits, not pushed. No agent running. Done: security re-check (SEC-095 FIXED, SEC-096 Low OPEN, SEC-052 2 s timeout no finding); docs drift fixed `59cedec`; README clean-checkout run passed. Next: backend-api fixes SEC-096 (option a in SECURITY.md) and flips `it.fails` in `tests/security/sec095-recheck.itest.ts`; run `pnpm verify`; ask owner about PROPOSED decisions (D-001..D-015, D-048..D-050); then T-081. Docker dev+test DB up.
+Session 135 started. Task 1 of 3: T-063 SEC-096 fix (option a). Agent: backend-api. Paths: `src/modules/admin/repository.ts`, `tests/security/sec095-recheck.itest.ts`, `tests/security/sec094-recheck.itest.ts`. Next after it: `pnpm verify`; ask owner about PROPOSED decisions (D-001..D-015, D-048..D-050); then T-081. Docker dev+test DB up.
 
 ## Open owner decisions
 
