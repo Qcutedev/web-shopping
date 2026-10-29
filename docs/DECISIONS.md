@@ -8,21 +8,21 @@ Decisions marked `PROPOSED` are not yet validated against the installed stack; e
 
 | Id | Date | Decision | Status |
 | --- | --- | --- | --- |
-| D-001 | 2026-10-10 | Modular monolith in one Next.js application | PROPOSED |
-| D-002 | 2026-10-10 | Next.js App Router, TypeScript strict, React, Tailwind, shadcn/ui | PROPOSED |
-| D-003 | 2026-10-10 | PostgreSQL with Prisma | PROPOSED |
-| D-004 | 2026-10-10 | Better Auth for authentication, database-backed sessions | PROPOSED |
-| D-005 | 2026-10-10 | Money as integer satang in `Int` columns | PROPOSED |
-| D-006 | 2026-10-10 | Conditional atomic stock decrement inside the checkout transaction | PROPOSED |
-| D-007 | 2026-10-10 | Order, SellerOrder, OrderItem aggregate | PROPOSED |
-| D-008 | 2026-10-10 | Reads via services in Server Components; mutations via `/api/v1` route handlers | PROPOSED |
-| D-009 | 2026-10-10 | Checkout idempotency key | PROPOSED |
-| D-010 | 2026-10-10 | Storage abstraction with a local-disk adapter for development | PROPOSED |
-| D-011 | 2026-10-10 | Payment and shipping provider interfaces with mock implementations | PROPOSED |
-| D-012 | 2026-10-10 | In-memory rate limiter for the MVP | PROPOSED |
-| D-013 | 2026-10-10 | Database search with `ILIKE`; no search service | PROPOSED |
-| D-014 | 2026-10-10 | pnpm as package manager | PROPOSED |
-| D-015 | 2026-10-10 | Foreign resources return 404, not 403 | PROPOSED |
+| D-001 | 2026-10-10 | Modular monolith in one Next.js application | ACCEPTED |
+| D-002 | 2026-10-10 | Next.js App Router, TypeScript strict, React, Tailwind, shadcn/ui | ACCEPTED |
+| D-003 | 2026-10-10 | PostgreSQL with Prisma | ACCEPTED |
+| D-004 | 2026-10-10 | Better Auth for authentication, database-backed sessions | ACCEPTED |
+| D-005 | 2026-10-10 | Money as integer satang in `Int` columns | ACCEPTED |
+| D-006 | 2026-10-10 | Conditional atomic stock decrement inside the checkout transaction | ACCEPTED |
+| D-007 | 2026-10-10 | Order, SellerOrder, OrderItem aggregate | ACCEPTED |
+| D-008 | 2026-10-10 | Reads via services in Server Components; mutations via `/api/v1` route handlers | ACCEPTED |
+| D-009 | 2026-10-10 | Checkout idempotency key | ACCEPTED |
+| D-010 | 2026-10-10 | Storage abstraction with a local-disk adapter for development | ACCEPTED |
+| D-011 | 2026-10-10 | Payment and shipping provider interfaces with mock implementations | ACCEPTED |
+| D-012 | 2026-10-10 | In-memory rate limiter for the MVP | ACCEPTED |
+| D-013 | 2026-10-10 | Database search with `ILIKE`; no search service | ACCEPTED |
+| D-014 | 2026-10-10 | pnpm as package manager | ACCEPTED |
+| D-015 | 2026-10-10 | Foreign resources return 404, not 403 | ACCEPTED |
 | D-016 | 2026-10-10 | Main session is the orchestrator | ACCEPTED |
 | D-017 | 2026-10-11 | Owner confirmed the defaults for open questions Q1 to Q6 | ACCEPTED |
 | D-018 | 2026-10-11 | Visual direction approved by the owner: green accent, IBM Plex Sans Thai | ACCEPTED |
@@ -405,8 +405,8 @@ Status: PROPOSED by backend-api; the owner may change points 1 to 4 without a da
 
 ### D-049 Correction to D-011: there is no shipping provider (T-080 drift audit, 2026-10-29)
 
-D-011 names a `ShippingProvider` interface and a `ManualShippingProvider`. Neither exists in `src`. As built: `PaymentProvider` and the mock implementation are in `src/modules/payments/provider.ts`, and `StorageProvider` with `LocalDiskStorage` is in `src/modules/uploads/storage.ts`. Shipping is not a provider: the seller types the carrier and tracking number when moving a seller order to `SHIPPED`, and no carrier is called ("simulated shipping", [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md)). D-011 itself is not rewritten. Status: PROPOSED; this entry records a fact found in code, and the owner decides whether to keep the manual design or ask for a shipping interface.
+D-011 names a `ShippingProvider` interface and a `ManualShippingProvider`. Neither exists in `src`. As built: `PaymentProvider` and the mock implementation are in `src/modules/payments/provider.ts`, and `StorageProvider` with `LocalDiskStorage` is in `src/modules/uploads/storage.ts`. Shipping is not a provider: the seller types the carrier and tracking number when moving a seller order to `SHIPPED`, and no carrier is called ("simulated shipping", [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md)). D-011 itself is not rewritten. Status: ACCEPTED by the owner (2026-10-29): keep the manual shipping design; no shipping interface.
 
 ### D-050 Correction to D-012: two rate-limit rules count in the database (T-080 drift audit, 2026-10-29)
 
-D-012 describes an in-process fixed-window limiter. As built, the in-process limiter is still used for the other rules (`RATE_LIMITS`), and the per-user rules `seller-application` and `review-create` count in PostgreSQL (`UserRateLimitWindow`, SEC-052; `src/server/rate-limit.ts`, `src/modules/rate-limit`). The in-process part is correct for a single instance only, as D-012 says. Status: PROPOSED; records current code, the owner may change it.
+D-012 describes an in-process fixed-window limiter. As built, the in-process limiter is still used for the other rules (`RATE_LIMITS`), and the per-user rules `seller-application` and `review-create` count in PostgreSQL (`UserRateLimitWindow`, SEC-052; `src/server/rate-limit.ts`, `src/modules/rate-limit`). The in-process part is correct for a single instance only, as D-012 says. Status: ACCEPTED by the owner (2026-10-29): keep the as-built limiter.
