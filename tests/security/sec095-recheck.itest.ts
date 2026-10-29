@@ -24,6 +24,16 @@
  *   3. the control of case 2: the same three requests with id(U) sorting after id(B), so the
  *      reactivation takes B before U, as every other write does; no cycle.
  *
+ * SEC-096 fix (commit 1140024, re-checked by security 2026-10-29): `reactivateUser` now takes the
+ * acting admin's row `FOR SHARE` first (`assertActingAdmin`), reads the target without a lock,
+ * answers an active `ADMIN` target 409 before locking it, and otherwise locks the target
+ * `FOR NO KEY UPDATE`. Case 2 is now a plain `it`; run against `1140024~1` it fails with one
+ * deadlock (negative control in a deleted scratch tree). Case 4, added at that re-check, is a
+ * regression guard for the one new lock the fix takes on an admin row: a reactivation of an
+ * inactive admin C (id(C) < id(B)) while two admin deactivations scan every active admin row
+ * `FOR UPDATE`, one of them targeting C. It is not a detector of the old defect (the pre-fix
+ * order also passes it); it checks that the new path queues without a cycle.
+ *
  * The interleavings are forced, not left to chance: a fourth transaction holds the customer row
  * `FOR SHARE` while the requests queue, and the case waits on `pg_stat_activity` until each request
  * waits for a lock before it starts the next one. When the holder ends, the request that queued
@@ -201,8 +211,10 @@ async function threeWrites(customerPrefix: "0a-" | "0bz-") {
 }
 
 describe("SEC-096: reactivateUser's id order against the acting-admin-first order of the others", () => {
-  // OPEN (SEC-096). Observed 2026-10-29 on c2b631b: PostgreSQL aborts one of the three after
-  // deadlock_timeout (a Prisma error, so a 500 at the handler).
+  // FIXED (SEC-096, commit 1140024, re-checked 2026-10-29). Observed on c2b631b and again on
+  // 1140024~1 (negative control): PostgreSQL aborts one of the three after deadlock_timeout (a
+  // Prisma error, so a 500 at the handler). On 1140024 the reactivation holds B before it asks U,
+  // so the three queue without a cycle.
   it("a reactivation, a customer deactivation, and an admin deactivation by two or more admins do not deadlock", async () => {
     const { customer, adminB, results } = await threeWrites("0a-");
     expect(before(customer.id, adminB.id)).toBe(true);
@@ -223,5 +235,49 @@ describe("SEC-096: reactivateUser's id order against the acting-admin-first orde
     // deactivation completes.
     expect(results).toEqual([null, null, null]);
     expect((await db.user.findUniqueOrThrow({ where: { id: customer.id } })).isActive).toBe(false);
+  }, 30_000);
+
+  // Regression guard for the fix's new path (see the file header, case 4). C ("0a-", inactive
+  // admin) sorts before B ("0b-") and A ("0c-"); X and Y ("user-") after them.
+  //   - R(B, C): holds B FOR SHARE, reads C (inactive, so no early 409), queues for C;
+  //   - D(X, Y): scans the active admins FOR UPDATE in id order; C is not one; waits for B;
+  //   - D(A, C): C is an admin, so the same scan; queues for B.
+  // Nothing that holds C waits for B, so no cycle: R takes C, the two scans then take B.
+  it("a reactivation of an inactive admin while two admin deactivations scan the admin rows does not deadlock", async () => {
+    const t = tag();
+    const adminC = await createAdmin({
+      id: `0a-${t}`,
+      email: `0a-${t}@example.test`,
+      isActive: false,
+    });
+    const adminB = await createAdmin({ id: `0b-${t}`, email: `0b-${t}@example.test` });
+    const adminA = await createAdmin({ id: `0c-${t}`, email: `0c-${t}@example.test` });
+    const adminX = await createAdmin({ id: `user-x-${t}`, email: `x-${t}@example.test` });
+    const adminY = await createAdmin({ id: `user-y-${t}`, email: `y-${t}@example.test` });
+    expect(before(adminC.id, adminB.id)).toBe(true);
+    const [a, b, x] = await Promise.all([
+      actorOf(adminA.id),
+      actorOf(adminB.id),
+      actorOf(adminX.id),
+    ]);
+
+    const holder = await holdShareLock(adminC.id);
+    const reactivation = settle(reactivateUser(b, adminC.id));
+    await waitForLockWaiters(1);
+    const adminDeactivation = settle(deactivateUser(x, adminY.id));
+    await waitForLockWaiters(2);
+    const targetDeactivation = settle(deactivateUser(a, adminC.id));
+    await waitForLockWaiters(3);
+    holder.release();
+    await holder.done;
+
+    const results = await Promise.all([reactivation, adminDeactivation, targetDeactivation]);
+    expect(results.filter(isDeadlock)).toEqual([]);
+    // Every request completes or is refused with an AppError (a 409 is allowed); nothing else.
+    expect(results.filter((result) => result !== null && !(result instanceof AppError))).toEqual(
+      [],
+    );
+    // The reactivation queued first for C, so it completes.
+    expect(results[0]).toBeNull();
   }, 30_000);
 });
