@@ -578,7 +578,16 @@ Single row: `id` (`Int`, always 1, no database default), `flatShippingFeeSatang`
 - **Rules kept here:** `seller-application` (24 h windows) and `review-create` (1 h windows), the two whose windows the one-minute `signed-in-address` rule does not bound. `UserRateLimitWindow_rule_check` refuses any other value. Moving another rule here is a new migration that drops and re-adds that check with the longer list. `rule` is text with a check, not an enum, because the rule names contain hyphens and are the names the limiter already uses.
 - `count` is the number of requests counted in the current window, at least 1 (`UserRateLimitWindow_count_check`): a row is only written by a counted request. `resetAt` is when the window ends; a row with `resetAt <= now()` is an expired window and counts as no row.
 - **Unique `(userId, rule)`** (`UserRateLimitWindow_userId_rule_key`) is the conflict target of the counting statement below. The primary key is a surrogate `id` and not `(userId, rule)` because every application table has an `id` (section 1), which the integration test snapshot (`tests/helpers/snapshot.ts`) orders rows by.
-- **Index `(resetAt)`** serves a purge of expired windows: `DELETE FROM "UserRateLimitWindow" WHERE "resetAt" <= now()`. No purge exists yet; until one does, the table holds at most two rows per user that has ever used either endpoint, which is small. Same position as `Session(expiresAt)` (section 6.1). If no purge is ever built, this index is dropped in a later migration.
+- **Index `(resetAt)`** (`UserRateLimitWindow_resetAt_idx`) serves the purge of expired windows, which exists and is kept (decided 2026-10-29, session 133: the purge is wired, so the index is used, and dropping it would leave the purge scanning the whole table). `purgeExpiredWindows` in `src/modules/rate-limit/repository.ts` removes at most 1,000 expired windows per call:
+
+  ```sql
+  DELETE FROM "UserRateLimitWindow"
+   WHERE "id" IN (SELECT "id" FROM "UserRateLimitWindow" WHERE "resetAt" <= now() LIMIT 1000)
+     AND "resetAt" <= now();
+  ```
+
+  The rate-limit service runs it at most once per 10 minutes per process, after a successful count; a failure is logged by error name and changes no answer. Removing an expired window changes no answer, because an expired window counts as no row. Both scans of the statement use the index (section 21.9).
+- **Statement timeout of 2 seconds** on the counting statement and on the purge (`STATEMENT_TIMEOUT_MS` in the same file), much shorter than the pool-wide 30 seconds (`src/server/db/pool-config.ts`). Each runs in a short transaction of its own, a Prisma batch transaction: `SELECT set_config('statement_timeout', '2000', true)`, the function form of `SET LOCAL`, then the statement. The setting ends with that transaction, so the pooled connection keeps the pool's value. A count stuck behind a row lock is cancelled with SQLSTATE `57014` and writes nothing; the service rejects and the route answers `500` without reading the body (fails closed). Still outside the caller's transaction: the batch transaction is its own, on its own connection.
 - `userId` is `Cascade` (section 14), as for `Session`: a counter has no meaning without its user and is not history. Users are never deleted by the application, so it does not fire. Deactivation does not delete windows; a reactivated user keeps the counts of windows still running.
 - No `AuditLog` row and no other history: the throttled security event that the route writes on a refusal is the record.
 
@@ -593,8 +602,10 @@ ON CONFLICT ("userId", "rule") DO UPDATE SET
   "resetAt" = CASE WHEN "UserRateLimitWindow"."resetAt" <= now() THEN EXCLUDED."resetAt"
                    ELSE "UserRateLimitWindow"."resetAt" END,
   "updatedAt" = now()
-RETURNING "count", "resetAt";
+RETURNING "count", "resetAt", now()::timestamptz(3) AS "now";
 ```
+
+`now()` is returned at the column's precision. `resetAt` is `timestamptz(3)` and rounds to the millisecond; a `now()` with microseconds, cut to milliseconds by the driver, could fall up to 1 ms before it, and `Retry-After` then came out one second longer than the window (24 h + 1 s; seen in 4 of 8 runs of the integration test before the cast, 0 of 8 after).
 
 - The request is allowed when the returned `count <= $limit`; otherwise it is refused with `Retry-After` computed from the returned `resetAt`.
 - `$id` is a new random id (`randomUUID()`, as for `Upload` and `Shipment`): the column has no database default, and the value is used only when the row is new.
@@ -1510,4 +1521,9 @@ Added 2026-10-29 by migration `20261028183507_user_rate_limit_window`. Why and t
 - `EXPLAIN DELETE FROM "UserRateLimitWindow" WHERE "resetAt" <= now()` (sequential scans off, the table being nearly empty) uses `Bitmap Index Scan on "UserRateLimitWindow_resetAt_idx"`.
 - A second `prisma migrate dev` reports "Already in sync": Prisma sees no drift from the hand-written checks.
 
-Not observed: two concurrent first requests of one user. `INSERT ... ON CONFLICT DO UPDATE` is atomic per conflicting row in PostgreSQL, so one inserts and the other updates; backend-api's integration test should show it with parallel requests.
+Observed on 2026-10-29 (session 133), local development and test databases:
+
+- `EXPLAIN` of the purge as `purgeExpiredWindows` sends it (the `id IN (... LIMIT 1000)` form of section 6.18; sequential scans off) uses `Bitmap Index Scan on "UserRateLimitWindow_resetAt_idx"` for the subquery and for the outer scan. The index is kept; no migration.
+- `tests/integration/rate-limit/user-windows.test.ts`, "the statement timeout of the count and the purge": a count and a purge each wait on a window that another session holds `FOR UPDATE`, are cancelled with SQLSTATE `57014` after about 2 seconds (not 30), and write nothing; after many counts and purges, ten parallel `current_setting('statement_timeout')` reads all return the pool's value, so the `SET LOCAL` does not leak.
+
+Not observed by hand: two concurrent first requests of one user. `INSERT ... ON CONFLICT DO UPDATE` is atomic per conflicting row in PostgreSQL, so one inserts and the other updates; the same test file shows it with parallel requests ("two concurrent first requests of one user", "twelve concurrent requests of one user").

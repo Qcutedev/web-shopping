@@ -6,7 +6,7 @@
  * Covers the counting statement (atomic under concurrency, capped at limit + 1, an expired window
  * starts again at 1, the database clock), that the count survives a restart (a new module copy
  * and an emptied in-process limiter), that it is written outside any transaction of the request,
- * the purge, and the endpoint answers (429 with Retry-After from `resetAt`, body unread; no window
+ * the purge, the 2-second statement timeout of both, and the endpoint answers (429 with Retry-After from `resetAt`, body unread; no window
  * for a request refused at steps 1 to 4).
  */
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,6 +17,7 @@ import {
   countRequest,
   PURGE_BATCH_SIZE,
   purgeExpiredWindows,
+  STATEMENT_TIMEOUT_MS,
 } from "@/modules/rate-limit/repository";
 import type { Actor } from "@/server/auth/actor";
 import { db } from "@/server/db";
@@ -195,6 +196,83 @@ describe("the purge of expired windows", () => {
     expect((await row(live.userId, REVIEW.name))?.count).toBe(1);
     // A purged user starts a new window at 1.
     expect((await consumeUserRateLimit(expired, REVIEW)).remaining).toBe(REVIEW.limit - 1);
+  });
+});
+
+/** The SQLSTATE of a raw statement's error (`P2010`, DATA_MODEL.md 21.5), or null. */
+function sqlState(error: unknown): unknown {
+  const meta = (error as { meta?: { driverAdapterError?: { cause?: { originalCode?: unknown } } } })
+    .meta;
+  return meta?.driverAdapterError?.cause?.originalCode ?? null;
+}
+
+/**
+ * Runs `attempt` while another session holds `FOR UPDATE` on every window of `userId`, and
+ * returns the error it rejected with and how long it took.
+ */
+async function whileLocked(
+  userId: string,
+  attempt: () => Promise<unknown>,
+): Promise<{ error: unknown; elapsedMs: number }> {
+  return db.$transaction(
+    async (tx) => {
+      await tx.$queryRaw`
+        SELECT "id" FROM "UserRateLimitWindow" WHERE "userId" = ${userId} FOR UPDATE`;
+      const started = Date.now();
+      const error = await attempt().then(
+        () => new Error("expected the statement to be cancelled"),
+        (rejected: unknown) => rejected,
+      );
+      return { error, elapsedMs: Date.now() - started };
+    },
+    { timeout: 20_000 },
+  );
+}
+
+describe("the statement timeout of the count and the purge", () => {
+  it("cancels a count stuck behind a row lock after STATEMENT_TIMEOUT_MS, and counts nothing", async () => {
+    const actor = await customer();
+    await consumeUserRateLimit(actor, REVIEW);
+    const { error, elapsedMs } = await whileLocked(actor.userId, () =>
+      consumeUserRateLimit(actor, REVIEW),
+    );
+    expect(sqlState(error)).toBe("57014");
+    expect(elapsedMs).toBeGreaterThanOrEqual(STATEMENT_TIMEOUT_MS - 100);
+    // Far below the pool-wide 30-second timeout.
+    expect(elapsedMs).toBeLessThan(STATEMENT_TIMEOUT_MS + 3_000);
+    // The cancelled statement wrote nothing; the next request counts on.
+    expect((await row(actor.userId, REVIEW.name))?.count).toBe(1);
+    expect((await consumeUserRateLimit(actor, REVIEW)).remaining).toBe(REVIEW.limit - 2);
+  });
+
+  it("cancels a purge stuck behind a row lock after STATEMENT_TIMEOUT_MS", async () => {
+    const actor = await customer();
+    await consumeUserRateLimit(actor, REVIEW);
+    await db.$executeRaw`
+      UPDATE "UserRateLimitWindow" SET "resetAt" = now() - interval '1 minute'
+       WHERE "userId" = ${actor.userId}`;
+    const { error, elapsedMs } = await whileLocked(actor.userId, () => purgeExpiredWindows());
+    expect(sqlState(error)).toBe("57014");
+    expect(elapsedMs).toBeGreaterThanOrEqual(STATEMENT_TIMEOUT_MS - 100);
+    expect(elapsedMs).toBeLessThan(STATEMENT_TIMEOUT_MS + 3_000);
+    expect(await db.userRateLimitWindow.count({ where: { userId: actor.userId } })).toBe(1);
+  });
+
+  it("sets the timeout for its own transaction only: pooled connections keep the pool's value", async () => {
+    const [{ setting: before }] = await db.$queryRaw<[{ setting: string }]>`
+      SELECT current_setting('statement_timeout') AS "setting"`;
+    expect(before).not.toBe(`${STATEMENT_TIMEOUT_MS}ms`);
+    const actor = await customer();
+    await Promise.all(Array.from({ length: 10 }, () => consumeUserRateLimit(actor, REVIEW)));
+    await Promise.all(Array.from({ length: 5 }, () => purgeExpiredWindows()));
+    const settings = await Promise.all(
+      Array.from(
+        { length: 10 },
+        () => db.$queryRaw<[{ setting: string }]>`
+          SELECT current_setting('statement_timeout') AS "setting", pg_sleep(0.05)::text AS "slept"`,
+      ),
+    );
+    expect(new Set(settings.map(([{ setting }]) => setting))).toEqual(new Set([before]));
   });
 });
 
