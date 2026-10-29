@@ -324,7 +324,7 @@ REQ-N-03 asks for WCAG 2.1 AA contrast, keyboard operability, and labelled forms
 | --- | --- | --- |
 | Labelled forms | End-to-end tests find every form field by its label and every button by its accessible name, so an unlabelled control fails the journey that uses it | E2E |
 | Keyboard operability | Journeys 3 and 4 have a keyboard-only variant at 1280: reach the product, add to cart, fill the checkout form, and submit without a pointer; focus is visible at each stop and is never trapped | E2E |
-| Automated rule scan | An accessibility rule engine scans home, search results, product page, cart, checkout, order detail, login, and register at 360 and 1280; any violation of a WCAG 2.1 A or AA rule fails the test | E2E; needs a scanner dependency, requested for T-060 |
+| Automated rule scan | `e2e/a11y.spec.ts` runs axe (`@axe-core/playwright` 4.13.0, tags wcag2a, wcag2aa, wcag21a, wcag21aa, no rule disabled, no element excluded) on home, search, search results, product, cart, checkout, orders, order detail, sign-in, sign-up, seller apply, seller dashboard/products/new product/orders/store, and all 11 admin list pages at 360, 768, and 1280; seller and admin pages also must not scroll sideways at 360 and 768. Any violation fails the test | E2E |
 | Primitive behaviour | Roles, names, and keyboard handling of each design-system primitive | Component tests, owned by ui-ux-design |
 
 An automated scan finds only part of what WCAG covers. Passing it is not a claim of AA conformance; contrast on images and reading order still need a manual pass, recorded as not done until someone does it.
