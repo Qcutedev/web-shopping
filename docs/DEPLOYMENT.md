@@ -197,12 +197,13 @@ Built in T-011 and exercised on the developer machine on 2026-10-12. `src/server
 | `PAYMENT_TIMEOUT_MINUTES` | An integer from `1` to `1440`, written in digits only: how long an order may await payment before the sweep fails it (D-028). It is configuration so that tests can shorten it (DATA_MODEL.md section 4.3) | `15` | no |
 | `SIGN_UP_RATE_LIMIT` | An integer from `1` to `1000`, digits only: sign-ups allowed per client address per hour. For the e2e suite only (`playwright.config.ts` sets `1000`; the e2e server runs `next dev`). Leave it unset everywhere else. **Refused at start when `NODE_ENV=production`, set to any value, even `5`**, so production and staging always use the code limit of 5 (`RATE_LIMITS.SIGN_UP`). `signUpRateLimiter` in `src/server/rate-limit.ts` refuses a non-default limit in production a second time | `5` | no |
 | `LOG_LEVEL` | `debug`, `info`, `warn`, or `error`. Lines below the level are not written, except lines written through `security()`, which the level never filters (SR-04). See "What `LOG_LEVEL` reaches" below | `info` | no |
-| `UPLOAD_DIR` | An absolute directory path (T-041): where the local disk upload adapter keeps files. Refused when relative or blank, in every `NODE_ENV`. See "Uploaded files" below | Outside production: no value, and the upload and file endpoints answer `500` until it is set. Production: refused, required | no |
+| `UPLOAD_DIR` | An absolute directory path (T-041): where the local disk upload adapter keeps files. Refused when relative or blank, in every `NODE_ENV`. See "Uploaded files" below | Outside production: no value, and the upload and file endpoints answer `500` until it or `BLOB_READ_WRITE_TOKEN` is set. Production: refused unless `BLOB_READ_WRITE_TOKEN` is set | no |
+| `BLOB_READ_WRITE_TOKEN` | A Vercel Blob read-write token, `vercel_blob_rw_<store id>_<secret>` (store id letters and digits; secret printable ASCII without blanks). Selects the Vercel Blob upload adapter with private objects (D-051). Refused together with `UPLOAD_DIR`, in every `NODE_ENV`. See "Deploying to Vercel" below | The local disk adapter (`UPLOAD_DIR`) is used | yes |
 
 How the rules are applied:
 
 - A variable that is set to an empty string counts as not set.
-- A variable that `src/server/env.ts` does not know is ignored, except the four variables of the auth library, which are refused when set (SEC-045, below).
+- A variable that `src/server/env.ts` does not know is ignored, except the variables of the auth library, which are refused when set (SEC-045, below), and the request overrides of the Vercel Blob library, which are refused when `NODE_ENV=production` (D-051, table below).
 - Every variable at fault is reported in one failure, not only the first.
 
 Refusals that apply only when `NODE_ENV=production`:
@@ -215,7 +216,9 @@ Refusals that apply only when `NODE_ENV=production`:
 | `AUTH_SECRET` | It is not a random-looking value (below): a character outside printable ASCII, fewer than 8 distinct characters, a repeated pattern, a run of 8 characters in steady steps, a pattern at a distance of 1 to 8 characters, or a published value or its prefix | SEC-044, SEC-047, SEC-049 |
 | `DATABASE_URL_TEST` | It is set at all | SEC-009 |
 | `TRUSTED_PROXY_HOPS` | It is not set. `0` is accepted, but it must be written | SR-01: no silent default |
-| `UPLOAD_DIR` | It is not set. No directory is guessed: a default could be one that is not persistent | T-041 |
+| `UPLOAD_DIR` | Neither it nor `BLOB_READ_WRITE_TOKEN` is set. No directory is guessed: a default could be one that is not persistent | T-041, D-051 |
+| `BLOB_READ_WRITE_TOKEN` | It contains `not_a_secret` | SEC-009, D-051 |
+| `VERCEL_BLOB_API_URL`, `NEXT_PUBLIC_VERCEL_BLOB_API_URL`, `VERCEL_BLOB_PROXY_THROUGH_ALTERNATIVE_API`, `NEXT_PUBLIC_VERCEL_BLOB_PROXY_THROUGH_ALTERNATIVE_API`, `VERCEL_BLOB_API_VERSION_OVERRIDE`, `NEXT_PUBLIC_VERCEL_BLOB_API_VERSION_OVERRIDE` | It is set at all. The Blob library reads them by itself; the first two send every Blob API request, with the token in it, to another address | D-051 (`BLOB_LIBRARY_VARIABLES` in `src/server/env.ts`) |
 
 The weak-secret rule for `AUTH_SECRET` (SEC-044, SEC-047, SEC-049). A value that is at least 32 characters long and does not contain `not_a_secret` is still refused when `NODE_ENV=production` if any of these holds:
 
@@ -300,7 +303,7 @@ Read by code that is not the server start-up validation. All are deliberately ab
 - **Backup.** The database holds the metadata of each file and the directory holds the bytes; neither is useful without the other. Back them up together, and take the directory copy at about the same time as the database dump. Restoring only the database leaves rows without bytes; restoring only the directory leaves bytes without rows (harmless but wasted). Backup tooling is **not set up**; this is manual until a hosting provider is chosen.
 - **Rollback.** Deleting the directory loses every uploaded file, and no migration can recreate them. Treat it as data, not as a cache.
 - **Local development.** Set `UPLOAD_DIR` in `.env` to a directory of yours, for example `C:\dev\web shoping\uploads` on this machine; `/uploads/` in the repository root is git-ignored. Without it, `pnpm dev` starts but the upload and file endpoints answer `500`. The integration tests set the variable themselves to a temporary directory.
-- **What the operator sees.** In production, a missing value stops the start with `UPLOAD_DIR must be set when NODE_ENV=production`; a relative value, in any environment, with `UPLOAD_DIR must be an absolute directory path`. The value is never in the message.
+- **What the operator sees.** In production, a missing value (with no `BLOB_READ_WRITE_TOKEN`) stops the start with `UPLOAD_DIR must be set when NODE_ENV=production, unless BLOB_READ_WRITE_TOKEN is set`; both set stops it with `BLOB_READ_WRITE_TOKEN cannot be set together with UPLOAD_DIR; configure exactly one upload storage`; a relative value, in any environment, with `UPLOAD_DIR must be an absolute directory path`. The value is never in the message.
 
 #### Upload volume alert (SEC-073 item 3)
 
@@ -386,6 +389,37 @@ Whichever option is chosen must be able to meet the owner's rules. None of the o
 | Can database backups, snapshots, and any point-in-time recovery window be limited to 30 days with automatic deletion, and can access to them be limited to the same named people? | "Database backups" (OQ-50) |
 | Are backups encrypted where they are stored and on the way there, and stored somewhere other than the database host? If that needs a paid plan, it is a paid addition and needs approval | "Database backups" (SECURITY.md SR-07; D-032 point 3) |
 | Does the server process keep running with no traffic, or can a scheduled command be run without a paid add-on? | "Scheduled work" (OQ-49) |
+
+## Deploying to Vercel (NOT DONE: nothing is deployed)
+
+**Status: NOT DONE.** No Vercel project, Neon database, or Blob store exists for this repository, and nothing has been deployed. The stack is D-051 (PROPOSED): Vercel Hobby for the application, Neon for PostgreSQL, Vercel Blob for uploaded files. Deploying, and running migrations against the Neon database, are production actions that need the owner's approval. Free-tier limits and prices change: check each provider's pricing page (Vercel, Neon, Vercel Blob) before relying on a limit.
+
+What exists in the code (2026-10-29): the Vercel Blob upload adapter (`src/modules/uploads/blob-storage.ts`, private objects, files still served only through `GET /api/files/{key}`) and its environment validation. Nothing else in this section has been tried.
+
+Environment variables for a Vercel deployment (set in the project's environment settings, never in a committed file):
+
+| Variable | Value | Secret |
+| --- | --- | --- |
+| `NODE_ENV` | Set by the platform; do not set it | no |
+| `APP_URL` | The public `https://` origin of the deployment | no |
+| `DATABASE_URL` | The Neon connection string (`postgresql://...`, TLS required). Which Neon endpoint (pooled or direct) suits the application and which suits `prisma migrate deploy` is not checked yet | yes |
+| `AUTH_SECRET` | A new random value for this environment (rules above) | yes |
+| `BLOB_READ_WRITE_TOKEN` | The read-write token of the Blob store. Vercel may add it when a store is connected to the project; check that it is present for the production environment | yes |
+| `UPLOAD_DIR` | **Must not be set**: with the token it is refused, and the platform has no persistent disk | no |
+| `TRUSTED_PROXY_HOPS`, `TRUSTED_CLIENT_IP_HEADER` | Must be set explicitly (SR-01). The right values for Vercel's proxy are not decided; this needs a security ruling against Vercel's documentation of its client address headers | no |
+| `LOG_LEVEL` | `info` or `warn` | no |
+| `PAYMENT_TIMEOUT_MINUTES` | Leave unset (15) unless the owner decides otherwise | no |
+
+Never set on Vercel: `SIGN_UP_RATE_LIMIT`, `DATABASE_URL_TEST`, `NEXT_PHASE`, any `BETTER_AUTH_*` variable, and the Blob request overrides listed in the production refusals above. Each of them stops the start.
+
+Open before a Vercel deployment can work correctly (none is solved by D-051):
+
+1. **Scheduled work.** The payment timeout sweep and the upload orphan cleanup run on timers in a long-lived process (`src/instrumentation.ts`). Serverless functions do not keep running, so neither job would run reliably. A scheduled trigger is needed ("Scheduled work" above); whether the free plan allows the needed frequency: check the pricing page.
+2. **Rate limits.** The in-process limiter (D-012, D-050) counts per instance. With many function instances the per-address limits are weaker than designed.
+3. **Upload size.** The platform limits the request body of a function (check the provider's documentation for the current figure). `MAX_UPLOAD_FILE_BYTES` is 5 MiB plus multipart overhead; if the platform limit is lower, larger pictures are refused by the platform before the application sees them. Changing the product limit is an owner decision.
+4. **Picture traffic.** Every picture is streamed through the application (`GET /api/files/{key}`), so each view counts against both function usage and Blob data transfer. Check both limits on the pricing pages.
+5. **Backups.** Neon's backups and the Blob objects must be backed up together ("Uploaded files", Backup). Not set up.
+6. **Dependency audit.** `pnpm audit --prod` reports GHSA-mrhx-c7xc-m3w5 (high) in `zod` 4.1.11, pinned by `@vercel/cli-config` under `@vercel/blob` > `@vercel/oidc`. The adapter always passes the token, so that path (OIDC token lookup) is not used, but the CI audit job fails until a pnpm override (the D-034 pattern) or an upstream fix lands.
 
 ## CI pipeline (T-070)
 

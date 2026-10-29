@@ -410,3 +410,18 @@ D-011 names a `ShippingProvider` interface and a `ManualShippingProvider`. Neith
 ### D-050 Correction to D-012: two rate-limit rules count in the database (T-080 drift audit, 2026-10-29)
 
 D-012 describes an in-process fixed-window limiter. As built, the in-process limiter is still used for the other rules (`RATE_LIMITS`), and the per-user rules `seller-application` and `review-create` count in PostgreSQL (`UserRateLimitWindow`, SEC-052; `src/server/rate-limit.ts`, `src/modules/rate-limit`). The in-process part is correct for a single instance only, as D-012 says. Status: ACCEPTED by the owner (2026-10-29): keep the as-built limiter.
+
+### D-051 Free-tier deploy stack: Vercel Hobby, Neon, Vercel Blob (2026-10-29)
+
+The orchestrator's brief numbered this D-036; that number is taken (owner answers of 2026-10-13), so it is D-051.
+
+Context: the owner chose a free-tier deployment (STATUS.md "Resume here", 2026-10-29). It settles part of "Pending decisions for the user" (hosting provider, production object storage) for a first deployment only.
+
+1. **Application: Vercel Hobby.** The Next.js application as it is, no rewrite.
+2. **Database: Neon PostgreSQL.** Keeps PostgreSQL and Prisma (D-003) unchanged.
+3. **Uploaded files: Vercel Blob, private objects.** A second `StorageProvider` adapter (`VercelBlobStorage`, `src/modules/uploads/blob-storage.ts`, `@vercel/blob` 2.8.2 pinned exact) behind the existing interface (D-010). Objects are written with `access: "private"` and `allowOverwrite: false`; the application still streams every file through `GET /api/files/{key}`, so the access rules (SEC-068), the content type of the `Upload` row, the length check, and the SEC-073 marker and orphan cleanup stay as they are. `BLOB_READ_WRITE_TOKEN` set selects it; otherwise `UPLOAD_DIR` selects the local disk. Both set is refused; production requires exactly one.
+4. **Rejected: Firebase.** Its database is a document store (Firestore); the application is built on PostgreSQL with Prisma, transactions, conditional stock updates, and foreign keys (D-003, D-006, D-023). Moving would be a rewrite of the data layer.
+5. **Rejected: Cloudflare Workers with D1.** D1 is SQLite, not PostgreSQL, and the Workers runtime is not the Node.js runtime this application, Prisma's `pg` adapter, and Better Auth run on.
+6. **Not solved by this decision** (DEPLOYMENT.md, "Deploying to Vercel"): scheduled work on a serverless platform, the per-instance rate limiter, the platform's request body limit against the 5 MiB upload limit, the client address configuration (SR-01), backups, and the `zod` audit finding under `@vercel/blob`. Free-tier limits change; check each provider's pricing page.
+
+Status: PROPOSED. Not deployed. Deploying and production migrations need the owner's approval.

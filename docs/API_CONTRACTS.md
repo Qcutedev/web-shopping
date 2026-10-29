@@ -1404,7 +1404,7 @@ Implemented: `POST /api/v1/seller/uploads` (`src/app/api/v1/seller/uploads/route
 
 **Choices made in T-041 and not yet ruled** (item 8.2-8, "T-041, with security"; each is one constant, so a ruling is a one-line change). A client may rely on the status and the error code, not on these values:
 
-- Storage key: 32 lower-case hexadecimal digits from 16 random bytes (`STORAGE_KEY_PATTERN` `^[0-9a-f]{32}$`). Files live at `<UPLOAD_DIR>/<first two digits>/<key>`, written once with an exclusive create.
+- Storage key: 32 lower-case hexadecimal digits from 16 random bytes (`STORAGE_KEY_PATTERN` `^[0-9a-f]{32}$`). With the local disk adapter, files live at `<UPLOAD_DIR>/<first two digits>/<key>`, written once with an exclusive create. With the Vercel Blob adapter (D-051), each file is a private object `uploads/<key>`, written with `allowOverwrite: false`; it has no public URL and is served only through `GET /api/files/{key}`.
 - Caching of file responses: `no-store` (`FILE_CACHE_CONTROL`), because nothing is documented as cacheable.
 - One file per request, as this section already says; the SR-05 allowance of 8 files is not used.
 - An extra form field (for example `storeId`) is refused with `400 unrecognized_keys`, as an unknown key of a JSON body (section 1.1), rather than ignored.
@@ -1412,7 +1412,7 @@ Implemented: `POST /api/v1/seller/uploads` (`src/app/api/v1/seller/uploads/route
 - The client file name rule above (the brief requires traversal names to be refused; the exact list is this task's).
 - SEC-065 (added 2026-10-19): the cap of 50 uploads nothing references per store (`MAX_UNATTACHED_UPLOADS_PER_STORE`), counted whatever their age; the refusal `409 CONFLICT` with the new reason `UPLOAD_LIMIT` (`UPLOAD_LIMIT_REASON`; not yet in the reason table of [section 2.3](#23-error-codes)); the early check at step 5b before the body; the cleanup's batch size (100), batches per run (10), and interval (one hour). The grace period of 24 hours is this section's own value, not a new choice.
 
-**Configuration.** The local adapter needs `UPLOAD_DIR`, an absolute directory path. When it is missing or not absolute, both endpoints answer `500 INTERNAL_ERROR` (the upload endpoint after step 4, before the rate limit and before the body). `src/server/env.ts` validates it at start (absolute, not blank, no NUL; required in production, optional elsewhere; DEPLOYMENT.md "Uploaded files"). `src/modules/uploads/config.ts` still reads the variable itself with the same rule; moving it to `getEnv().uploadDir` is open.
+**Configuration (D-051).** `BLOB_READ_WRITE_TOKEN` set selects the Vercel Blob adapter (`src/modules/uploads/blob-storage.ts`); otherwise the local adapter needs `UPLOAD_DIR`, an absolute directory path. Both set, a malformed token, or neither is `UploadStorageNotConfiguredError`, a `500 INTERNAL_ERROR` with nothing disclosed; `src/server/env.ts` refuses the same at start, and in production requires exactly one of the two. The responses below are the same with either adapter. With Blob, the SEC-073 marker is the private object `uploads/.marketplace-uploads`. When the local configuration is missing or not absolute, both endpoints answer `500 INTERNAL_ERROR` (the upload endpoint after step 4, before the rate limit and before the body). `src/server/env.ts` validates it at start (absolute, not blank, no NUL; required in production, optional elsewhere; DEPLOYMENT.md "Uploaded files"). `src/modules/uploads/config.ts` still reads the variable itself with the same rule; moving it to `getEnv().uploadDir` is open.
 
 ### 5.9 Admin
 
