@@ -12,7 +12,7 @@ Done as reviews: the full code review (T-061, `reviews/T-061-code-review.md`) an
 
 ## Resume here
 
-Session 136 (cont.): repo pushed to https://github.com/Qcutedev/web-shopping (public, `origin/main`); first CI run 40884137487: e2e success, 4 jobs failed: (1) verify: `tests/unit/e2e/server-environment.test.ts` needs `DATABASE_URL_TEST`; (2) integration: assertion `/Tests\s+1 passed/` fails on CI; (3) gitleaks: 27 `generic-api-key` hits, all test fixtures/canaries (checked by orchestrator; local `.env` differs); (4) audit: no vulnerabilities, job fails on setup-node cache post step. Started: devops agent fixing the four; touches `.github/workflows/ci.yml`, `.gitleaks.toml`, `tests/unit/e2e/server-environment.test.ts`, the integration test with the `Tests 1 passed` assertion. Owner approved fixing (2026-10-29). Not done: manual a11y pass, uncovered pages, SEC-096 remediation (b). Commit author email is public in history (owner informed).
+Session 136 stopped by owner for a new session. No agent running. Repo https://github.com/Qcutedev/web-shopping (public), `origin/main` at `3bf29ed`, `gh` logged in as Qcutedev with `workflow` scope. CI run 40889555775 (after the 4 CI fixes `530cd3b`, `608cc21`, `4197e1d`, `3bf29ed`): verify, audit, integration, gitleaks all success; e2e was still running when the session stopped: check `gh run view 40889555775`. First run 40884137487 had e2e success and the 4 other jobs failed (causes fixed). Local: `pnpm verify` exit 0, integration 1682 passed, e2e 92 passed (incl. `e2e/a11y.spec.ts`, axe 0 violations). Next: (1) read the e2e result of run 40889555775; if green, B-04 is resolved: update B-04, T-070 row, `ci.yml` header comment (still says NOT YET RUN), `docs/DEPLOYMENT.md`; push that STATUS commit. (2) Owner decides T-081 exceptions: manual a11y pass (image contrast, reading order), uncovered pages (seller order detail, seller product edit, admin order and product detail), open menus and error states. (3) Optional: SEC-096 remediation (b). Owner note: commit author email is public in history; rewriting history needs an explicit owner order.
 
 ## Open owner decisions
 
@@ -25,7 +25,7 @@ Session 136 (cont.): repo pushed to https://github.com/Qcutedev/web-shopping (pu
 
 | Id | Blocker | Blocks | Next step |
 | --- | --- | --- | --- |
-| B-04 | No GitHub remote; `gh` not logged in | T-070 cannot be verified on a real run | Owner runs `gh auth login`, then creates the repository; CI can be written but not proven until then |
+| B-04 | Remote created 2026-10-29; CI ran on GitHub, e2e result of run 40889555775 not yet read | T-070 is verified only when that run is green | Read the run result in the next session, then close B-04 |
 
 ## Environment
 
