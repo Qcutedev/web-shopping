@@ -562,10 +562,9 @@ The 20 minutes are the 15-minute timeout (D-028) plus 5 minutes for the one-minu
 
 The tables and the two jobs these queries check now exist; the queries have not been run against a deployed database:
 
-- The table and column names are those of DATA_MODEL.md sections 6.1 and 6.10. The `Session` names are the auth library's expected shape and are validated in T-015; if they differ, these queries are corrected then.
-- Both tables land with T-013. Before that, each query fails with `relation ... does not exist`; this was observed for query 1 against the local development database on 2026-10-11 with the command below.
-- From T-013 on, the queries run but return 0 on an empty database, which says nothing. Query 1 means something once T-015 has landed and sessions exist; query 2 once T-032 has landed.
-- How a query is run against a deployed database depends on the hosting provider and is written into the runbook in T-071. It is run by one of the named people, because it needs database access.
+- The table and column names are those of DATA_MODEL.md sections 6.1 and 6.10. Both tables exist (T-013), the auth code (T-015) and checkout (T-032) are built, and the `Session` names were not re-compared with the migration in the T-080 audit.
+- On an empty database the queries return 0, which says nothing; they mean something only on a database that holds sessions and orders.
+- How a query is run against a deployed database depends on the hosting provider; [RUNBOOK-STAGING.md](RUNBOOK-STAGING.md) (T-071) does not give it, because no provider is chosen. It is run by one of the named people, because it needs database access.
 
 Against the local development database the form is (PowerShell; the query is passed on standard input because the double quotes do not survive as a command-line argument):
 
