@@ -2,7 +2,7 @@
  * SEC-074, SEC-075, SEC-076: the e2e server is started bound to loopback, with its own database,
  * upload root, and session secret, and with the driver overrides emptied. Each entry is pinned.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   E2E_HOST,
@@ -54,11 +54,22 @@ describe("e2e server start-up (SEC-074 to SEC-076)", () => {
   });
 
   it("gives SIGN_UP_RATE_LIMIT to the e2e server only, never to the runner process (CR-S116-03)", async () => {
-    const before = process.env["SIGN_UP_RATE_LIMIT"];
-    const { default: config } = await import("../../../playwright.config");
-    expect(config.webServer).toMatchObject({
-      env: { SIGN_UP_RATE_LIMIT: "1000", NODE_ENV: "development" },
-    });
-    expect(process.env["SIGN_UP_RATE_LIMIT"]).toBe(before);
+    // Loading the config validates DATABASE_URL_TEST (e2e/support/environment.ts), which is unset
+    // on a machine without a test database (CI verify job). The check under test is about the
+    // server env, not the database, so give the validator well-formed local URLs on two different
+    // servers. Nothing connects; the values are placeholders and are restored afterwards.
+    vi.stubEnv("DATABASE_URL_TEST", "postgresql://u:p@127.0.0.1:5433/marketplace_test");
+    vi.stubEnv("DATABASE_URL", "postgresql://u:p@127.0.0.1:5432/marketplace");
+    vi.resetModules();
+    try {
+      const before = process.env["SIGN_UP_RATE_LIMIT"];
+      const { default: config } = await import("../../../playwright.config");
+      expect(config.webServer).toMatchObject({
+        env: { SIGN_UP_RATE_LIMIT: "1000", NODE_ENV: "development" },
+      });
+      expect(process.env["SIGN_UP_RATE_LIMIT"]).toBe(before);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
