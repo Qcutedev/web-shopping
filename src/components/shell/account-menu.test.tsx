@@ -48,12 +48,19 @@ describe("AccountMenu", () => {
     );
   });
 
-  it("offers no admin or seller link", async () => {
+  it("offers no admin or seller link to a non-admin", async () => {
     await openMenu();
     const hrefs = screen.getAllByRole("link").map((a) => a.getAttribute("href") ?? "");
     expect(hrefs.some((href) => href.startsWith("/admin") || href.startsWith("/seller"))).toBe(
       false,
     );
+  });
+
+  it("offers a link to the admin area to an admin", async () => {
+    const user = userEvent.setup();
+    render(<AccountMenu name={NAME} isAdmin />);
+    await user.click(screen.getByRole("button", { name: fill(copy.buttonLabel, { name: NAME }) }));
+    expect(screen.getByRole("link", { name: copy.admin }).getAttribute("href")).toBe(ROUTES.admin);
   });
 
   it("uses the fallback name when the profile could not be read", () => {

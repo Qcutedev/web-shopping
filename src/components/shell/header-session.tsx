@@ -34,7 +34,7 @@ export async function HeaderSession() {
   const [name, count] = await Promise.all([readName(actor), readCartCount(actor)]);
   return (
     <>
-      <AccountMenu name={name} />
+      <AccountMenu name={name} isAdmin={actor.role === "ADMIN"} />
       <CartLink count={count} />
     </>
   );

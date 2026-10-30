@@ -35,6 +35,8 @@ export const th = {
         buttonLabel: "เมนูบัญชีของ {name}",
         profile: "บัญชีของฉัน",
         orders: "คำสั่งซื้อของฉัน",
+        // proposal: shown to an admin only.
+        admin: "หลังบ้านแอดมิน",
         signOut: "ออกจากระบบ",
         signingOut: "กำลังออกจากระบบ",
         signOutFailed: "ออกจากระบบไม่สำเร็จ กรุณาลองอีกครั้ง",

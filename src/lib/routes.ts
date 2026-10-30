@@ -17,6 +17,7 @@ export const ROUTES = {
   // Account area (T-030). `src/proxy.ts` already gates `/account/*`.
   account: "/account",
   accountAddresses: "/account/addresses",
+  admin: "/admin",
 } as const;
 
 /**

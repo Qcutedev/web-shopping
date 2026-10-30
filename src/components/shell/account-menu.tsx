@@ -17,12 +17,13 @@ const ITEM =
 /**
  * Signed-in menu of the storefront header: the user's name as a disclosure button, a link to the
  * account and to the orders, and sign-out. The name is shown only; the server decides everything
- * the links lead to. Links are the same for every role (no admin or seller link here).
+ * the links lead to. Links are the same for every role except one: an admin also gets a link to
+ * `/admin` (display only; every admin page and endpoint checks the role again on the server).
  *
  * Sign-out posts to `/api/v1/auth/sign-out`, disables itself while pending, and on success (or a
  * `401`, which means the session was already gone) goes home and refreshes the server data.
  */
-export function AccountMenu({ name }: { name: string | null }) {
+export function AccountMenu({ name, isAdmin = false }: { name: string | null; isAdmin?: boolean }) {
   const router = useRouter();
   const panelId = useId();
   const root = useRef<HTMLDivElement>(null);
@@ -104,6 +105,11 @@ export function AccountMenu({ name }: { name: string | null }) {
         <Link href={ROUTES.orders} className={ITEM} onClick={close}>
           {th.shell.header.account.orders}
         </Link>
+        {isAdmin ? (
+          <Link href={ROUTES.admin} className={ITEM} onClick={close}>
+            {th.shell.header.account.admin}
+          </Link>
+        ) : null}
         <button type="button" className={ITEM} disabled={pending} onClick={onSignOut}>
           {pending ? th.shell.header.account.signingOut : th.shell.header.account.signOut}
         </button>
