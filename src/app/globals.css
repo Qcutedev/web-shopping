@@ -171,11 +171,15 @@
     line-height: 1.65;
   }
 
-  /* Motion is limited to short colour, border, and shadow transitions; remove even those on request. */
+  /*
+   * Motion is limited to short colour, border, and shadow transitions; remove even those on request.
+   * Owner choice (2026-10-31): the home poster (.hero-motion) keeps its motion regardless of this
+   * setting; its pause button stays available.
+   */
   @media (prefers-reduced-motion: reduce) {
-    *,
-    ::before,
-    ::after {
+    :not(.hero-motion, .hero-motion *),
+    :not(.hero-motion, .hero-motion *)::before,
+    :not(.hero-motion, .hero-motion *)::after {
       transition-duration: 0.01ms !important;
       animation-duration: 0.01ms !important;
       animation-iteration-count: 1 !important;

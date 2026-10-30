@@ -45,9 +45,9 @@ const ROUND_BUTTON =
  * Poster carousel for the home page. Every slide has a tinted stage: real products float on it
  * (they link to their pages), an optional presenter picture stands in the middle, and the layers
  * follow the pointer a little. Slides cross-fade, the active slide's text rises in, and the shapes
- * drift (CSS only, see `hero-*` in globals.css). Autoplay never starts when the visitor asked for
- * reduced motion, stops while the pointer or focus is inside, and can be paused with a button
- * (WCAG 2.2.2). Inactive slides are `inert`, so only the visible one is reachable.
+ * drift (CSS only, see `hero-*` in globals.css). All of this stays on even when the visitor asked
+ * for reduced motion (owner choice). Autoplay stops while the pointer or focus is inside and can
+ * be paused with a button (WCAG 2.2.2). Inactive slides are `inert`, so only the visible one is reachable.
  */
 export function HeroCarousel({
   slides,
@@ -61,23 +61,12 @@ export function HeroCarousel({
 }) {
   const [index, setIndex] = useState(0);
   const [playing, setPlaying] = useState(true);
-  const [reducedMotion, setReducedMotion] = useState(false);
   const [hovering, setHovering] = useState(false);
   const rootRef = useRef<HTMLElement>(null);
   const count = slides.length;
 
-  useEffect(() => {
-    // Not every environment has matchMedia (jsdom does not); there the motion stays on.
-    if (typeof window.matchMedia !== "function") return;
-    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const sync = () => setReducedMotion(query.matches);
-    sync();
-    query.addEventListener("change", sync);
-    return () => query.removeEventListener("change", sync);
-  }, []);
-
-  // Autoplay also runs for visitors who asked for reduced motion (the slide change is then an
-  // instant swap); the pause button stays available for them (WCAG 2.2.2).
+  // The poster keeps its motion and autoplay for visitors who asked for reduced motion (owner
+  // choice, see globals.css); the pause button stays available for them (WCAG 2.2.2).
   const running = playing && !hovering && count > 1;
   useEffect(() => {
     if (!running) return;
@@ -88,16 +77,13 @@ export function HeroCarousel({
   const go = useCallback((to: number) => setIndex((to + count) % count), [count]);
 
   // The pointer position (-1..1 on each axis) goes to CSS variables; no React state, no re-render.
-  const follow = useCallback(
-    (event: React.PointerEvent<HTMLElement>) => {
-      const root = rootRef.current;
-      if (!root || reducedMotion || event.pointerType !== "mouse") return;
-      const box = root.getBoundingClientRect();
-      root.style.setProperty("--px", String(((event.clientX - box.left) / box.width - 0.5) * 2));
-      root.style.setProperty("--py", String(((event.clientY - box.top) / box.height - 0.5) * 2));
-    },
-    [reducedMotion],
-  );
+  const follow = useCallback((event: React.PointerEvent<HTMLElement>) => {
+    const root = rootRef.current;
+    if (!root || event.pointerType !== "mouse") return;
+    const box = root.getBoundingClientRect();
+    root.style.setProperty("--px", String(((event.clientX - box.left) / box.width - 0.5) * 2));
+    root.style.setProperty("--py", String(((event.clientY - box.top) / box.height - 0.5) * 2));
+  }, []);
 
   if (count === 0) return null;
 
@@ -106,7 +92,7 @@ export function HeroCarousel({
       ref={rootRef}
       aria-roledescription="carousel"
       aria-label={labels.region}
-      className="text-foreground bg-surface-muted @container relative h-full overflow-hidden"
+      className="hero-motion text-foreground bg-surface-muted @container relative h-full overflow-hidden"
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={() => setHovering(false)}
       onPointerMove={follow}
