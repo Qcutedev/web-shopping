@@ -393,9 +393,9 @@ Whichever option is chosen must be able to meet the owner's rules. None of the o
 | Are backups encrypted where they are stored and on the way there, and stored somewhere other than the database host? If that needs a paid plan, it is a paid addition and needs approval | "Database backups" (SECURITY.md SR-07; D-032 point 3) |
 | Does the server process keep running with no traffic, or can a scheduled command be run without a paid add-on? | "Scheduled work" (OQ-49) |
 
-## Deploying to Vercel (NOT DONE: nothing is deployed)
+## Deploying to Vercel (PREVIEW ONLY: no production deployment)
 
-**Status: NOT DONE.** No Vercel project, Neon database, or Blob store exists for this repository, and nothing has been deployed. The stack is D-051 (PROPOSED): Vercel Hobby for the application, Neon for PostgreSQL, Vercel Blob for uploaded files. Deploying, and running migrations against the Neon database, are production actions that need the owner's approval. Free-tier limits and prices change: check each provider's pricing page (Vercel, Neon, Vercel Blob) before relying on a limit.
+**Status: a preview deployment exists (2026-10-30).** The Vercel project `web-shopping`, a Neon database, and a private Blob store exist, and the committed migrations were applied to that database. Production is not deployed. The stack is D-051 (PROPOSED): Vercel Hobby for the application, Neon for PostgreSQL, Vercel Blob for uploaded files. Production deployment needs the owner's approval. A `.vercelignore` keeps build output and test folders out of the upload (anchored with `/`: an unanchored `uploads` also hides `src/modules/uploads` and breaks the build). Free-tier limits and prices change: check each provider's pricing page (Vercel, Neon, Vercel Blob) before relying on a limit.
 
 What exists in the code (2026-10-29): the Vercel Blob upload adapter (`src/modules/uploads/blob-storage.ts`, private objects, files still served only through `GET /api/files/{key}`) and its environment validation. Nothing else in this section has been tried.
 

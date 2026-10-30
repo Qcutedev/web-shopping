@@ -58,3 +58,6 @@ desktop.ini
 
 # run-agents.ps1 output
 logs/
+
+# Vercel CLI link
+/.vercel
