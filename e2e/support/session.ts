@@ -11,6 +11,18 @@ import { takeSignIn } from "./sign-in-budget";
 /** Header the API requires on every mutation (API_CONTRACTS 1.1). */
 export const ORIGIN_HEADERS = { Origin: E2E_ORIGIN } as const;
 
+/**
+ * Waits until React has attached its props to the first form. A click before hydration submits
+ * the form natively (a GET with the fields in the URL). `networkidle` is no use: the dev server's
+ * reloads keep it busy.
+ */
+export async function hydrated(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const form = document.querySelector("form");
+    return form !== null && Object.keys(form).some((key) => key.startsWith("__reactProps"));
+  });
+}
+
 export interface Person {
   context: BrowserContext;
   page: Page;
@@ -40,6 +52,7 @@ export async function registerCustomer(browser: Browser, prefix: string): Promis
   const page = await context.newPage();
 
   await page.goto("/sign-up");
+  await hydrated(page);
   await page.getByLabel(th.auth.name).fill(name);
   await page.getByLabel(th.auth.email).fill(email);
   await page.getByLabel(th.auth.password).fill(password);
@@ -52,6 +65,7 @@ export async function registerCustomer(browser: Browser, prefix: string): Promis
   await expect(page.getByRole("button", { name: ACCOUNT_BUTTON })).toHaveCount(0);
 
   await page.goto("/sign-in");
+  await hydrated(page);
   await page.getByLabel(th.auth.email).fill(email);
   await page.getByLabel(th.auth.password).fill(password);
   await takeSignIn();

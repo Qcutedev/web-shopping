@@ -11,23 +11,12 @@ import { th } from "@/i18n/th";
 import { ADMIN, uniqueEmail } from "./support/accounts";
 import { E2E_ORIGIN } from "./support/constants";
 import { takeSignIn } from "./support/sign-in-budget";
+import { hydrated } from "./support/session";
 
 // A sign-in can wait up to a minute for a slot in the sign-in budget (support/sign-in-budget.ts).
 test.describe.configure({ timeout: 180_000 });
 
 const ACCOUNT_BUTTON = new RegExp(th.shell.header.account.buttonLabel.replace("{name}", ".+"));
-
-/**
- * The forms are client components in a dev server that compiles on first use. A click before
- * hydration submits the form natively (a GET with the fields in the URL), so wait until React has
- * attached its props to the form. `networkidle` is no use: the dev server's reloads keep it busy.
- */
-async function hydrated(page: Page): Promise<void> {
-  await page.waitForFunction(() => {
-    const form = document.querySelector("form");
-    return form !== null && Object.keys(form).some((key) => key.startsWith("__reactProps"));
-  });
-}
 
 // The routes are compiled without a browser in global-setup (warmRoutes). This hook then opens each
 // form once in a browser, with no retry. If a navigation still fails, the frame navigations and

@@ -74,7 +74,9 @@ test.describe("customer pages", () => {
 
   let customer: Person;
 
+  // Registering signs in once, which may wait a minute for a slot in the sign-in budget.
   test.beforeAll(async ({ browser }) => {
+    test.setTimeout(180_000);
     customer = await registerCustomer(browser, "a11y");
     const response = await customer.context.request.post("/api/v1/me/addresses", {
       headers: ORIGIN_HEADERS,
