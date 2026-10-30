@@ -35,7 +35,11 @@ export const sessionPurgeOutcomeSchema = z.union([
   failedJob,
 ]);
 
-/** `data` of a `200` response: every job ran and succeeded (`ok` is then always true). */
+/**
+ * The report of one maintenance run, as `runMaintenance` returns it; `ok` is false when at least
+ * one job failed. The endpoint sends it as `data` of a `200` response only when `ok` is true; a
+ * report with `ok: false` is answered `500 INTERNAL_ERROR` and is not sent.
+ */
 export const maintenanceReportSchema = z.strictObject({
   ok: z.boolean(),
   jobs: z.strictObject({
