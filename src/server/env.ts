@@ -816,6 +816,10 @@ export function getEnv(): Env {
   return (cached ??= parseEnv(process.env));
 }
 
+/** The start-up warning for `MAINTENANCE_VIA_HTTP=true` without `CRON_SECRET` (outside production). */
+export const MAINTENANCE_WITHOUT_SECRET_WARNING =
+  "MAINTENANCE_VIA_HTTP is true but CRON_SECRET is not set: no maintenance timer runs and the maintenance endpoint refuses every request, so the payment timeout sweep, upload cleanup, and session purge never run.";
+
 /** True when no proxy is trusted, so the client address is always "unknown" (SR-01). */
 function trustsNoProxy(config: ClientAddressConfig): boolean {
   return config.trustedProxyHops === 0 && config.trustedClientIpHeader === undefined;
@@ -828,7 +832,8 @@ function trustsNoProxy(config: ClientAddressConfig): boolean {
  *
  * In production it also writes the one warning SR-01 requires when no proxy is trusted. That
  * line goes through `security("warn", ...)`, the logger path that `LOG_LEVEL` never filters
- * (SR-04; SEC-031), so no level can silence it.
+ * (SR-04; SEC-031), so no level can silence it. In any NODE_ENV it also warns, the same way, when
+ * `MAINTENANCE_VIA_HTTP=true` and `CRON_SECRET` is not set (production refuses that start).
  *
  * Last, it hands the validated `LOG_LEVEL` to the process-wide logger (`setLogLevel`), whichever
  * logger this call itself was given. The level is kept once per process (on `globalThis`, in
@@ -856,6 +861,14 @@ export function loadEnvAtStartup(options: { logger?: StructuredLogger } = {}): E
       "No trusted proxy is configured: the client address is unknown, so every per-address rate limit is shared by all clients.",
       { component: "env" },
     );
+  }
+  // D-051 review: with MAINTENANCE_VIA_HTTP=true no timer starts, and without CRON_SECRET the
+  // endpoint refuses every request, so the payment timeout sweep (SEC-055), the upload cleanup,
+  // and the session purge never run. Production refuses this configuration (cronSecretRequired);
+  // elsewhere it is allowed but must not go unnoticed. Through `security`, so LOG_LEVEL cannot
+  // hide it. Names only, no value.
+  if (env.maintenanceViaHttp && env.cronSecret === undefined) {
+    log.security("warn", MAINTENANCE_WITHOUT_SECRET_WARNING, { component: "env" });
   }
   setLogLevel(env.logLevel);
   return env;

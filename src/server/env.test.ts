@@ -1596,6 +1596,8 @@ describe("loadEnvAtStartup", () => {
       BETTER_AUTH_SECRETS: undefined,
       BETTER_AUTH_URL: undefined,
       BETTER_AUTH_TRUSTED_ORIGINS: undefined,
+      MAINTENANCE_VIA_HTTP: undefined,
+      CRON_SECRET: undefined,
       ...overrides,
     };
     for (const [name, value] of Object.entries(values)) vi.stubEnv(name, value);
@@ -1750,6 +1752,63 @@ describe("loadEnvAtStartup", () => {
     const { lines, logger } = capture();
     load({ logger });
     expect(lines).toEqual([]);
+  });
+
+  // D-051 review: MAINTENANCE_VIA_HTTP=true starts no timer, and without CRON_SECRET the endpoint
+  // refuses everything, so the scheduled work never runs. Production refuses it; elsewhere a warn.
+  it.each(["development", "test"])(
+    "warns through security() in %s when MAINTENANCE_VIA_HTTP=true and CRON_SECRET is not set",
+    async (nodeEnv) => {
+      stubValid({ NODE_ENV: nodeEnv, MAINTENANCE_VIA_HTTP: "true" });
+      const { loadEnvAtStartup: load, MAINTENANCE_WITHOUT_SECRET_WARNING: message } =
+        await import("./env");
+      const lines: Record<string, unknown>[] = [];
+      const quiet = createLogger({
+        level: "error",
+        write: (line) => lines.push(JSON.parse(line) as Record<string, unknown>),
+      });
+      const security = vi.spyOn(quiet, "security");
+      expect(load({ logger: quiet }).maintenanceViaHttp).toBe(true);
+      expect(security).toHaveBeenCalledTimes(1);
+      expect(lines).toEqual([
+        expect.objectContaining({ level: "warn", component: "env", message }),
+      ]);
+      expect(message).toContain("MAINTENANCE_VIA_HTTP");
+      expect(message).toContain("CRON_SECRET");
+    },
+  );
+
+  it("does not warn about maintenance when CRON_SECRET is set or MAINTENANCE_VIA_HTTP is false", async () => {
+    const secret = ["Zq7canary", "Cr0nS3cr", "Kd2Xw9Lm", "4Rt6Pn3b", "Vy8Hq1Jf"].join("");
+    for (const overrides of [
+      { MAINTENANCE_VIA_HTTP: "true", CRON_SECRET: secret },
+      { MAINTENANCE_VIA_HTTP: "false" },
+      { MAINTENANCE_VIA_HTTP: undefined },
+      {
+        NODE_ENV: "production",
+        TRUSTED_PROXY_HOPS: "1",
+        MAINTENANCE_VIA_HTTP: "true",
+        CRON_SECRET: secret,
+      },
+    ]) {
+      stubValid(overrides);
+      const { loadEnvAtStartup: load } = await import("./env");
+      const { lines, logger } = capture();
+      load({ logger });
+      expect(lines).toEqual([]);
+    }
+  });
+
+  it("stops the start in production instead of warning when MAINTENANCE_VIA_HTTP=true without CRON_SECRET", async () => {
+    stubValid({ NODE_ENV: "production", TRUSTED_PROXY_HOPS: "1", MAINTENANCE_VIA_HTTP: "true" });
+    const { loadEnvAtStartup: load, EnvValidationError: FreshError } = await import("./env");
+    const { lines, logger } = capture();
+    expect(() => load({ logger })).toThrow(FreshError);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({
+      level: "error",
+      issues: [{ variable: "CRON_SECRET", rule: ENV_RULES.cronSecretRequired }],
+    });
   });
 
   it("passes on an error that is not a validation error unchanged, and logs nothing", async () => {
