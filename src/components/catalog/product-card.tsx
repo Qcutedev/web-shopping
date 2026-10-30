@@ -27,13 +27,16 @@ export function ProductCard({
       href={productHref(product.slug)}
       className="group focus-ring flex h-full flex-col gap-2 rounded-lg"
     >
-      <div className="relative overflow-hidden rounded-lg transition-transform duration-300 group-hover:-translate-y-1 group-hover:shadow-lg">
+      <div className="product-card-media relative overflow-hidden rounded-lg transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-lg">
         <ProductImage
           image={product.image}
           alt=""
           sizes="(min-width: 1024px) 25vw, (min-width: 768px) 33vw, 50vw"
           priority={priority}
         />
+        <span aria-hidden="true" className="product-card-cta">
+          {th.catalog.viewProduct}
+        </span>
         {product.soldOut ? (
           <Badge variant="neutral" className="absolute top-2 left-2">
             {th.catalog.soldOut}

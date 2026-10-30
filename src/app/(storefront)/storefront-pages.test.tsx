@@ -140,12 +140,25 @@ describe("home page", () => {
     catalog.listProducts.mockResolvedValue(pageOf([item(1), item(2)], 2));
     const { container } = await renderPage(<HomePage />);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(th.catalog.home.newestTitle);
-    expect(screen.getByText("สินค้า 1")).toBeTruthy();
+    expect(screen.getAllByText("สินค้า 1").length).toBeGreaterThan(0);
     const all = hrefs(container);
     expect(all).toContain("/products/product-1");
     expect(all).toContain("/products/product-2");
     expect(all).toContain("/categories/tea");
     expect(catalog.listProducts).toHaveBeenCalledWith({ page: 1, pageSize: 20, sort: "newest" });
+  });
+
+  it("shelves: lowest price and each category are requested and shown", async () => {
+    catalog.listProducts.mockResolvedValue(pageOf([item(1)], 1));
+    await renderPage(<HomePage />);
+    expect(catalog.listProducts).toHaveBeenCalledWith({ page: 1, pageSize: 4, sort: "price_asc" });
+    expect(catalog.listProducts).toHaveBeenCalledWith({
+      page: 1,
+      pageSize: 4,
+      sort: "newest",
+      category: "tea",
+    });
+    expect(screen.getByRole("heading", { name: th.catalog.home.cheapestTitle })).toBeTruthy();
   });
 
   it("empty: shows the empty state, no product links", async () => {
@@ -169,7 +182,7 @@ describe("home page", () => {
     catalog.listCategories.mockRejectedValue(internal());
     catalog.listProducts.mockResolvedValue(pageOf([item(1)], 1));
     const { container } = await renderPage(<HomePage />);
-    expect(screen.getByText("สินค้า 1")).toBeTruthy();
+    expect(screen.getAllByText("สินค้า 1").length).toBeGreaterThan(0);
     expect(hrefs(container)).not.toContain("/categories/tea");
   });
 });
@@ -307,7 +320,7 @@ describe("category page", () => {
       <CategoryPage params={slugParams("tea")} searchParams={searchParams()} />,
     );
     expect(container.querySelector("h1")?.textContent).toBe(th.catalog.categories.label);
-    expect(screen.getByText("สินค้า 1")).toBeTruthy();
+    expect(screen.getAllByText("สินค้า 1").length).toBeGreaterThan(0);
     expect(container.textContent).not.toContain("password");
   });
 

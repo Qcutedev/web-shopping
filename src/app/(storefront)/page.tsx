@@ -2,6 +2,8 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { CategoryTiles, CategoryTilesSkeleton } from "@/components/catalog/category-tiles";
 import { HeroSection, HeroSkeleton } from "@/components/catalog/hero-section";
+import { CategoryShelves, CheapestShelf } from "@/components/catalog/product-shelf";
+import { Reveal } from "@/components/reveal";
 import { HomeHighlights } from "@/components/catalog/home-highlights";
 import { listHref } from "@/components/catalog/list-href";
 import { ProductGridSkeleton } from "@/components/catalog/product-grid";
@@ -60,7 +62,15 @@ export default function HomePage() {
           />
         </Suspense>
       </section>
-      <HomeHighlights />
+      <Suspense fallback={null}>
+        <CheapestShelf />
+      </Suspense>
+      <Suspense fallback={null}>
+        <CategoryShelves />
+      </Suspense>
+      <Reveal>
+        <HomeHighlights />
+      </Reveal>
     </div>
   );
 }

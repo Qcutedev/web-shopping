@@ -378,9 +378,13 @@ export const th = {
     productListLabel: "รายการสินค้า",
     soldOut: "สินค้าหมด",
     noImage: "ไม่มีรูปภาพสินค้า",
+    viewProduct: "ดูสินค้า",
     breadcrumbLabel: "เส้นทางนำทาง",
     home: {
       newestTitle: "สินค้ามาใหม่",
+      // proposals: home shelves
+      cheapestTitle: "ราคาประหยัด",
+      categoryShelf: "เลือกซื้อ{name}",
       categoriesTitle: "หมวดหมู่สินค้า",
       viewAll: "ดูสินค้าทั้งหมด",
       emptyTitle: "ยังไม่มีสินค้าในขณะนี้",
