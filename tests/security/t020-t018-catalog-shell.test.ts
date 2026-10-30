@@ -698,6 +698,8 @@ describe("T-020 review: the catalog route files are thin", () => {
     "src/app/api/v1/cart/items/[itemId]/route.ts",
     "src/app/api/v1/cart/items/route.ts",
     "src/app/api/v1/cart/route.ts",
+    // D-051 scheduled maintenance endpoint (secret-guarded, no session).
+    "src/app/api/v1/internal/maintenance/route.ts",
     // T-032 checkout and orders routes; reviewed in tests/security/t032-checkout.test.ts and
     // tests/security/t032-checkout.itest.ts (docs/reviews/T-032-security.md).
     "src/app/api/v1/checkout/route.ts",

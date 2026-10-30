@@ -362,6 +362,8 @@ const TRANSITIONS = new Set([
 /** Files outside the orders module that may bind a transition, and which ones. */
 const ALLOWED: Record<string, readonly string[]> = {
   "src/modules/checkout/service.ts": ["completeOrderPayment", "failOrderPayment"],
+  // D-051: the maintenance endpoint runs the same payment timeout sweep as the timer.
+  "src/server/maintenance-jobs.ts": ["runPaymentTimeoutSweep"],
 };
 
 /** Repository-relative path an import specifier names, or undefined for a package. */
