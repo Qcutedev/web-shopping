@@ -624,8 +624,12 @@ describe("T-050 review: the admin repository and service", () => {
       expect(body, name).not.toBe("");
       expect(body.match(/await writeAudit\(tx, \{/g)?.length, name).toBe(1);
       expect(body, name).toMatch(/actorId: adminId,/);
-      expect(body, name).toMatch(/db\.\$transaction\(/);
+      // SEC-096 (b): every write goes through adminWrite, which is the one db.$transaction.
+      expect(body, name).toMatch(/adminWrite\(/);
     }
+    expect(repository).toMatch(
+      /function adminWrite<T>\([^)]*\)[^{]*\{\s*return retryTransientConflict\(\(\) =>\s*db\.\$transaction\(/,
+    );
   });
 
   it("SEC-092: a review hide or unhide locks the row, is guarded, uses the database clock, and never audits the comment", () => {
