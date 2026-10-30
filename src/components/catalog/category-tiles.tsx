@@ -2,39 +2,37 @@ import Link from "next/link";
 import { unstable_rethrow } from "next/navigation";
 import { connection } from "next/server";
 import { listAllActiveCategories } from "@/components/catalog/all-categories";
-import { ProductImage } from "@/components/catalog/product-image";
+import { CategoryIcon } from "@/components/catalog/category-icon";
 import { Skeleton } from "@/components/ui/skeleton";
 import { th } from "@/i18n/th";
 import { categoryHref } from "@/lib/routes";
-import { listProducts } from "@/modules/catalog";
-import type { CategoryDto, ImageRef } from "@/modules/catalog/schema";
+import type { CategoryDto } from "@/modules/catalog/schema";
 
-const MAX_TILES = 8;
+const MAX_TILES = 12;
 const TILE_LIST = "grid grid-cols-[repeat(auto-fill,minmax(6.5rem,1fr))] gap-3";
 
-export interface CategoryTile {
-  category: CategoryDto;
-  image: ImageRef | null;
-}
-
-/** Category cards: the picture of the category's newest product over its name. */
-export function CategoryTilesView({ tiles }: { tiles: readonly CategoryTile[] }) {
-  if (tiles.length === 0) return null;
+/** Category cards: a line icon on a tinted disc over the category's name. */
+export function CategoryTilesView({ categories }: { categories: readonly CategoryDto[] }) {
+  if (categories.length === 0) return null;
   return (
     <nav aria-label={th.catalog.categories.label}>
       <ul className={TILE_LIST}>
-        {tiles.map(({ category, image }) => (
+        {categories.map((category, i) => (
           <li key={category.id}>
             <Link
               href={categoryHref(category.slug)}
               className="group focus-ring flex flex-col items-center gap-2 rounded-lg text-center"
             >
-              <ProductImage
-                image={image}
-                alt=""
-                sizes="(min-width: 1024px) 12vw, 25vw"
-                className="transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-md"
-              />
+              <span
+                aria-hidden="true"
+                data-tone={i % 5}
+                className="category-disc flex aspect-square w-full items-center justify-center rounded-lg transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-md"
+              >
+                <CategoryIcon
+                  name={category.name}
+                  className="size-10 transition-transform duration-300 group-hover:scale-110"
+                />
+              </span>
               <span className="type-label text-foreground line-clamp-2 group-hover:underline">
                 {category.name}
               </span>
@@ -59,10 +57,7 @@ export function CategoryTilesSkeleton() {
   );
 }
 
-/**
- * Server Component. Categories are navigation: if they fail to load, nothing is shown. A category
- * whose newest product cannot be read keeps its card without a picture.
- */
+/** Server Component. Categories are navigation: if they fail to load, nothing is shown. */
 export async function CategoryTiles() {
   await connection();
   let categories: CategoryDto[];
@@ -72,21 +67,5 @@ export async function CategoryTiles() {
     unstable_rethrow(error);
     return null;
   }
-  const tiles = await Promise.all(
-    categories.map(async (category): Promise<CategoryTile> => {
-      try {
-        const page = await listProducts({
-          page: 1,
-          pageSize: 1,
-          sort: "newest",
-          category: category.slug,
-        });
-        return { category, image: page.items[0]?.image ?? null };
-      } catch (error) {
-        unstable_rethrow(error);
-        return { category, image: null };
-      }
-    }),
-  );
-  return <CategoryTilesView tiles={tiles} />;
+  return <CategoryTilesView categories={categories} />;
 }

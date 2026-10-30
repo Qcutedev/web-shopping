@@ -76,7 +76,9 @@ export function HeroCarousel({
     return () => query.removeEventListener("change", sync);
   }, []);
 
-  const running = playing && !reducedMotion && !hovering && count > 1;
+  // Autoplay also runs for visitors who asked for reduced motion (the slide change is then an
+  // instant swap); the pause button stays available for them (WCAG 2.2.2).
+  const running = playing && !hovering && count > 1;
   useEffect(() => {
     if (!running) return;
     const timer = window.setInterval(() => setIndex((i) => (i + 1) % count), AUTOPLAY_MS);
@@ -219,6 +221,18 @@ export function HeroCarousel({
         })}
       </div>
 
+      {count > 1 ? (
+        <span
+          key={index}
+          aria-hidden="true"
+          className="hero-progress"
+          style={{
+            animationDuration: `${AUTOPLAY_MS}ms`,
+            animationPlayState: running ? "running" : "paused",
+          }}
+        />
+      ) : null}
+
       <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-3 px-4 pb-4 md:px-8">
         <div className="flex items-center gap-1">
           {slides.map((slide, i) => (
@@ -256,19 +270,17 @@ export function HeroCarousel({
           >
             <ChevronRightIcon />
           </button>
-          {reducedMotion ? null : (
-            <button
-              type="button"
-              aria-label={playing ? labels.pause : labels.play}
-              aria-pressed={!playing}
-              onClick={() => setPlaying((value) => !value)}
-              className={ROUND_BUTTON}
-            >
-              <svg viewBox="0 0 20 20" className="size-5" fill="currentColor" aria-hidden="true">
-                {playing ? <path d="M6 4h3v12H6zM11 4h3v12h-3z" /> : <path d="M6 4l10 6-10 6z" />}
-              </svg>
-            </button>
-          )}
+          <button
+            type="button"
+            aria-label={playing ? labels.pause : labels.play}
+            aria-pressed={!playing}
+            onClick={() => setPlaying((value) => !value)}
+            className={ROUND_BUTTON}
+          >
+            <svg viewBox="0 0 20 20" className="size-5" fill="currentColor" aria-hidden="true">
+              {playing ? <path d="M6 4h3v12H6zM11 4h3v12h-3z" /> : <path d="M6 4l10 6-10 6z" />}
+            </svg>
+          </button>
         </div>
       </div>
     </section>

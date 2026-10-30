@@ -549,3 +549,53 @@
     transform: rotate(360deg);
   }
 }
+
+/* Category cards on the home page: a line icon on a tinted disc. */
+.category-disc {
+  color: var(--primary-active);
+  background: var(--placeholder-1);
+}
+.category-disc[data-tone="1"] {
+  background: var(--placeholder-2);
+}
+.category-disc[data-tone="2"] {
+  background: var(--placeholder-3);
+}
+.category-disc[data-tone="3"] {
+  background: var(--placeholder-4);
+}
+.category-disc[data-tone="4"] {
+  background: var(--placeholder-5);
+}
+
+/* Autoplay progress line along the bottom of the poster; restarts with every slide. */
+.hero-progress {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 3px;
+  transform-origin: left;
+  background: var(--primary);
+  animation: hero-progress linear both;
+}
+@keyframes hero-progress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.hero-slide[data-active="true"] .hero-stage {
+  animation: hero-stage-in 900ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+@keyframes hero-stage-in {
+  from {
+    opacity: 0;
+    transform: translateX(48px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}

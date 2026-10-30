@@ -99,7 +99,7 @@ describe("seed runs twice cleanly", () => {
     const run = await runSeed();
     expect(run.exitCode).toBe(EXIT.ok);
     expect(run.output).toContain("users 3 created, 0 already present");
-    expect(run.output).toContain("products 20 created, 0 already present");
+    expect(run.output).toContain("products 30 created, 0 already present");
     expectNoPersonalData(run.output);
 
     const users = await db.user.findMany({
@@ -153,12 +153,12 @@ describe("seed runs twice cleanly", () => {
     for (const table of [
       "users 0 created, 3",
       "addresses 0 created, 1",
-      "categories 0 created, 5",
+      "categories 0 created, 10",
     ]) {
       expect(run.output).toContain(table);
     }
     expect(run.output).toContain("stores 0 created, 2 already present");
-    expect(run.output).toContain("products 0 created, 20 already present");
+    expect(run.output).toContain("products 0 created, 30 already present");
     expect(diffSnapshots(before, await snapshotDatabase())).toEqual([]);
   });
 
@@ -169,7 +169,7 @@ describe("seed runs twice cleanly", () => {
     const before = await snapshotDatabase();
     const run = await runSeed();
     expect(run.exitCode).toBe(EXIT.ok);
-    expect(run.output).toContain("products 0 created, 20 already present");
+    expect(run.output).toContain("products 0 created, 30 already present");
     expect(diffSnapshots(before, await snapshotDatabase())).toEqual([]);
   });
 

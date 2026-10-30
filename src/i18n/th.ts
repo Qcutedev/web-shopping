@@ -63,16 +63,6 @@ export const th = {
       myOrders: "คำสั่งซื้อของฉัน",
       cart: "ตะกร้าสินค้า",
     },
-    // proposal: the bar above the header. Every line is true of the system (payment and shipping are
-    // simulated, REQ notices), none is a promotion.
-    announcement: {
-      label: "ประกาศ",
-      items: [
-        "สินค้าจากหลายร้านค้า รวมไว้ในที่เดียว",
-        "ระบบชำระเงินจำลอง ไม่มีการเก็บเงินจริง",
-        "การจัดส่งเป็นการจำลอง ไม่มีพัสดุจริง",
-      ],
-    },
   },
   // Not-found page (CR-67). Proposal: wording written by the frontend agent, not yet approved.
   notFound: {

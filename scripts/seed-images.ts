@@ -43,6 +43,16 @@ const PHOTOS: Record<string, string> = {
   "SMP-LNC-001": "kitchen-accessories/lunch-box",
   "SMP-COF-001": "groceries/nescafe-coffee",
   "SMP-HNY-001": "groceries/honey-jar",
+  "SMP-BTY-LIP": "beauty/red-lipstick",
+  "SMP-BTY-MSC": "beauty/essence-mascara-lash-princess",
+  "SMP-SPT-BSK": "sports-accessories/basketball",
+  "SMP-SPT-GLV": "sports-accessories/baseball-glove",
+  "SMP-ACC-SUN": "sunglasses/black-sun-glasses",
+  "SMP-ACC-EAR": "womens-jewellery/green-crystal-earring",
+  "SMP-CMP-LNV": "laptops/lenovo-yoga-920",
+  "SMP-CMP-DEL": "laptops/new-dell-xps-13-9300-laptop",
+  "SMP-PHN-IP6": "smartphones/iphone-6",
+  "SMP-PHN-TAB": "tablets/samsung-galaxy-tab-white",
 };
 
 /** The photo as a square JPEG on white, the whole product kept in view. */
