@@ -12,7 +12,7 @@ Done as reviews: the full code review (T-061, `reviews/T-061-code-review.md`) an
 
 ## Resume here
 
-NEXT: no open order. Owner to look at the home page (`pnpm dev`, run `pnpm db:seed` and `pnpm db:seed-images` for sample products) and say what to change.
+NEXT: no open order. Brand is now QUBIX with the logo `public/brand/qubix-logo.png` (header, footer; owner order 2026-10-31); REQ-N-12 and Q6 are answered. Owner to look at the home page (`pnpm dev`, run `pnpm db:seed` and `pnpm db:seed-images` for sample products) and say what to change.
 
 2026-10-31 session 144: poster dots and arrows now sit in the same 90rem column as the poster text (`hero-carousel.tsx`); format and typecheck pass, no browser check. Owner saw no poster effects on desktop: `globals.css` turns animations off under `prefers-reduced-motion`, so the Windows "Animation effects" setting is the likely cause (not confirmed). Owner chose to override it for the poster only: `.hero-motion` on the carousel is excluded from the reduced-motion rule in `globals.css`, and the mouse-follow no longer checks the setting. The rest of the site still obeys it. Lint and typecheck pass; no browser check.
 

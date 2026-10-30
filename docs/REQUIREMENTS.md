@@ -230,7 +230,7 @@ Confirmed by the owner on 2026-10-11, see [DECISIONS.md](DECISIONS.md) D-017. Th
 | Q3 | Commission rate | 5 percent, recorded only, nothing deducted | Confirmed by owner 2026-10-11, see D-017 | BR-13, REQ-A-09 |
 | Q4 | Can customers cancel their own orders? | No in the MVP; seller or admin only | Confirmed by owner 2026-10-11, see D-017 | Fulfilment status, REQ-C-13 |
 | Q5 | Guest cart before login | No guest cart; login required to add to cart | Confirmed by owner 2026-10-11, see D-017 | Roles, REQ-C-10 |
-| Q6 | Marketplace name and logo | Placeholder name "ชื่อแบรนด์" is used (Q18); the real name and logo are to be provided by the owner. Use of a placeholder in one replaceable place is confirmed (D-017); the real name and logo themselves remain outstanding | Partly open | REQ-N-12 |
+| Q6 | Marketplace name and logo | Placeholder name "ชื่อแบรนด์" is used (Q18); the real name and logo are to be provided by the owner. Use of a placeholder in one replaceable place is confirmed (D-017); the real name and logo themselves remain outstanding | Answered 2026-10-31: name QUBIX, logo `public/brand/qubix-logo.png` | REQ-N-12 |
 
 Answered by the owner on 2026-10-11, see [DECISIONS.md](DECISIONS.md) D-025. These are rules, not defaults. The "Owner question" column gives the id used in D-025 and [STATUS.md](STATUS.md).
 

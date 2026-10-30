@@ -1,8 +1,8 @@
 // All customer-facing Thai strings live here (CLAUDE.md, Language).
 export const th = {
   site: {
-    // Placeholder until the owner provides the marketplace name (D-017, Q6).
-    name: "ชื่อแบรนด์",
+    // Marketplace name provided by the owner (D-017, Q6).
+    name: "QUBIX",
     description: "มาร์เก็ตเพลสสำหรับร้านค้าไทย",
   },
   scaffold: {

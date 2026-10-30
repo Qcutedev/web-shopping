@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { NoticeLabel } from "@/components/ui/notice-label";
@@ -54,23 +55,14 @@ export function SiteFooter() {
       <div className="container-page grid gap-8 py-10 md:grid-cols-[1.6fr_1fr_1fr]">
         <div className="flex max-w-md flex-col gap-2">
           <p className="type-panel-title text-foreground flex items-center gap-2">
-            <span
-              aria-hidden="true"
-              className="bg-primary text-on-primary flex size-9 items-center justify-center rounded-md"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.9}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="size-5"
-              >
-                <path d="M5 8h14l-1 12H6L5 8z" />
-                <path d="M9 8V7a3 3 0 016 0v1" />
-              </svg>
-            </span>
+            <Image
+              src="/brand/qubix-logo.png"
+              alt=""
+              width={36}
+              height={36}
+              className="size-9 rounded-md"
+              unoptimized
+            />
             {th.site.name}
           </p>
           <p className="type-small text-foreground-secondary">{th.site.description}</p>
