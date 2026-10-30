@@ -106,7 +106,7 @@ export function HeroCarousel({
       ref={rootRef}
       aria-roledescription="carousel"
       aria-label={labels.region}
-      className="text-foreground bg-surface-muted @container relative h-full overflow-hidden rounded-xl"
+      className="text-foreground bg-surface-muted @container relative h-full overflow-hidden"
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={() => setHovering(false)}
       onPointerMove={follow}
@@ -134,90 +134,92 @@ export function HeroCarousel({
               inert={!active}
               data-active={active}
               data-tone={i % 3}
-              className="hero-slide col-start-1 row-start-1 grid overflow-hidden @xl:grid-cols-2"
+              className="hero-slide col-start-1 row-start-1 overflow-hidden"
             >
-              <div className="relative z-10 flex flex-col items-start justify-center gap-4 px-6 pt-10 pb-4 @xl:px-14 @xl:py-16 @xl:pb-20">
-                <p className="hero-rise type-label bg-surface text-primary-active border-border rounded-full border px-3 py-1">
-                  {slide.kicker}
-                </p>
-                <h2
-                  className="hero-rise type-hero @max-4xl:text-4xl"
-                  style={{ animationDelay: "80ms" }}
-                >
-                  {slide.title}
-                </h2>
-                <p
-                  className="hero-rise text-foreground-secondary max-w-md text-base"
-                  style={{ animationDelay: "160ms" }}
-                >
-                  {slide.description}
-                </p>
-                <Link
-                  href={slide.href}
-                  className="hero-rise focus-ring on-ink bg-ink text-on-ink type-label hover:bg-ink-hover inline-flex min-h-11 items-center gap-1.5 rounded-full px-6 transition-transform duration-150 hover:scale-[1.04]"
-                  style={{ animationDelay: "240ms" }}
-                >
-                  {slide.cta}
-                  <ChevronRightIcon />
-                </Link>
-              </div>
-
-              <div
-                className="hero-stage relative min-h-72 @xl:min-h-[26rem]"
-                data-presenter={presenterSrc !== null}
-              >
-                <span aria-hidden="true" className="hero-blob" />
-                <span aria-hidden="true" className="hero-ring" />
-                <span aria-hidden="true" className="hero-ring hero-ring-b" />
-                {presenterSrc === null ? null : (
-                  <div className="hero-presenter">
-                    <Image
-                      src={presenterSrc}
-                      alt={labels.presenterAlt}
-                      fill
-                      sizes="(min-width: 768px) 30vw, 60vw"
-                      priority={i === 0}
-                      className="object-contain object-bottom"
-                    />
-                  </div>
-                )}
-                {slide.products.slice(0, 3).map((product, k) => (
-                  <div
-                    key={product.href}
-                    className={`hero-layer hero-layer-${k}`}
-                    style={{ "--depth": 10 + k * 8 } as CSSProperties}
+              <div className="mx-auto grid max-w-[90rem] @xl:grid-cols-2">
+                <div className="relative z-10 flex flex-col items-start justify-center gap-4 px-6 pt-10 pb-4 @xl:px-14 @xl:py-16 @xl:pb-20">
+                  <p className="hero-rise type-label bg-surface text-primary-active border-border rounded-full border px-3 py-1">
+                    {slide.kicker}
+                  </p>
+                  <h2
+                    className="hero-rise type-hero @max-4xl:text-4xl"
+                    style={{ animationDelay: "80ms" }}
                   >
-                    <div className="hero-pop" style={{ animationDelay: `${250 + k * 150}ms` }}>
-                      <Link
-                        href={product.href}
-                        aria-label={product.title}
-                        className={cn(
-                          "hero-product focus-ring bg-surface relative block overflow-hidden rounded-lg p-1.5",
-                          `hero-bob-${k}`,
-                        )}
-                      >
-                        <span className="bg-surface-muted relative block aspect-square overflow-hidden rounded-md">
-                          <Image
-                            src={product.imageUrl}
-                            alt=""
-                            fill
-                            sizes="160px"
-                            unoptimized
-                            priority={i === 0}
-                            className="object-cover"
-                          />
-                        </span>
-                      </Link>
-                    </div>
-                  </div>
-                ))}
-                <span
-                  aria-hidden="true"
-                  className="hero-badge bg-primary text-on-primary type-label"
+                    {slide.title}
+                  </h2>
+                  <p
+                    className="hero-rise text-foreground-secondary max-w-md text-base"
+                    style={{ animationDelay: "160ms" }}
+                  >
+                    {slide.description}
+                  </p>
+                  <Link
+                    href={slide.href}
+                    className="hero-rise focus-ring on-ink bg-ink text-on-ink type-label hover:bg-ink-hover inline-flex min-h-11 items-center gap-1.5 rounded-full px-6 transition-transform duration-150 hover:scale-[1.04]"
+                    style={{ animationDelay: "240ms" }}
+                  >
+                    {slide.cta}
+                    <ChevronRightIcon />
+                  </Link>
+                </div>
+
+                <div
+                  className="hero-stage relative min-h-72 @xl:min-h-[26rem]"
+                  data-presenter={presenterSrc !== null}
                 >
-                  {labels.badge}
-                </span>
-                <span aria-hidden="true" className="hero-shine" />
+                  <span aria-hidden="true" className="hero-blob" />
+                  <span aria-hidden="true" className="hero-ring" />
+                  <span aria-hidden="true" className="hero-ring hero-ring-b" />
+                  {presenterSrc === null ? null : (
+                    <div className="hero-presenter">
+                      <Image
+                        src={presenterSrc}
+                        alt={labels.presenterAlt}
+                        fill
+                        sizes="(min-width: 768px) 30vw, 60vw"
+                        priority={i === 0}
+                        className="object-contain object-bottom"
+                      />
+                    </div>
+                  )}
+                  {slide.products.slice(0, 3).map((product, k) => (
+                    <div
+                      key={product.href}
+                      className={`hero-layer hero-layer-${k}`}
+                      style={{ "--depth": 10 + k * 8 } as CSSProperties}
+                    >
+                      <div className="hero-pop" style={{ animationDelay: `${250 + k * 150}ms` }}>
+                        <Link
+                          href={product.href}
+                          aria-label={product.title}
+                          className={cn(
+                            "hero-product focus-ring bg-surface relative block overflow-hidden rounded-lg p-1.5",
+                            `hero-bob-${k}`,
+                          )}
+                        >
+                          <span className="bg-surface-muted relative block aspect-square overflow-hidden rounded-md">
+                            <Image
+                              src={product.imageUrl}
+                              alt=""
+                              fill
+                              sizes="160px"
+                              unoptimized
+                              priority={i === 0}
+                              className="object-cover"
+                            />
+                          </span>
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                  <span
+                    aria-hidden="true"
+                    className="hero-badge bg-primary text-on-primary type-label"
+                  >
+                    {labels.badge}
+                  </span>
+                  <span aria-hidden="true" className="hero-shine" />
+                </div>
               </div>
             </div>
           );

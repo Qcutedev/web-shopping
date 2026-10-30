@@ -25,6 +25,14 @@ export const th = {
       },
       // proposal (session 137): nav link shown from 1024 px
       home: "หน้าแรก",
+      // proposal (session 143): hamburger button and its category panel
+      menu: {
+        open: "เปิดเมนูหมวดหมู่",
+        close: "ปิดเมนู",
+        categories: "หมวดหมู่สินค้า",
+        cheapest: "ราคาประหยัด",
+        cart: "ตะกร้าสินค้า",
+      },
       // approved
       openStore: "เปิดร้านค้า",
       signIn: "เข้าสู่ระบบ",
@@ -400,13 +408,6 @@ export const th = {
       newBadge: "ใหม่",
       scrollPrevious: "เลื่อนไปทางซ้าย",
       scrollNext: "เลื่อนไปทางขวา",
-      sideBanners: {
-        label: "ข้อเสนอแนะนำ",
-        items: [
-          { title: "สินค้ามาใหม่", description: "ดูสินค้าล่าสุดจากทุกร้าน", cta: "ดูเลย" },
-          { title: "เปิดร้านของคุณ", description: "สมัครเป็นผู้ขายและลงสินค้าเอง", cta: "สมัคร" },
-        ],
-      },
       promoBanners: {
         label: "ทางลัดเลือกซื้อ",
         items: [

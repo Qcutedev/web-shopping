@@ -12,9 +12,11 @@ export const MAIN_CONTENT_ID = "main-content";
 export function AppShell({
   children,
   headerSession,
+  headerMenu,
 }: {
   children: ReactNode;
   headerSession?: ReactNode;
+  headerMenu?: ReactNode;
 }) {
   return (
     <>
@@ -24,7 +26,7 @@ export function AppShell({
       >
         {th.shell.skipToContent}
       </a>
-      <SiteHeader session={headerSession} />
+      <SiteHeader session={headerSession} menu={headerMenu} />
       {/* tabIndex -1 lets the skip link move focus here, not only scroll. The element is not
           interactive, so the focus outline is removed. */}
       <main id={MAIN_CONTENT_ID} tabIndex={-1} className="flex flex-1 flex-col outline-none">

@@ -1,6 +1,7 @@
 import { type ReactNode, Suspense } from "react";
 import { AppShell } from "./app-shell";
 import { CartLink } from "./cart-link";
+import { HeaderCategoryMenu, HeaderCategoryMenuSkeleton } from "./header-category-menu";
 import { HeaderSession } from "./header-session";
 
 /**
@@ -11,6 +12,11 @@ import { HeaderSession } from "./header-session";
 export function StorefrontShell({ children }: { children: ReactNode }) {
   return (
     <AppShell
+      headerMenu={
+        <Suspense fallback={<HeaderCategoryMenuSkeleton />}>
+          <HeaderCategoryMenu />
+        </Suspense>
+      }
       headerSession={
         <Suspense fallback={<CartLink />}>
           <HeaderSession />

@@ -50,19 +50,6 @@ function BannerList({
   );
 }
 
-/** Two small banners beside the poster. Each is a link; none claims more than the link does. */
-export function SideBanners({ targets }: { targets: readonly BannerTarget[] }) {
-  const { sideBanners } = th.catalog.home;
-  return (
-    <BannerList
-      label={sideBanners.label}
-      className="grid h-full gap-3 sm:grid-cols-2 xl:grid-cols-1 xl:grid-rows-2"
-      items={sideBanners.items}
-      targets={targets}
-    />
-  );
-}
-
 /** A row of small banners under the poster. */
 export function PromoBanners({ targets }: { targets: readonly BannerTarget[] }) {
   const { promoBanners } = th.catalog.home;

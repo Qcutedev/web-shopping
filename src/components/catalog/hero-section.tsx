@@ -66,5 +66,5 @@ export async function HeroSection() {
 }
 
 export function HeroSkeleton() {
-  return <Skeleton aria-hidden="true" className="h-96 w-full rounded-xl md:h-[30rem]" />;
+  return <Skeleton aria-hidden="true" className="h-96 w-full md:h-[30rem]" />;
 }

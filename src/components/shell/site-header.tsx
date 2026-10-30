@@ -18,12 +18,20 @@ import { NAV_LINK } from "./nav-link";
  * menu, then the cart link). The layout passes it behind Suspense; the default is the plain cart
  * link, which is also the loading state. Not in this task: the second row of category links.
  */
-export function SiteHeader({ session = <CartLink /> }: { session?: ReactNode }) {
+export function SiteHeader({
+  session = <CartLink />,
+  menu = null,
+}: {
+  session?: ReactNode;
+  /** The hamburger button and its category panel, placed before the brand. */
+  menu?: ReactNode;
+}) {
   return (
     <header className="border-border bg-background/95 sticky top-0 z-40 border-b backdrop-blur">
       <div className="container-page flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
         {/* DOM order is the visual order below 768 px: brand, nav, then the search row. From
             768 px the search sits between brand and nav through `md:order-*`. */}
+        {menu === null ? null : <div className="order-1 -ml-2">{menu}</div>}
         <Link
           href={ROUTES.home}
           className="type-panel-title text-foreground focus-ring order-1 inline-flex min-h-11 items-center gap-2 rounded-sm"

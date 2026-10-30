@@ -744,3 +744,18 @@
 .scroll-row::-webkit-scrollbar {
   display: none;
 }
+
+/* Category panel opened from the header hamburger. */
+@keyframes drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .drawer-panel[open] {
+    animation: drawer-in 220ms ease-out;
+  }
+}
