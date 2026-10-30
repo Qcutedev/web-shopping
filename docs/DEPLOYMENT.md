@@ -199,6 +199,8 @@ Built in T-011 and exercised on the developer machine on 2026-10-12. `src/server
 | `LOG_LEVEL` | `debug`, `info`, `warn`, or `error`. Lines below the level are not written, except lines written through `security()`, which the level never filters (SR-04). See "What `LOG_LEVEL` reaches" below | `info` | no |
 | `UPLOAD_DIR` | An absolute directory path (T-041): where the local disk upload adapter keeps files. Refused when relative or blank, in every `NODE_ENV`. See "Uploaded files" below | Outside production: no value, and the upload and file endpoints answer `500` until it or `BLOB_READ_WRITE_TOKEN` is set. Production: refused unless `BLOB_READ_WRITE_TOKEN` is set | no |
 | `BLOB_READ_WRITE_TOKEN` | A Vercel Blob read-write token, `vercel_blob_rw_<store id>_<secret>` (store id letters and digits; secret printable ASCII without blanks). Selects the Vercel Blob upload adapter with private objects (D-051). Refused together with `UPLOAD_DIR`, in every `NODE_ENV`. See "Deploying to Vercel" below | The local disk adapter (`UPLOAD_DIR`) is used | yes |
+| `MAINTENANCE_VIA_HTTP` | Exactly `true` or `false` (`1`, `yes`, `TRUE` are refused). `true` means the scheduled work is triggered through `POST /api/v1/internal/maintenance` instead of the in-process timers of `src/instrumentation.ts` (D-051). See "Scheduled work" below | `false` | no |
+| `CRON_SECRET` | 32 to 256 printable ASCII characters without blanks; must differ from `AUTH_SECRET`. The bearer secret of the maintenance endpoint. Unset means the endpoint refuses every request | No value | yes |
 
 How the rules are applied:
 
@@ -218,6 +220,7 @@ Refusals that apply only when `NODE_ENV=production`:
 | `TRUSTED_PROXY_HOPS` | It is not set. `0` is accepted, but it must be written | SR-01: no silent default |
 | `UPLOAD_DIR` | Neither it nor `BLOB_READ_WRITE_TOKEN` is set. No directory is guessed: a default could be one that is not persistent | T-041, D-051 |
 | `BLOB_READ_WRITE_TOKEN` | It contains `not_a_secret` | SEC-009, D-051 |
+| `CRON_SECRET` | `MAINTENANCE_VIA_HTTP=true` and it is not set; or, when set, it contains `not_a_secret` or fails the weak-secret rule of `AUTH_SECRET` below | D-051, SEC-009, SEC-044 |
 | `VERCEL_BLOB_API_URL`, `NEXT_PUBLIC_VERCEL_BLOB_API_URL`, `VERCEL_BLOB_PROXY_THROUGH_ALTERNATIVE_API`, `NEXT_PUBLIC_VERCEL_BLOB_PROXY_THROUGH_ALTERNATIVE_API`, `VERCEL_BLOB_API_VERSION_OVERRIDE`, `NEXT_PUBLIC_VERCEL_BLOB_API_VERSION_OVERRIDE` | It is set at all. The Blob library reads them by itself; the first two send every Blob API request, with the token in it, to another address | D-051 (`BLOB_LIBRARY_VARIABLES` in `src/server/env.ts`) |
 
 The weak-secret rule for `AUTH_SECRET` (SEC-044, SEC-047, SEC-049). A value that is at least 32 characters long and does not contain `not_a_secret` is still refused when `NODE_ENV=production` if any of these holds:
