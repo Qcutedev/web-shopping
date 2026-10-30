@@ -735,3 +735,12 @@
     transform: none;
   }
 }
+
+/* Sideways product rows (home page): no visible scrollbar, the arrows and touch do the work. */
+.scroll-row {
+  scrollbar-width: none;
+  scroll-padding-inline: 0.25rem;
+}
+.scroll-row::-webkit-scrollbar {
+  display: none;
+}

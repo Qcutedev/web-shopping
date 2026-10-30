@@ -43,6 +43,8 @@ describe("toProductListItemDto", () => {
     priceSatang: 25_900,
     stock: 0,
     isSample: true,
+    createdAt: new Date("2026-10-01T00:00:00.000Z"),
+    reviews: { count: 2, ratingSum: 9 },
     store,
     images: [{ upload: { storageKey: "k1" } }],
   };
@@ -57,6 +59,8 @@ describe("toProductListItemDto", () => {
       image: { key: "k1", url: "/api/files/k1" },
       soldOut: true,
       isSample: true,
+      createdAt: "2026-10-01T00:00:00.000Z",
+      reviewSummary: { averageRating: 4.5, count: 2 },
       store,
     });
     expect(Number.isInteger(dto.priceSatang)).toBe(true);

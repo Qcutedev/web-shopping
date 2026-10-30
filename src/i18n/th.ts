@@ -68,6 +68,9 @@ export const th = {
       signUp: "สมัครสมาชิก",
       myOrders: "คำสั่งซื้อของฉัน",
       cart: "ตะกร้าสินค้า",
+      // proposal (session 142): call to open a store, above the footer columns.
+      sellerCtaTitle: "อยากขายสินค้าของคุณเอง",
+      sellerCtaDescription: "สมัครเป็นผู้ขาย ลงสินค้า และจัดการคำสั่งซื้อผ่านหน้าร้านของคุณ",
     },
   },
   // Not-found page (CR-67). Proposal: wording written by the frontend agent, not yet approved.
@@ -391,6 +394,33 @@ export const th = {
       emptyDescription: "กรุณากลับมาดูใหม่อีกครั้งภายหลัง",
       // proposal: the "all" link beside a section title
       viewAllArrow: "ดูทั้งหมด",
+      // proposals: home page density (session 142). Every claim is true of the system.
+      menuTitle: "หมวดหมู่ทั้งหมด",
+      menuAllProducts: "สินค้าทั้งหมด",
+      newBadge: "ใหม่",
+      scrollPrevious: "เลื่อนไปทางซ้าย",
+      scrollNext: "เลื่อนไปทางขวา",
+      sideBanners: {
+        label: "ข้อเสนอแนะนำ",
+        items: [
+          { title: "สินค้ามาใหม่", description: "ดูสินค้าล่าสุดจากทุกร้าน", cta: "ดูเลย" },
+          { title: "เปิดร้านของคุณ", description: "สมัครเป็นผู้ขายและลงสินค้าเอง", cta: "สมัคร" },
+        ],
+      },
+      promoBanners: {
+        label: "ทางลัดเลือกซื้อ",
+        items: [
+          { title: "ราคาประหยัด", description: "เรียงสินค้าจากราคาต่ำสุด", cta: "ดูสินค้า" },
+          { title: "ค้นหาสินค้า", description: "พิมพ์ชื่อสินค้าที่ต้องการ", cta: "ค้นหา" },
+          { title: "ร้านค้าแนะนำ", description: "ดูร้านค้าที่มีสินค้าพร้อมขาย", cta: "ดูร้านค้า" },
+        ],
+      },
+      stores: {
+        title: "ร้านค้าแนะนำ",
+        label: "รายการร้านค้า",
+        // {count} is the number of products on sale.
+        productCount: "{count} สินค้า",
+      },
       highlights: {
         label: "จุดเด่นของเว็บไซต์",
         items: [

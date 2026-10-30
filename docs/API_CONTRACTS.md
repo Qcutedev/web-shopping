@@ -499,6 +499,8 @@ Query of `GET /products` (and of the store's product list):
 
 The earlier names `minPrice` and `maxPrice` no longer exist.
 
+`productListItem` carries `createdAt` (UTC, section 1.6) and `reviewSummary` (the `reviewSummary` shape of the detail, or `null` when no visible review exists; hidden reviews do not count). Added 2026-10-30 for the home page product card. The home page also reads the service function `listFeaturedStores` (stores with at least one visible product); it is not an endpoint.
+
 Shapes. The block below is a catalogue of the six shapes keyed by name, not one response; each endpoint returns the matching shape inside the envelope of [section 2.1](#21-success-envelope):
 
 ```json
@@ -513,6 +515,8 @@ Shapes. The block below is a catalogue of the six shapes keyed by name, not one 
     "image": { "key": "...", "url": "..." },
     "soldOut": false,
     "isSample": false,
+    "createdAt": "2026-10-01T00:00:00.000Z",
+    "reviewSummary": { "averageRating": 4.5, "count": 2 },
     "store": { "name": "...", "slug": "...", "isSample": false }
   },
 

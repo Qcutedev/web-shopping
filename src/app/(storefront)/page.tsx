@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { Suspense } from "react";
+import { CategoryMenu, CategoryMenuSkeleton } from "@/components/catalog/category-menu";
 import { CategoryTiles, CategoryTilesSkeleton } from "@/components/catalog/category-tiles";
+import { FeaturedStores } from "@/components/catalog/featured-stores";
+import { PromoBanners, SideBanners } from "@/components/catalog/home-banners";
 import { HeroSection, HeroSkeleton } from "@/components/catalog/hero-section";
 import { CategoryShelves, CheapestShelf } from "@/components/catalog/product-shelf";
 import { Reveal } from "@/components/reveal";
@@ -22,10 +25,36 @@ const SEE_ALL =
 export default function HomePage() {
   return (
     <div className="container-page flex flex-col gap-10 py-6 md:py-8">
-      <Suspense fallback={<HeroSkeleton />}>
-        <HeroSection />
-      </Suspense>
-      <section aria-labelledby="home-categories" className="page-rise flex flex-col gap-4">
+      <div className="grid gap-4 lg:grid-cols-[15rem_minmax(0,1fr)] xl:grid-cols-[15rem_minmax(0,1fr)_16rem]">
+        <Suspense fallback={<CategoryMenuSkeleton />}>
+          <CategoryMenu />
+        </Suspense>
+        <Suspense fallback={<HeroSkeleton />}>
+          <HeroSection />
+        </Suspense>
+        <div className="lg:col-span-2 xl:col-span-1 xl:h-full">
+          <SideBanners
+            targets={[
+              { href: ROUTES.search, tone: 0 },
+              { href: ROUTES.openStore, tone: 3 },
+            ]}
+          />
+        </div>
+      </div>
+      <Reveal>
+        <HomeHighlights />
+      </Reveal>
+      <PromoBanners
+        targets={[
+          { href: `${ROUTES.search}?sort=price_asc`, tone: 1 },
+          { href: ROUTES.search, tone: 2 },
+          { href: "#home-stores", tone: 4 },
+        ]}
+      />
+      <section
+        aria-labelledby="home-categories"
+        className="page-rise flex flex-col gap-4 lg:hidden"
+      >
         <div className="flex items-center justify-between gap-3">
           <h2 id="home-categories" className="type-section-title">
             {th.catalog.home.categoriesTitle}
@@ -63,14 +92,14 @@ export default function HomePage() {
         </Suspense>
       </section>
       <Suspense fallback={null}>
+        <FeaturedStores />
+      </Suspense>
+      <Suspense fallback={null}>
         <CheapestShelf />
       </Suspense>
       <Suspense fallback={null}>
         <CategoryShelves />
       </Suspense>
-      <Reveal>
-        <HomeHighlights />
-      </Reveal>
     </div>
   );
 }

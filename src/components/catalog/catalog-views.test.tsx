@@ -29,6 +29,8 @@ function product(overrides: Partial<ProductListItemDto> = {}): ProductListItemDt
     image: null,
     soldOut: false,
     isSample: false,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    reviewSummary: null,
     store: { name: "ร้านตัวอย่าง", slug: "shop-a", isSample: false },
     ...overrides,
   };

@@ -253,6 +253,10 @@ export interface ProductListItemDto {
   image: ImageRef | null;
   soldOut: boolean;
   isSample: boolean;
+  /** ISO 8601 in UTC with `Z`. */
+  createdAt: string;
+  /** `null` when the product has no visible review. */
+  reviewSummary: ReviewSummaryDto | null;
   store: StoreSummaryDto;
 }
 
@@ -283,6 +287,15 @@ export interface StoreDto {
   slug: string;
   description: string | null;
   logo: ImageRef | null;
+  isSample: boolean;
+}
+
+/** A store for the home page row: name, picture, and how many products are on sale. */
+export interface FeaturedStoreDto {
+  name: string;
+  slug: string;
+  logo: ImageRef | null;
+  productCount: number;
   isSample: boolean;
 }
 

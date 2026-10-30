@@ -110,6 +110,7 @@ const PRODUCT_LIST_SELECT = {
   priceSatang: true,
   stock: true,
   isSample: true,
+  createdAt: true,
   store: { select: STORE_SUMMARY_SELECT },
   images: {
     select: IMAGE_SELECT,
@@ -118,7 +119,9 @@ const PRODUCT_LIST_SELECT = {
   },
 } as const satisfies Prisma.ProductSelect;
 
-export type ProductListRow = Prisma.ProductGetPayload<{ select: typeof PRODUCT_LIST_SELECT }>;
+export type ProductListRow = Prisma.ProductGetPayload<{ select: typeof PRODUCT_LIST_SELECT }> & {
+  reviews: ReviewAggregate;
+};
 
 export interface ProductFilter {
   /** Plain text, matched case-insensitively anywhere in the title. */
@@ -170,14 +173,35 @@ export async function findVisibleProducts(
   const total = await db.product.count({ where });
   const skip = offsetOf(request);
   if (skip >= total) return { rows: [], total };
-  const rows = await db.product.findMany({
+  const found = await db.product.findMany({
     where,
     select: PRODUCT_LIST_SELECT,
     orderBy: PRODUCT_ORDER[sort],
     skip,
     take: request.pageSize,
   });
+  const aggregates = await reviewAggregates(found.map((row) => row.id));
+  const rows = found.map((row) => ({
+    ...row,
+    reviews: aggregates.get(row.id) ?? { count: 0, ratingSum: 0 },
+  }));
   return { rows, total };
+}
+
+/** Review figures of several products in one read. Hidden reviews do not count (SEC-092). */
+async function reviewAggregates(productIds: string[]): Promise<Map<string, ReviewAggregate>> {
+  const map = new Map<string, ReviewAggregate>();
+  if (productIds.length === 0) return map;
+  const groups = await db.review.groupBy({
+    by: ["productId"],
+    where: { productId: { in: productIds }, hiddenAt: null },
+    _count: { _all: true },
+    _sum: { rating: true },
+  });
+  for (const group of groups) {
+    map.set(group.productId, { count: group._count._all, ratingSum: group._sum.rating ?? 0 });
+  }
+  return map;
 }
 
 const PRODUCT_DETAIL_SELECT = {
@@ -301,4 +325,24 @@ export async function findPublicStoreIdBySlug(slug: string): Promise<string | nu
     select: { id: true },
   });
   return row?.id ?? null;
+}
+
+const FEATURED_STORE_SELECT = {
+  name: true,
+  slug: true,
+  isSample: true,
+  logoUpload: { select: { storageKey: true } },
+  _count: { select: { products: { where: VISIBLE_PRODUCT_WHERE } } },
+} as const satisfies Prisma.StoreSelect;
+
+export type FeaturedStoreRow = Prisma.StoreGetPayload<{ select: typeof FEATURED_STORE_SELECT }>;
+
+/** Public stores that have at least one visible product, the most recently opened first. */
+export async function findFeaturedStores(limit: number): Promise<FeaturedStoreRow[]> {
+  return db.store.findMany({
+    where: { AND: [PUBLIC_STORE_WHERE, { products: { some: VISIBLE_PRODUCT_WHERE } }] },
+    select: FEATURED_STORE_SELECT,
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: limit,
+  });
 }

@@ -104,6 +104,7 @@ const PRODUCT_ROW = {
   priceSatang: 25_900,
   stock: 4,
   isSample: false,
+  createdAt: new Date("2026-10-01T00:00:00.000Z"),
   sku: `${ROW_CANARY}-sku`,
   moderationStatus: `${ROW_CANARY}-moderation`,
   moderationNote: `${ROW_CANARY}-note`,
@@ -153,6 +154,9 @@ function defaultResponder(model: string, method: string): unknown {
   if (model === "product" && method === "findFirst") return PRODUCT_ROW;
   if (model === "review" && method === "aggregate") {
     return { _count: { _all: 2 }, _sum: { rating: 9 } };
+  }
+  if (model === "review" && method === "groupBy") {
+    return [{ productId: "prod-1", _count: { _all: 2 }, _sum: { rating: 9 } }];
   }
   if (model === "review" && method === "findMany") return [REVIEW_ROW];
   if (model === "store" && method === "findFirst") return STORE_ROW;
@@ -299,7 +303,14 @@ afterEach(() => {
 // Helpers over recorded calls
 // ---------------------------------------------------------------------------------------------
 
-const READ_METHODS = new Set(["findMany", "findFirst", "findUnique", "count", "aggregate"]);
+const READ_METHODS = new Set([
+  "findMany",
+  "findFirst",
+  "findUnique",
+  "count",
+  "aggregate",
+  "groupBy",
+]);
 
 /** The where of a call, which must be a plain object. */
 function whereOf(args: unknown): Record<string, unknown> {
@@ -415,7 +426,12 @@ describe("T-020 review: every catalog read asks for visible rows only and hands 
           // Only the id that the visible-product lookup returned, and only public reviews: a
           // review an admin hid is in neither the list, its total, nor the rating aggregate
           // (SEC-092, re-checked 2026-10-29, docs/reviews/SEC-092-SEC-072-recheck.md).
-          expect(where).toEqual({ productId: "prod-1", hiddenAt: null });
+          if (method === "groupBy") {
+            // The list's rating figures: only the ids of the rows just read, only public reviews.
+            expect(where).toEqual({ productId: { in: ["prod-1"] }, hiddenAt: null });
+          } else {
+            expect(where).toEqual({ productId: "prod-1", hiddenAt: null });
+          }
         } else {
           throw new Error(`unexpected model ${model}`);
         }

@@ -5,6 +5,7 @@ export {
   getCategory,
   getProduct,
   getStore,
+  listFeaturedStores,
   listCategories,
   listProductReviews,
   listProducts,

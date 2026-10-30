@@ -83,6 +83,8 @@ const item = (n: number, over: Partial<ProductListItemDto> = {}): ProductListIte
   image: null,
   soldOut: false,
   isSample: false,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  reviewSummary: null,
   store: { name: "ร้านชา", slug: "tea-shop", isSample: false },
   ...over,
 });
@@ -151,10 +153,10 @@ describe("home page", () => {
   it("shelves: lowest price and each category are requested and shown", async () => {
     catalog.listProducts.mockResolvedValue(pageOf([item(1)], 1));
     await renderPage(<HomePage />);
-    expect(catalog.listProducts).toHaveBeenCalledWith({ page: 1, pageSize: 4, sort: "price_asc" });
+    expect(catalog.listProducts).toHaveBeenCalledWith({ page: 1, pageSize: 10, sort: "price_asc" });
     expect(catalog.listProducts).toHaveBeenCalledWith({
       page: 1,
-      pageSize: 4,
+      pageSize: 10,
       sort: "newest",
       category: "tea",
     });

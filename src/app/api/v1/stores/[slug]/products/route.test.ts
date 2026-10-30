@@ -50,6 +50,8 @@ const ITEM: ProductListItemDto = {
   image: null,
   soldOut: true,
   isSample: true,
+  createdAt: "2026-10-01T00:00:00.000Z",
+  reviewSummary: null,
   store: { name: "ร้านตัวอย่าง", slug: "sample-store", isSample: true },
 };
 

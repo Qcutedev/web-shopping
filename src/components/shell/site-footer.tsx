@@ -37,6 +37,20 @@ export function SiteFooter() {
   const { footer, header } = th.shell;
   return (
     <footer className="border-border bg-surface-muted mt-14 border-t lg:mt-18">
+      <div className="container-page pt-8">
+        <div className="bg-primary-soft flex flex-col gap-3 rounded-xl p-5 sm:flex-row sm:items-center sm:justify-between md:p-6">
+          <div className="flex flex-col gap-1">
+            <p className="type-panel-title text-foreground">{footer.sellerCtaTitle}</p>
+            <p className="type-small text-foreground-secondary">{footer.sellerCtaDescription}</p>
+          </div>
+          <Link
+            href={ROUTES.openStore}
+            className="focus-ring on-ink bg-ink text-on-ink type-label hover:bg-ink-hover inline-flex min-h-11 items-center justify-center rounded-full px-6 transition-transform duration-150 hover:scale-[1.04]"
+          >
+            {header.openStore}
+          </Link>
+        </div>
+      </div>
       <div className="container-page grid gap-8 py-10 md:grid-cols-[1.6fr_1fr_1fr]">
         <div className="flex max-w-md flex-col gap-2">
           <p className="type-panel-title text-foreground flex items-center gap-2">

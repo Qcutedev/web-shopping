@@ -106,7 +106,7 @@ export function HeroCarousel({
       ref={rootRef}
       aria-roledescription="carousel"
       aria-label={labels.region}
-      className="text-foreground bg-surface-muted relative overflow-hidden rounded-xl"
+      className="text-foreground bg-surface-muted @container relative h-full overflow-hidden rounded-xl"
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={() => setHovering(false)}
       onPointerMove={follow}
@@ -134,13 +134,16 @@ export function HeroCarousel({
               inert={!active}
               data-active={active}
               data-tone={i % 3}
-              className="hero-slide col-start-1 row-start-1 grid overflow-hidden md:grid-cols-2"
+              className="hero-slide col-start-1 row-start-1 grid overflow-hidden @xl:grid-cols-2"
             >
-              <div className="relative z-10 flex flex-col items-start justify-center gap-4 px-6 pt-10 pb-4 md:px-14 md:py-16 md:pb-20">
+              <div className="relative z-10 flex flex-col items-start justify-center gap-4 px-6 pt-10 pb-4 @xl:px-14 @xl:py-16 @xl:pb-20">
                 <p className="hero-rise type-label bg-surface text-primary-active border-border rounded-full border px-3 py-1">
                   {slide.kicker}
                 </p>
-                <h2 className="hero-rise type-hero" style={{ animationDelay: "80ms" }}>
+                <h2
+                  className="hero-rise type-hero @max-4xl:text-4xl"
+                  style={{ animationDelay: "80ms" }}
+                >
                   {slide.title}
                 </h2>
                 <p
@@ -160,7 +163,7 @@ export function HeroCarousel({
               </div>
 
               <div
-                className="hero-stage relative min-h-72 md:min-h-[26rem]"
+                className="hero-stage relative min-h-72 @xl:min-h-[26rem]"
                 data-presenter={presenterSrc !== null}
               >
                 <span aria-hidden="true" className="hero-blob" />

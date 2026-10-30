@@ -84,6 +84,8 @@ const listItem: ProductListItemDto = {
   image: { key: "k1", url: "/api/files/k1" },
   soldOut: false,
   isSample: false,
+  createdAt: "2026-10-01T00:00:00.000Z",
+  reviewSummary: null,
   store: { name: STORE_NAME, slug: "s-1", isSample: false },
 };
 

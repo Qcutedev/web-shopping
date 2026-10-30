@@ -50,6 +50,8 @@ const ITEM: ProductListItemDto = {
   image: { key: "uploads/a.webp", url: "/api/files/uploads%2Fa.webp" },
   soldOut: false,
   isSample: true,
+  createdAt: "2026-10-01T00:00:00.000Z",
+  reviewSummary: null,
   store: { name: "ร้านตัวอย่าง", slug: "sample-store", isSample: true },
 };
 

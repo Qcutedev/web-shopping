@@ -2,7 +2,8 @@ import Link from "next/link";
 import { unstable_rethrow } from "next/navigation";
 import { connection } from "next/server";
 import { listAllActiveCategories } from "@/components/catalog/all-categories";
-import { ProductGrid } from "@/components/catalog/product-grid";
+import { ProductCard } from "@/components/catalog/product-card";
+import { ScrollRow, ScrollRowItem } from "@/components/scroll-row";
 import { ChevronRightIcon } from "@/components/ui/icons";
 import { Reveal } from "@/components/reveal";
 import { fill } from "@/i18n/fill";
@@ -11,7 +12,7 @@ import { categoryHref, ROUTES } from "@/lib/routes";
 import { listProducts } from "@/modules/catalog";
 import type { CategoryDto, Page, ProductListItemDto } from "@/modules/catalog/schema";
 
-const SHELF_SIZE = 4;
+const SHELF_SIZE = 10;
 const SHELF_CATEGORIES = 3;
 
 const SEE_ALL =
@@ -45,7 +46,17 @@ export function ProductShelf({
             <ChevronRightIcon />
           </Link>
         </div>
-        <ProductGrid products={products} label={title} />
+        <ScrollRow
+          label={title}
+          previous={th.catalog.home.scrollPrevious}
+          next={th.catalog.home.scrollNext}
+        >
+          {products.map((product, index) => (
+            <ScrollRowItem key={product.id}>
+              <ProductCard product={product} priority={index < 4} />
+            </ScrollRowItem>
+          ))}
+        </ScrollRow>
       </section>
     </Reveal>
   );

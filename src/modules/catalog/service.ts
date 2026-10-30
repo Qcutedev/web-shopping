@@ -13,10 +13,12 @@ import { catalogNotFound } from "./errors";
 import { imageRef } from "./image";
 import {
   type CategoryRow,
+  type FeaturedStoreRow,
   type CategorySummaryRow,
   findActiveCategories,
   findActiveCategoryBySlug,
   findActiveCategoryIdBySlug,
+  findFeaturedStores,
   findPublicStoreBySlug,
   findPublicStoreIdBySlug,
   findReviewsOfVisibleProduct,
@@ -32,6 +34,7 @@ import {
 import type {
   CategoryDto,
   CategorySummaryDto,
+  FeaturedStoreDto,
   ListCategoriesQuery,
   ListProductReviewsQuery,
   ListProductsQuery,
@@ -66,6 +69,8 @@ export function toProductListItemDto(row: ProductListRow): ProductListItemDto {
     image: first === undefined ? null : imageRef(first.upload.storageKey),
     soldOut: isSoldOut(row.stock),
     isSample: row.isSample,
+    createdAt: row.createdAt.toISOString(),
+    reviewSummary: toReviewSummary(row.reviews),
     store: { name: row.store.name, slug: row.store.slug, isSample: row.store.isSample },
   };
 }
@@ -107,6 +112,16 @@ export function toStoreDto(row: StoreRow): StoreDto {
     slug: row.slug,
     description: row.description,
     logo: row.logoUpload === null ? null : imageRef(row.logoUpload.storageKey),
+    isSample: row.isSample,
+  };
+}
+
+export function toFeaturedStoreDto(row: FeaturedStoreRow): FeaturedStoreDto {
+  return {
+    name: row.name,
+    slug: row.slug,
+    logo: row.logoUpload === null ? null : imageRef(row.logoUpload.storageKey),
+    productCount: row._count.products,
     isSample: row.isSample,
   };
 }
@@ -178,6 +193,11 @@ async function listProductPage(
 /** GET /products: visible products, searched, filtered, sorted, and paginated. */
 export async function listProducts(query: ListProductsQuery): Promise<Page<ProductListItemDto>> {
   return listProductPage(query, undefined);
+}
+
+/** Stores for the home page row. Not an endpoint: only the storefront page reads it. */
+export async function listFeaturedStores(limit: number): Promise<FeaturedStoreDto[]> {
+  return (await findFeaturedStores(limit)).map(toFeaturedStoreDto);
 }
 
 /** GET /products/{slug}: a visible product, else 404. */

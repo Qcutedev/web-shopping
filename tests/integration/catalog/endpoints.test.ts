@@ -130,7 +130,18 @@ describe("GET /products", () => {
     for (const item of result.body.data) {
       expect(Number.isInteger(item.priceSatang)).toBe(true);
       expect(Object.keys(item).sort()).toEqual(
-        ["id", "slug", "title", "priceSatang", "image", "soldOut", "isSample", "store"].sort(),
+        [
+          "id",
+          "slug",
+          "title",
+          "priceSatang",
+          "image",
+          "soldOut",
+          "isSample",
+          "createdAt",
+          "reviewSummary",
+          "store",
+        ].sort(),
       );
       expect(Object.keys(item.store).sort()).toEqual(["isSample", "name", "slug"]);
     }
