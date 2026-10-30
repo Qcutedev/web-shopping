@@ -215,6 +215,9 @@ export const th = {
     itemsLabel: "สินค้าที่จะสั่งซื้อ",
     submit: "ยืนยันคำสั่งซื้อ (ชำระเงินจำลอง)",
     confirmAgain: "ยืนยันคำสั่งซื้ออีกครั้ง (ชำระเงินจำลอง)",
+    progressProcessing: "กำลังดำเนินการสั่งซื้อ...",
+    progressSuccess: "สั่งซื้อสำเร็จ!",
+    progressFailed: "ชำระเงินไม่สำเร็จ (จำลอง)",
     // The customer must confirm again after a refusal (BR-22, BR-30; D-026 OQ-30).
     refusedTitle: "ยังไม่มีการสร้างคำสั่งซื้อ",
     refusedBody:

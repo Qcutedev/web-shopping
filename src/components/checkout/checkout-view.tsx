@@ -29,8 +29,12 @@ import type { ApiFailure } from "@/lib/api-client/http";
 import { orderHref, ROUTES } from "@/lib/routes";
 import type { CartDto, CartLineDto } from "@/modules/cart/schema";
 import type { AddressDto } from "@/modules/profile/schema";
+import { OrderProgressOverlay, type OrderProgressPhase } from "./order-progress-overlay";
 
 type Failure = Pick<ApiFailure, "status" | "code" | "reason">;
+
+/** How long the check mark shows before the order page opens. */
+const CELEBRATE_MS = 1600;
 
 function lineOf(cart: CartDto, productId: string): CartLineDto | null {
   for (const group of cart.stores) {
@@ -87,6 +91,7 @@ export function CheckoutView({
   const [addressError, setAddressError] = useState<string | null>(null);
   const [unknown, setUnknown] = useState(false);
   const [changedNote, setChangedNote] = useState(false);
+  const [phase, setPhase] = useState<OrderProgressPhase | null>(null);
   // One key per attempt; kept only while the outcome of the request is unknown.
   const keyRef = useRef<string | null>(null);
   const busyRef = useRef(false);
@@ -101,6 +106,7 @@ export function CheckoutView({
     }
     busyRef.current = true;
     setPending(true);
+    setPhase("processing");
     setAddressError(null);
     setFailure(null);
     setRefusal(null);
@@ -119,11 +125,14 @@ export function CheckoutView({
       // The order exists, paid or failed; the order page tells which. Stay disabled while leaving.
       keyRef.current = null;
       setUnknown(false);
+      setPhase(response.data.paymentStatus === "FAILED" ? "failed" : "success");
+      await new Promise((resolve) => setTimeout(resolve, CELEBRATE_MS));
       router.push(orderHref(response.data.id));
       return;
     }
     busyRef.current = false;
     setPending(false);
+    setPhase(null);
     if (isUnknownOutcome(response)) {
       // The unknown-outcome notice says it all; a second banner would repeat it.
       setUnknown(true);
@@ -301,6 +310,7 @@ export function CheckoutView({
       aria-busy={pending || undefined}
       className="grid items-start gap-6 lg:grid-cols-[1fr_24rem]"
     >
+      {phase ? <OrderProgressOverlay phase={phase} /> : null}
       <div className="flex flex-col gap-4">
         {header}
 

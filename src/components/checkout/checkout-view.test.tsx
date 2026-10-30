@@ -157,7 +157,8 @@ describe("CheckoutView submit", () => {
     checkoutApi.placeOrder.mockResolvedValue(placed("o 1"));
     render(<CheckoutView cart={cartOf()} addresses={[address({ isDefault: true })]} />);
     await userEvent.click(submitButton());
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/orders/o%201"));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/orders/o%201"), { timeout: 4000 });
+    expect(screen.getByText(th.checkout.progressSuccess)).toBeTruthy();
     const [body, key] = checkoutApi.placeOrder.mock.calls[0] ?? [];
     expect(body).toEqual({ addressId: "a1", paymentMethod: "MOCK", mockOutcome: "SUCCESS" });
     expect(key).toMatch(/^[0-9a-f-]{36}$/);
@@ -185,7 +186,7 @@ describe("CheckoutView submit", () => {
     await userEvent.click(button);
     expect(checkoutApi.placeOrder).toHaveBeenCalledTimes(1);
     resolve(placed());
-    await waitFor(() => expect(push).toHaveBeenCalled());
+    await waitFor(() => expect(push).toHaveBeenCalled(), { timeout: 4000 });
   });
 
   it("reuses the key when the outcome is unknown and shows the unknown state", async () => {
@@ -199,7 +200,7 @@ describe("CheckoutView submit", () => {
     api.readCart.mockResolvedValue({ ok: true, status: 200, data: cartOf() });
     checkoutApi.placeOrder.mockResolvedValue(placed("o9"));
     await userEvent.click(screen.getByRole("button", { name: th.checkout.unknownCheck }));
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/orders/o9"));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/orders/o9"), { timeout: 4000 });
     const keys = checkoutApi.placeOrder.mock.calls.map((call) => call[1]);
     expect(keys).toHaveLength(2);
     expect(keys[0]).toBe(keys[1]);
@@ -368,7 +369,7 @@ describe("CheckoutView submit", () => {
 
     checkoutApi.placeOrder.mockResolvedValueOnce(placed());
     await userEvent.click(submitButton(th.checkout.confirmAgain));
-    await waitFor(() => expect(push).toHaveBeenCalled());
+    await waitFor(() => expect(push).toHaveBeenCalled(), { timeout: 4000 });
     const keys = checkoutApi.placeOrder.mock.calls.map((call) => call[1]);
     expect(keys[0]).not.toBe(keys[1]);
   });
