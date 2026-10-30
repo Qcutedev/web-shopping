@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { maintenanceReportSchema } from "./schema";
-import { type MaintenanceJobs, runMaintenance, runMaintenanceOnce } from "./service";
+import {
+  assessMaintenanceStatus,
+  MAINTENANCE_STALE_AFTER_MINUTES,
+  type MaintenanceJobs,
+  runMaintenance,
+  runMaintenanceOnce,
+} from "./service";
 
 const SWEEP = { found: 3, failed: 2, errored: 1 };
 const CLEANUP = { rowsDeleted: 4, filesDeleted: 3, filesMissing: 1, filesFailed: 0 };
@@ -131,6 +137,136 @@ describe("runMaintenance", () => {
       authPurgeOk: false,
     });
     expect(Object.keys(fields).some((key) => key.toLowerCase().includes("session"))).toBe(false);
+  });
+});
+
+describe("runMaintenance: recording the run (SEC-100)", () => {
+  it("records once, after the three jobs, with ok true when all succeeded", async () => {
+    const order: string[] = [];
+    const recordRun = vi.fn((ok: boolean) => (order.push(`record:${ok}`), Promise.resolve(1)));
+    const report = await runMaintenance(
+      {
+        paymentTimeoutSweep: () => (order.push("sweep"), Promise.resolve(SWEEP)),
+        uploadCleanup: () => (order.push("cleanup"), Promise.resolve(CLEANUP)),
+        sessionPurge: () => (order.push("purge"), Promise.resolve(PURGE)),
+        recordRun,
+      },
+      logs(),
+    );
+    expect(report.ok).toBe(true);
+    expect(order).toEqual(["sweep", "cleanup", "purge", "record:true"]);
+    expect(recordRun).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["paymentTimeoutSweep", "uploadCleanup", "sessionPurge"] as const)(
+    "records ok false when %s failed",
+    async (name) => {
+      const recordRun = vi.fn(() => Promise.resolve(1));
+      await runMaintenance(jobs({ [name]: () => Promise.resolve(undefined), recordRun }), logs());
+      expect(recordRun.mock.calls).toEqual([[false]]);
+    },
+  );
+
+  it("a failed write is logged with the error class only and changes nothing in the report", async () => {
+    const log = logs();
+    const expected = await runMaintenance(jobs(), logs());
+    const error = Object.assign(new Error("Zq7canary postgresql://u:p@h/db"), { code: "P2010" });
+    for (const recordRun of [
+      () => Promise.reject(error),
+      () => {
+        throw error;
+      },
+    ]) {
+      log.error.mockClear();
+      const report = await runMaintenance(jobs({ recordRun }), log);
+      expect(report).toEqual(expected);
+      expect(log.error).toHaveBeenCalledTimes(1);
+      expect(log.error.mock.calls[0]).toEqual([
+        "Maintenance run not recorded: the status write failed",
+        { component: "maintenance", errorName: "Error", errorCode: "P2010" },
+      ]);
+      expect(JSON.stringify(log.error.mock.calls)).not.toContain("Zq7canary");
+    }
+  });
+
+  it("a missing row (no row updated) is logged and changes nothing in the report", async () => {
+    const log = logs();
+    const report = await runMaintenance(jobs({ recordRun: () => Promise.resolve(0) }), log);
+    expect(report.ok).toBe(true);
+    expect(log.error.mock.calls).toEqual([
+      [
+        "Maintenance run not recorded: the status row is missing",
+        { component: "maintenance", rowsUpdated: 0 },
+      ],
+    ]);
+  });
+
+  it("a log that throws while reporting a failed write does not make the run throw", async () => {
+    const log = {
+      info: vi.fn(),
+      error: vi.fn(() => {
+        throw new Error("the log is broken");
+      }),
+    };
+    const report = await runMaintenance(
+      jobs({ recordRun: () => Promise.reject(new Error("x")) }),
+      log,
+    );
+    expect(report.ok).toBe(true);
+  });
+});
+
+describe("assessMaintenanceStatus", () => {
+  const MIN = 60;
+  it.each([
+    ["missing row", null, "missing"],
+    [
+      "never ran",
+      { lastRunAgeSeconds: null, lastRunOk: null, lastSuccessAgeSeconds: null },
+      "never-ran",
+    ],
+    [
+      "fresh success",
+      { lastRunAgeSeconds: 10 * MIN, lastRunOk: true, lastSuccessAgeSeconds: 10 * MIN },
+      "fresh",
+    ],
+    [
+      "exactly 45 minutes",
+      { lastRunAgeSeconds: 45 * MIN, lastRunOk: true, lastSuccessAgeSeconds: 45 * MIN },
+      "fresh",
+    ],
+    [
+      "45 minutes and 1 second",
+      { lastRunAgeSeconds: 45 * MIN + 1, lastRunOk: true, lastSuccessAgeSeconds: 45 * MIN + 1 },
+      "stale",
+    ],
+    [
+      "recent failed run after an old success",
+      { lastRunAgeSeconds: MIN, lastRunOk: false, lastSuccessAgeSeconds: 120 * MIN },
+      "stale",
+    ],
+    [
+      "recent failed run after a recent success",
+      { lastRunAgeSeconds: MIN, lastRunOk: false, lastSuccessAgeSeconds: 11 * MIN },
+      "fresh",
+    ],
+    [
+      "runs recorded, none succeeded",
+      { lastRunAgeSeconds: MIN, lastRunOk: false, lastSuccessAgeSeconds: null },
+      "stale",
+    ],
+  ] as const)("%s", (_label, reading, expected) => {
+    expect(assessMaintenanceStatus(reading)).toBe(expected);
+  });
+
+  it("has the owner's threshold of 45 minutes, and the threshold can be set", () => {
+    expect(MAINTENANCE_STALE_AFTER_MINUTES).toBe(45);
+    const reading = {
+      lastRunAgeSeconds: 11 * MIN,
+      lastRunOk: true,
+      lastSuccessAgeSeconds: 11 * MIN,
+    };
+    expect(assessMaintenanceStatus(reading, 10)).toBe("stale");
   });
 });
 

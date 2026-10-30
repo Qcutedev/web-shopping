@@ -232,7 +232,9 @@ describe("SEC-100 a scheduler that stops calling goes unnoticed", () => {
     expect(branch).not.toMatch(/exit 0/);
   });
 
-  it.fails("something in the application reports how long ago the last maintenance run was", () => {
+  // Remediation (b) built by backend-api (not committed yet at the time of the flip): the run
+  // records itself in MaintenanceStatus and src/server/health.ts logs a stale last success.
+  it("something in the application reports how long ago the last maintenance run was", () => {
     const health = read("src/server/health.ts");
     expect(health).toMatch(/maintenance|sweep|lastRun/i);
   });

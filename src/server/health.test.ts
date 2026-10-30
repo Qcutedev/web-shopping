@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { MAINTENANCE_STALE_AFTER_MINUTES } from "@/modules/maintenance";
+
 import {
   checkHealth,
   createHealthCheck,
   HEALTH_DATABASE_TIMEOUT_MS,
   HEALTH_FAILURE_LOG_INTERVAL_MS,
+  HEALTH_MAINTENANCE_READ_INTERVAL_MS,
   HEALTH_PROBE_ABANDON_MS,
 } from "./health";
 import { createLogger, type Logger } from "./logger";
@@ -542,6 +545,232 @@ describe("createHealthCheck: what an outage writes to the log (SEC-026)", () => 
     expect(await check()).toEqual(DOWN);
     expect(lines).toEqual([]);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+// SEC-100 remediation (b): the maintenance status goes to the log only. The answer, and with it
+// the response body and the 200/503 status, depends on the probe alone.
+describe("createHealthCheck: the maintenance signal (SEC-100)", () => {
+  const MIN = 60;
+  const reading = (
+    lastSuccessAgeSeconds: number | null,
+    lastRunAgeSeconds: number | null = lastSuccessAgeSeconds,
+    lastRunOk: boolean | null = lastRunAgeSeconds === null ? null : true,
+  ) => ({ lastSuccessAgeSeconds, lastRunAgeSeconds, lastRunOk });
+
+  /** Lets the status read and the log decision after it settle. */
+  const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+  function harness(
+    status: () => Promise<ReturnType<typeof reading> | null>,
+    options: { up?: () => boolean; clock?: () => number; readIntervalMs?: number } = {},
+  ) {
+    const { lines, logger } = capture();
+    const maintenanceStatus = vi.fn(status);
+    const check = createHealthCheck({
+      probe: () =>
+        (options.up?.() ?? true) ? Promise.resolve() : Promise.reject(new Error("refused")),
+      maintenanceStatus,
+      maintenanceReadIntervalMs: options.readIntervalMs ?? 0,
+      logger,
+      now: options.clock ?? (() => 0),
+    });
+    return { lines, check, maintenanceStatus };
+  }
+
+  it("writes one warn line when the last success is older than 45 minutes, and the answer stays up", async () => {
+    const { lines, check } = harness(async () => reading(46 * MIN, 5 * MIN, false));
+    const report = await check({ requestId: "req-stale-001" });
+    await flush();
+    expect(report).toEqual(UP);
+    expect(Object.keys(report).sort()).toEqual(["database", "status"]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({
+      level: "warn",
+      message: "Maintenance is stale: no successful scheduled run within the threshold.",
+      component: "health",
+      check: "maintenance",
+      freshness: "stale",
+      staleAfterMinutes: 45,
+      lastSuccessAgeMinutes: 46,
+      lastRunAgeMinutes: 5,
+      lastRunOk: false,
+      requestId: "req-stale-001",
+    });
+  });
+
+  it("uses a 45-minute threshold: 45 minutes is fresh, one second more is stale", async () => {
+    expect(MAINTENANCE_STALE_AFTER_MINUTES).toBe(45);
+    const fresh = harness(async () => reading(45 * MIN));
+    expect(await fresh.check()).toEqual(UP);
+    await flush();
+    expect(fresh.lines).toEqual([]);
+
+    const stale = harness(async () => reading(45 * MIN + 1));
+    expect(await stale.check()).toEqual(UP);
+    await flush();
+    expect(stale.lines).toHaveLength(1);
+  });
+
+  it("is silent for a row that never ran (every column NULL)", async () => {
+    const { lines, check, maintenanceStatus } = harness(async () => reading(null, null, null));
+    expect(await check()).toEqual(UP);
+    await flush();
+    expect(maintenanceStatus).toHaveBeenCalledTimes(1);
+    expect(lines).toEqual([]);
+  });
+
+  it("reports runs that were recorded but never succeeded as stale", async () => {
+    const { lines, check } = harness(async () => reading(null, 2 * MIN, false));
+    expect(await check()).toEqual(UP);
+    await flush();
+    expect(lines[0]).toMatchObject({
+      level: "warn",
+      freshness: "stale",
+      lastSuccessAgeMinutes: null,
+      lastRunAgeMinutes: 2,
+      lastRunOk: false,
+    });
+  });
+
+  it("warns when the row is missing", async () => {
+    const { lines, check } = harness(async () => null);
+    expect(await check()).toEqual(UP);
+    await flush();
+    expect(lines[0]).toMatchObject({
+      level: "warn",
+      message: "Maintenance status row is missing: scheduled runs cannot be recorded.",
+      freshness: "missing",
+    });
+  });
+
+  it("a failed read is a warn line with the error class only, and the answer stays up", async () => {
+    const error = Object.assign(new Error('relation "MaintenanceStatus" does not exist'), {
+      code: "42P01",
+      meta: { query: "Zq7canary" },
+    });
+    const { lines, check } = harness(() => Promise.reject(error));
+    expect(await check()).toEqual(UP);
+    await flush();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({
+      level: "warn",
+      message: "Health check could not read the maintenance status.",
+      reason: "error",
+      errorName: "Error",
+      errorCode: "42P01",
+    });
+    expect(JSON.stringify(lines)).not.toContain("Zq7canary");
+  });
+
+  it("bounds the read by the same timeout, answers without waiting for it, and leaves no timer", async () => {
+    vi.useFakeTimers();
+    const { lines, logger } = capture();
+    const check = createHealthCheck({
+      probe: async () => undefined,
+      maintenanceStatus: () => new Promise(() => {}),
+      timeoutMs: 100,
+      logger,
+      now: () => 0,
+    });
+    expect(await check()).toEqual(UP);
+    expect(lines).toEqual([]);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ level: "warn", reason: "timeout", timeoutMs: 100 });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("writes no maintenance line while the database is down, and the answer stays down", async () => {
+    const { lines, check } = harness(async () => reading(10 * 60 * MIN), { up: () => false });
+    expect(await check()).toEqual(DOWN);
+    await flush();
+    expect(lines.map((line) => line.level)).toEqual(["error"]);
+    expect(lines[0]).toMatchObject({ component: "health", reason: "error" });
+  });
+
+  it("writes at most one warn line per interval, whatever the number of checks", async () => {
+    let clock = 0;
+    const { lines, check } = harness(async () => reading(50 * MIN), { clock: () => clock });
+    for (let request = 0; request < 200; request += 1) {
+      clock = Math.min(request * 100, HEALTH_FAILURE_LOG_INTERVAL_MS - 1);
+      expect(await check()).toEqual(UP);
+      await flush();
+    }
+    expect(lines).toHaveLength(1);
+    clock = HEALTH_FAILURE_LOG_INTERVAL_MS;
+    await check();
+    await flush();
+    expect(lines).toHaveLength(2);
+  });
+
+  it("reads the row at most once per read interval", async () => {
+    let clock = 0;
+    const { check, maintenanceStatus } = harness(async () => reading(MIN), {
+      clock: () => clock,
+      readIntervalMs: HEALTH_MAINTENANCE_READ_INTERVAL_MS,
+    });
+    expect(HEALTH_MAINTENANCE_READ_INTERVAL_MS).toBe(60_000);
+    for (let request = 0; request < 50; request += 1) {
+      clock = request * 1_000;
+      await check();
+      await flush();
+    }
+    expect(maintenanceStatus).toHaveBeenCalledTimes(1);
+    clock = HEALTH_MAINTENANCE_READ_INTERVAL_MS;
+    await check();
+    await flush();
+    expect(maintenanceStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it("writes one info line when the status is fresh again after a warn line", async () => {
+    let stale = true;
+    const { lines, check } = harness(async () => reading(stale ? 60 * MIN : MIN));
+    await check();
+    await flush();
+    stale = false;
+    for (let request = 0; request < 5; request += 1) {
+      await check();
+      await flush();
+    }
+    expect(lines.map((line) => line.level)).toEqual(["warn", "info"]);
+    expect(lines[1]).toMatchObject({
+      message: "Maintenance status is fresh again.",
+      check: "maintenance",
+      freshness: "fresh",
+    });
+  });
+
+  it("does not read the status when only the probe is injected", async () => {
+    // The default reader would reach the database layer; with no DATABASE_URL that would fail
+    // and, with the probe up, write a warn line. Nothing is written.
+    vi.stubEnv("DATABASE_URL", undefined);
+    const { lines, logger } = capture();
+    const check = createHealthCheck({ probe: async () => undefined, logger });
+    expect(await check()).toEqual(UP);
+    await flush();
+    expect(lines).toEqual([]);
+  });
+
+  it("a log that throws on the maintenance line changes no answer", async () => {
+    const broken = createLogger({ level: "debug", write: () => {} });
+    const throwing: Logger = {
+      ...broken,
+      warn: () => {
+        throw new Error("the log is broken");
+      },
+      child: () => throwing,
+    };
+    const check = createHealthCheck({
+      probe: async () => undefined,
+      maintenanceStatus: async () => reading(99 * MIN),
+      maintenanceReadIntervalMs: 0,
+      logger: throwing,
+      now: () => 0,
+    });
+    expect(await check()).toEqual(UP);
+    await flush();
+    expect(await check()).toEqual(UP);
   });
 });
 

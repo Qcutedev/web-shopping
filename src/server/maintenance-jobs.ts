@@ -13,8 +13,11 @@
  * `undefined`. The module service (src/modules/maintenance) takes these as parameters because a
  * module may not import the auth layer beyond actor.ts (D-022). No database client is imported
  * here (rule 7): every job reaches the database through its own module or the auth layer.
+ *
+ * `recordRun` is not a job: it stores the end of the run in the maintenance status row
+ * (SECURITY.md SEC-100 (b); `recordMaintenanceRun` of the maintenance module).
  */
-import type { MaintenanceJobs } from "@/modules/maintenance";
+import { type MaintenanceJobs, recordMaintenanceRun } from "@/modules/maintenance";
 import { runPaymentTimeoutSweep } from "@/modules/orders";
 import { runUploadCleanup } from "@/modules/uploads";
 
@@ -37,5 +40,6 @@ export function createMaintenanceJobs(options: MaintenanceJobOptions): Maintenan
     paymentTimeoutSweep: () => runPaymentTimeoutSweep(options.paymentTimeoutMinutes),
     uploadCleanup: () => runUploadCleanup((uploadCleanupLogger ??= withUploadVolumeAlert())),
     sessionPurge: () => runSessionPurge(),
+    recordRun: (ok) => recordMaintenanceRun(ok),
   };
 }

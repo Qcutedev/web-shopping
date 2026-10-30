@@ -30,7 +30,27 @@
  *
  * Reads no environment variable. The database layer creates its client on first use, so a
  * missing `DATABASE_URL` shows here as "down" with the cause in the log.
+ *
+ * Maintenance signal (SECURITY.md SEC-100 remediation (b); owner decisions 2026-10-30). Next to
+ * the probe, at most once per HEALTH_MAINTENANCE_READ_INTERVAL_MS, the check reads the maintenance
+ * status row (`readMaintenanceStatus` of src/modules/maintenance; DATA_MODEL.md section 6.19)
+ * under the same timeout. When the last successful scheduled run is older than
+ * MAINTENANCE_STALE_AFTER_MINUTES (45), when runs were recorded and none succeeded, or when the
+ * row is missing or cannot be read while the database answers, it writes one `warn` line, under
+ * the same kind of limit as the failure lines: at most one per HEALTH_FAILURE_LOG_INTERVAL_MS,
+ * with its own clock. A row that says "never ran" (every column NULL) is not stale. When the
+ * status is fresh again after a `warn` line, one `info` line says so. The signal goes to the log
+ * only: the result, and with it the response body and the 200/503 status, depends on the probe
+ * alone, exactly as before. The read is not awaited by any caller and a failed or slow read
+ * never makes the check "down".
  */
+import {
+  assessMaintenanceStatus,
+  MAINTENANCE_STALE_AFTER_MINUTES,
+  type MaintenanceStatusReading,
+  readMaintenanceStatus,
+} from "@/modules/maintenance";
+
 import { db } from "./db";
 import { type Logger, logger as defaultLogger } from "./logger";
 
@@ -40,6 +60,8 @@ export const HEALTH_DATABASE_TIMEOUT_MS = 2_000;
 export const HEALTH_PROBE_ABANDON_MS = 30_000;
 /** The shortest time between two failure lines in the log. */
 export const HEALTH_FAILURE_LOG_INTERVAL_MS = 30_000;
+/** The shortest time between two reads of the maintenance status row. */
+export const HEALTH_MAINTENANCE_READ_INTERVAL_MS = 60_000;
 
 /** The whole public result. The route handler sends it as the response body. */
 export type HealthReport =
@@ -55,6 +77,16 @@ export interface HealthCheckOptions {
   logger?: Logger;
   /** Clock in milliseconds, injectable for tests. */
   now?: () => number;
+  /**
+   * Reads the maintenance status row (SEC-100). Default: `readMaintenanceStatus` when `probe` is
+   * not given either, and no read at all when only `probe` is injected, so a test of the probe
+   * never reaches a database through this.
+   */
+  maintenanceStatus?: () => Promise<MaintenanceStatusReading | null>;
+  /** Shortest time between two reads. Default HEALTH_MAINTENANCE_READ_INTERVAL_MS. */
+  maintenanceReadIntervalMs?: number;
+  /** Default MAINTENANCE_STALE_AFTER_MINUTES. */
+  maintenanceStaleAfterMinutes?: number;
 }
 
 export interface HealthCheckContext {
@@ -68,6 +100,11 @@ export interface HealthCheckContext {
 export type HealthCheck = (context?: HealthCheckContext) => Promise<HealthReport>;
 
 type ProbeOutcome = { answered: true } | { answered: false; error: unknown };
+
+type StatusOutcome =
+  | { read: true; reading: MaintenanceStatusReading | null }
+  | { read: false; reason: "error"; error: unknown }
+  | { read: false; reason: "timeout" };
 
 /** One probe and the callers that still wait for it. */
 interface RunningProbe {
@@ -122,8 +159,21 @@ export function createHealthCheck(options: HealthCheckOptions = {}): HealthCheck
   const failureLogIntervalMs = options.failureLogIntervalMs ?? HEALTH_FAILURE_LOG_INTERVAL_MS;
   const log = options.logger ?? defaultLogger;
   const now = options.now ?? (() => performance.now());
+  const readStatus =
+    options.maintenanceStatus ?? (options.probe === undefined ? readMaintenanceStatus : undefined);
+  const statusReadIntervalMs =
+    options.maintenanceReadIntervalMs ?? HEALTH_MAINTENANCE_READ_INTERVAL_MS;
+  const staleAfterMinutes = options.maintenanceStaleAfterMinutes ?? MAINTENANCE_STALE_AFTER_MINUTES;
 
   let running: RunningProbe | undefined;
+
+  // The maintenance signal (see "Maintenance signal" above), with its own limit.
+  /** Clock value of the start of the last status read. */
+  let lastStatusReadAt: number | undefined;
+  /** Clock value of the last maintenance `warn` line. */
+  let lastMaintenanceLineAt: number | undefined;
+  /** True from a maintenance `warn` line until the `info` line that follows it. */
+  let maintenanceAnnounced = false;
 
   // What the log has and has not been told (see "The log reports the outage" above).
   /** Clock value of the last failure line. */
@@ -178,6 +228,108 @@ export function createHealthCheck(options: HealthCheckOptions = {}): HealthCheck
     });
   }
 
+  /** Writes a maintenance `warn` line when one is due. */
+  function noteMaintenanceWarning(
+    message: string,
+    details: Record<string, string | number | boolean | null>,
+    requestId: string | undefined,
+  ): void {
+    const time = now();
+    if (
+      lastMaintenanceLineAt !== undefined &&
+      time - lastMaintenanceLineAt < failureLogIntervalMs
+    ) {
+      return;
+    }
+    lastMaintenanceLineAt = time;
+    maintenanceAnnounced = true;
+    logFor(requestId).warn(message, {
+      component: "health",
+      check: "maintenance",
+      staleAfterMinutes,
+      ...details,
+    });
+  }
+
+  /** Whole minutes of an age in seconds; `null` stays `null`. */
+  function minutes(seconds: number | null): number | null {
+    return seconds === null ? null : Math.floor(seconds / 60);
+  }
+
+  /**
+   * The probe and the status read have both settled (the read bounded by `timeoutMs`). One log
+   * decision for the maintenance signal. Nothing when the database did not answer: the failure
+   * line already reports that, and a stale row cannot be told from an unreachable one.
+   */
+  function noteMaintenance(
+    probeResult: ProbeOutcome,
+    status: StatusOutcome,
+    requestId: string | undefined,
+  ): void {
+    if (!probeResult.answered) return;
+    if (!status.read) {
+      noteMaintenanceWarning(
+        "Health check could not read the maintenance status.",
+        status.reason === "timeout"
+          ? { reason: "timeout", timeoutMs }
+          : { reason: "error", ...describeError(status.error) },
+        requestId,
+      );
+      return;
+    }
+    const freshness = assessMaintenanceStatus(status.reading, staleAfterMinutes);
+    if (freshness === "missing") {
+      noteMaintenanceWarning(
+        "Maintenance status row is missing: scheduled runs cannot be recorded.",
+        { freshness },
+        requestId,
+      );
+      return;
+    }
+    if (freshness === "stale") {
+      const reading = status.reading;
+      noteMaintenanceWarning(
+        "Maintenance is stale: no successful scheduled run within the threshold.",
+        {
+          freshness,
+          lastSuccessAgeMinutes: minutes(reading?.lastSuccessAgeSeconds ?? null),
+          lastRunAgeMinutes: minutes(reading?.lastRunAgeSeconds ?? null),
+          lastRunOk: reading?.lastRunOk ?? null,
+        },
+        requestId,
+      );
+      return;
+    }
+    if (!maintenanceAnnounced) return;
+    maintenanceAnnounced = false;
+    logFor(requestId).info("Maintenance status is fresh again.", {
+      component: "health",
+      check: "maintenance",
+      freshness,
+    });
+  }
+
+  /** Starts a status read when one is due, bounded by `timeoutMs`; `undefined` when not due. */
+  function startStatusRead(): Promise<StatusOutcome> | undefined {
+    if (readStatus === undefined) return undefined;
+    const time = now();
+    if (lastStatusReadAt !== undefined && time - lastStatusReadAt < statusReadIntervalMs) {
+      return undefined;
+    }
+    lastStatusReadAt = time;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const read: Promise<StatusOutcome> = Promise.resolve()
+      .then(readStatus)
+      .then(
+        (reading): StatusOutcome => ({ read: true, reading }),
+        (error: unknown): StatusOutcome => ({ read: false, reason: "error", error }),
+      );
+    const timedOut = new Promise<StatusOutcome>((resolve) => {
+      timer = setTimeout(() => resolve({ read: false, reason: "timeout" }), timeoutMs);
+    });
+    return Promise.race([read, timedOut]).finally(() => clearTimeout(timer));
+  }
+
   /** The probe has settled: one log decision for all the callers that still wait for it. */
   function noteOutcome(probed: RunningProbe, result: ProbeOutcome): void {
     const checks = probed.waiting.size;
@@ -215,6 +367,26 @@ export function createHealthCheck(options: HealthCheckOptions = {}): HealthCheck
         // The log is not worth an unhandled rejection; the callers are answered all the same.
       }
     });
+    // The maintenance signal: no caller waits for it, and it never changes an answer, so not
+    // even a failure to start it may reach the caller's `catch`.
+    let status: Promise<StatusOutcome> | undefined;
+    try {
+      status = startStatusRead();
+    } catch {
+      status = undefined;
+    }
+    if (status !== undefined) {
+      void Promise.all([outcome, status]).then(
+        ([result, read]) => {
+          try {
+            noteMaintenance(result, read, started.requestId);
+          } catch {
+            // As above: the log failed, nothing else depends on it.
+          }
+        },
+        () => undefined,
+      );
+    }
     return started;
   }
 

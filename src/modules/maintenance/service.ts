@@ -23,9 +23,17 @@
  * one process runs one maintenance run at a time: a request that arrives while a run is in
  * progress waits for that run and receives its report (`runMaintenanceOnce`), so a burst of
  * requests to one instance does not multiply the work.
+ *
+ * Last run (SECURITY.md SEC-100 remediation (b); DATA_MODEL.md section 6.19). At the end of a run
+ * `jobs.recordRun` stores when it finished, whether all three jobs were ok, and, when they were,
+ * the time of the last success, in the single `MaintenanceStatus` row. src/server/health.ts reads
+ * it and writes a `warn` line when the last success is older than MAINTENANCE_STALE_AFTER_MINUTES.
+ * A failed write is logged and changes nothing in the report or in the response. Two overlapping
+ * runs both writing the row is harmless: the last write wins and both values are true.
  */
 import type { Logger } from "@/server/logger";
 
+import type { MaintenanceStatusReading } from "./repository";
 import type {
   MaintenanceReport,
   PaymentTimeoutSweepOutcome,
@@ -41,6 +49,77 @@ export interface MaintenanceJobs {
     | undefined
   >;
   sessionPurge(): Promise<{ sessions: number; verifications: number } | undefined>;
+  /**
+   * Records the end of the run (`recordMaintenanceRun` of ./repository.ts; resolves to the number
+   * of rows updated). Not a job: it runs after the three, once, whatever they returned.
+   * src/server/maintenance-jobs.ts sets it; when absent (stub jobs in unit tests) nothing is
+   * recorded.
+   */
+  recordRun?(ok: boolean): Promise<number>;
+}
+
+/**
+ * Owner decision 2026-10-30: the last successful run may be at most this old. Matches the
+ * threshold of `.github/workflows/maintenance-watchdog.yml`; the scheduler calls every 10 minutes.
+ */
+export const MAINTENANCE_STALE_AFTER_MINUTES = 45;
+
+/**
+ * What the maintenance status row says:
+ *
+ *   - `never-ran`: no run was ever recorded (every column NULL, as the migration inserts it). Not
+ *     stale, so a fresh deployment, or one that uses the in-process timers, is not reported.
+ *   - `fresh`: the last successful run is at most `staleAfterMinutes` old.
+ *   - `stale`: the last successful run is older than that, or runs were recorded and none ever
+ *     succeeded.
+ *   - `missing`: the row does not exist, so no run can be recorded (a deployment fault).
+ */
+export type MaintenanceFreshness = "never-ran" | "fresh" | "stale" | "missing";
+
+export function assessMaintenanceStatus(
+  reading: MaintenanceStatusReading | null,
+  staleAfterMinutes: number = MAINTENANCE_STALE_AFTER_MINUTES,
+): MaintenanceFreshness {
+  if (reading === null) return "missing";
+  const { lastRunAgeSeconds, lastRunOk, lastSuccessAgeSeconds } = reading;
+  if (lastSuccessAgeSeconds === null) {
+    return lastRunAgeSeconds === null && lastRunOk === null ? "never-ran" : "stale";
+  }
+  return lastSuccessAgeSeconds > staleAfterMinutes * 60 ? "stale" : "fresh";
+}
+
+/** The error's class and code for a log line, never its message or the object (SR-04). */
+function errorFields(error: unknown): Record<string, string> {
+  if (!(error instanceof Error)) return { errorName: typeof error };
+  const code = (error as { code?: unknown }).code;
+  return { errorName: error.name, ...(typeof code === "string" ? { errorCode: code } : {}) };
+}
+
+/** Calls `jobs.recordRun`; logs a failure or a missing row. Never throws. */
+async function recordRun(
+  jobs: MaintenanceJobs,
+  ok: boolean,
+  log: Pick<Logger, "info" | "error">,
+): Promise<void> {
+  if (jobs.recordRun === undefined) return;
+  try {
+    const updated = await jobs.recordRun(ok);
+    if (updated !== 1) {
+      log.error("Maintenance run not recorded: the status row is missing", {
+        component: "maintenance",
+        rowsUpdated: countOf(updated),
+      });
+    }
+  } catch (error) {
+    try {
+      log.error("Maintenance run not recorded: the status write failed", {
+        component: "maintenance",
+        ...errorFields(error),
+      });
+    } catch {
+      // The log failed as well; the run's report stands.
+    }
+  }
 }
 
 /** Awaits `job`; `undefined` when it resolved to nothing or threw. Never throws. */
@@ -111,6 +190,8 @@ export async function runMaintenance(
   };
   if (ok) log.info("Maintenance run finished", fields);
   else log.error("Maintenance run finished with a failed job", fields);
+
+  await recordRun(jobs, ok, log);
 
   return { ok, jobs: { paymentTimeoutSweep, uploadCleanup, sessionPurge } };
 }

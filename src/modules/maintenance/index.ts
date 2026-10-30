@@ -13,5 +13,17 @@ export {
   MAINTENANCE_REFUSED_RULE,
   type MaintenanceRefusal,
 } from "./refusal-limit";
+export {
+  type MaintenanceStatusReading,
+  readMaintenanceStatus,
+  recordMaintenanceRun,
+} from "./repository";
 export * from "./schema";
-export { type MaintenanceJobs, runMaintenance, runMaintenanceOnce } from "./service";
+export {
+  assessMaintenanceStatus,
+  MAINTENANCE_STALE_AFTER_MINUTES,
+  type MaintenanceFreshness,
+  type MaintenanceJobs,
+  runMaintenance,
+  runMaintenanceOnce,
+} from "./service";
