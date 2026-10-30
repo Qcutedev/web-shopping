@@ -18,6 +18,8 @@ export const ROUTES = {
   account: "/account",
   accountAddresses: "/account/addresses",
   admin: "/admin",
+  seller: "/seller",
+  sellerOrders: "/seller/orders",
 } as const;
 
 /**

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
+import { NotifyBadge } from "@/components/ui/notify-badge";
 import { fill } from "@/i18n/fill";
 import { th } from "@/i18n/th";
 import { ROUTES } from "@/lib/routes";
@@ -49,14 +50,7 @@ export function CartLink({ count = 0, className }: CartLinkProps) {
       className={cn(buttonVariants({ variant: "secondary" }), "rounded-full", className)}
     >
       <CartIcon />
-      {hasItems ? (
-        <span
-          aria-hidden="true"
-          className="bg-primary text-on-primary type-caption inline-flex min-w-6 items-center justify-center rounded-full px-1.5 font-medium"
-        >
-          {count}
-        </span>
-      ) : null}
+      {hasItems ? <NotifyBadge count={count} /> : null}
     </Link>
   );
 }

@@ -39,6 +39,12 @@ export const th = {
         orders: "คำสั่งซื้อของฉัน",
         // proposal: shown to an admin only.
         admin: "หลังบ้านแอดมิน",
+        // proposal: shown to a seller only.
+        seller: "จัดการร้านค้า",
+        // proposal. Accessible-name suffixes of the red notification badges. {count} is a number.
+        ordersOnTheWay: "{count} รายการกำลังจัดส่ง",
+        sellerToShip: "{count} คำสั่งซื้อรอจัดส่ง",
+        adminPending: "{count} รายการรอตรวจสอบ",
         signOut: "ออกจากระบบ",
         signingOut: "กำลังออกจากระบบ",
         signOutFailed: "ออกจากระบบไม่สำเร็จ กรุณาลองอีกครั้ง",

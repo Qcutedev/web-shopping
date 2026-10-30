@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { unstable_rethrow } from "next/navigation";
 import { countCartLines } from "@/modules/cart";
+import { getNavCounts, type NavCounts } from "@/modules/notifications";
 import { getProfile } from "@/modules/profile";
 import type { Actor } from "@/server/auth/actor";
 import { getActor } from "@/server/auth/session";
@@ -31,10 +32,19 @@ export async function HeaderSession() {
   }
   if (actor === null) return <SignedOutNav />;
 
-  const [name, count] = await Promise.all([readName(actor), readCartCount(actor)]);
+  const [name, count, counts] = await Promise.all([
+    readName(actor),
+    readCartCount(actor),
+    readNavCounts(actor),
+  ]);
   return (
     <>
-      <AccountMenu name={name} isAdmin={actor.role === "ADMIN"} />
+      <AccountMenu
+        name={name}
+        isAdmin={actor.role === "ADMIN"}
+        isSeller={actor.role === "SELLER" && actor.storeId !== null}
+        counts={counts}
+      />
       <CartLink count={count} />
     </>
   );
@@ -67,5 +77,23 @@ async function readCartCount(actor: Actor): Promise<number> {
     unstable_rethrow(error);
     logger.warn("header.cart.read_failed", { errorClass: errorClass(error) });
     return 0;
+  }
+}
+
+const NO_COUNTS: NavCounts = {
+  ordersOnTheWay: 0,
+  sellerToShip: 0,
+  pendingApplications: 0,
+  pendingProducts: 0,
+};
+
+/** Counts for the red badges. A failed read shows no badge; it never blocks the page. */
+async function readNavCounts(actor: Actor): Promise<NavCounts> {
+  try {
+    return await getNavCounts(actor);
+  } catch (error) {
+    unstable_rethrow(error);
+    logger.warn("header.notifications.read_failed", { errorClass: errorClass(error) });
+    return NO_COUNTS;
   }
 }

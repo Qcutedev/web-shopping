@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { th } from "@/i18n/th";
 
+const refresh = vi.fn();
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
 const addCartItem = vi.fn();
 vi.mock("@/lib/api-client/cart", () => ({
   addCartItem: (...args: unknown[]) => addCartItem(...args),
@@ -16,7 +18,10 @@ function failure(status: number, code: string, extra: Record<string, unknown> = 
   return { ok: false, status, code, fields: [], requestId: null, ...extra };
 }
 
-beforeEach(() => addCartItem.mockReset());
+beforeEach(() => {
+  addCartItem.mockReset();
+  refresh.mockReset();
+});
 
 describe("AddToCart", () => {
   it("sends only the product id and the quantity, then confirms with a cart link", async () => {
@@ -107,5 +112,21 @@ describe("AddToCart", () => {
     await user.click(plus);
     await user.click(screen.getByRole("button", { name: th.cart.add.submit }));
     expect(addCartItem).toHaveBeenCalledWith("prod-1", 2);
+  });
+});
+
+describe("AddToCart header refresh", () => {
+  it("refreshes the server data after an add so the red cart badge updates", async () => {
+    addCartItem.mockResolvedValue({ ok: true });
+    render(<AddToCart {...props} />);
+    await userEvent.click(screen.getByRole("button", { name: th.cart.add.submit }));
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not refresh after a refused add", async () => {
+    addCartItem.mockResolvedValue(failure(409, "INSUFFICIENT_STOCK"));
+    render(<AddToCart {...props} />);
+    await userEvent.click(screen.getByRole("button", { name: th.cart.add.submit }));
+    expect(refresh).not.toHaveBeenCalled();
   });
 });

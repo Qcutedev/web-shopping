@@ -20,6 +20,11 @@ vi.mock("@/modules/cart", () => ({
   countCartLines: (...args: unknown[]) => countCartLines(...args),
 }));
 
+const getNavCounts = vi.fn();
+vi.mock("@/modules/notifications", () => ({
+  getNavCounts: (...args: unknown[]) => getNavCounts(...args),
+}));
+
 import { HeaderSession } from "./header-session";
 
 const actor = { userId: "u1", role: "CUSTOMER", storeId: null, storeStatus: null };
@@ -32,6 +37,13 @@ beforeEach(() => {
   getActor.mockReset();
   getProfile.mockReset();
   countCartLines.mockReset();
+  getNavCounts.mockReset();
+  getNavCounts.mockResolvedValue({
+    ordersOnTheWay: 0,
+    sellerToShip: 0,
+    pendingApplications: 0,
+    pendingProducts: 0,
+  });
   warn.mockReset();
 });
 

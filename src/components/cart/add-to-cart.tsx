@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { RequestError } from "@/components/account/request-error";
 import { Alert } from "@/components/ui/alert";
@@ -51,6 +52,7 @@ export interface AddToCartProps {
  * (`401`) shows a sign-in link that comes back to this product.
  */
 export function AddToCart({ productId, slug, stock, soldOut }: AddToCartProps) {
+  const router = useRouter();
   const [quantity, setQuantity] = useState(1);
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<ApiFailure | null>(null);
@@ -72,6 +74,8 @@ export function AddToCart({ productId, slug, stock, soldOut }: AddToCartProps) {
     setPending(false);
     if (response.ok) {
       setAdded(true);
+      // Re-reads the header so the red cart badge shows the new count.
+      router.refresh();
       return;
     }
     setFailure(response);

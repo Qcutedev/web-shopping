@@ -1,5 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { th } from "@/i18n/th";
 import { formatSatang } from "@/lib/format";
 import type {
@@ -9,6 +9,8 @@ import type {
   ProductListItemDto,
   ReviewDto,
 } from "@/modules/catalog/schema";
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+
 import { CatalogInvalidFilter, CatalogLoadError } from "./catalog-load-error";
 import { CategoryChipsView } from "./category-chips-view";
 import { ProductCard } from "./product-card";

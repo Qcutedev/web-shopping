@@ -5,11 +5,18 @@ import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import { UserName, USER_NAME_CONTAINER_CLASS } from "@/components/user-name";
 import { buttonVariants } from "@/components/ui/button";
+import { NotifyBadge } from "@/components/ui/notify-badge";
+import type { NavCounts } from "@/modules/notifications";
 import { fill } from "@/i18n/fill";
 import { th } from "@/i18n/th";
 import { signOut } from "@/lib/api-client/auth";
 import { ROUTES } from "@/lib/routes";
 import { cn } from "@/lib/utils";
+
+/** Accessible name of a link with a red count: the label, then the Thai count phrase. */
+function withCount(label: string, phrase: string, count: number): string | undefined {
+  return count > 0 ? `${label}, ${fill(phrase, { count })}` : undefined;
+}
 
 const ITEM =
   "type-label text-foreground hover:bg-surface-muted focus-ring flex min-h-11 w-full items-center rounded-sm px-3 text-left disabled:cursor-not-allowed disabled:text-foreground-disabled";
@@ -23,7 +30,23 @@ const ITEM =
  * Sign-out posts to `/api/v1/auth/sign-out`, disables itself while pending, and on success (or a
  * `401`, which means the session was already gone) goes home and refreshes the server data.
  */
-export function AccountMenu({ name, isAdmin = false }: { name: string | null; isAdmin?: boolean }) {
+export function AccountMenu({
+  name,
+  isAdmin = false,
+  isSeller = false,
+  counts,
+}: {
+  name: string | null;
+  isAdmin?: boolean;
+  isSeller?: boolean;
+  counts?: NavCounts;
+}) {
+  const onTheWay = counts?.ordersOnTheWay ?? 0;
+  const toShip = isSeller ? (counts?.sellerToShip ?? 0) : 0;
+  const adminPending = isAdmin
+    ? (counts?.pendingApplications ?? 0) + (counts?.pendingProducts ?? 0)
+    : 0;
+  const total = onTheWay + toShip + adminPending;
   const router = useRouter();
   const panelId = useId();
   const root = useRef<HTMLDivElement>(null);
@@ -93,6 +116,7 @@ export function AccountMenu({ name, isAdmin = false }: { name: string | null; is
         <span className={cn(USER_NAME_CONTAINER_CLASS, "truncate")}>
           {name === null ? visible : <UserName>{visible}</UserName>}
         </span>
+        <NotifyBadge count={total} className="ms-2" />
       </button>
       <div
         id={panelId}
@@ -102,12 +126,47 @@ export function AccountMenu({ name, isAdmin = false }: { name: string | null; is
         <Link href={ROUTES.account} className={ITEM} onClick={close}>
           {th.shell.header.account.profile}
         </Link>
-        <Link href={ROUTES.orders} className={ITEM} onClick={close}>
+        <Link
+          href={ROUTES.orders}
+          className={cn(ITEM, "justify-between")}
+          onClick={close}
+          aria-label={withCount(
+            th.shell.header.account.orders,
+            th.shell.header.account.ordersOnTheWay,
+            onTheWay,
+          )}
+        >
           {th.shell.header.account.orders}
+          <NotifyBadge count={onTheWay} />
         </Link>
+        {isSeller ? (
+          <Link
+            href={ROUTES.seller}
+            className={cn(ITEM, "justify-between")}
+            onClick={close}
+            aria-label={withCount(
+              th.shell.header.account.seller,
+              th.shell.header.account.sellerToShip,
+              toShip,
+            )}
+          >
+            {th.shell.header.account.seller}
+            <NotifyBadge count={toShip} />
+          </Link>
+        ) : null}
         {isAdmin ? (
-          <Link href={ROUTES.admin} className={ITEM} onClick={close}>
+          <Link
+            href={ROUTES.admin}
+            className={cn(ITEM, "justify-between")}
+            onClick={close}
+            aria-label={withCount(
+              th.shell.header.account.admin,
+              th.shell.header.account.adminPending,
+              adminPending,
+            )}
+          >
             {th.shell.header.account.admin}
+            <NotifyBadge count={adminPending} />
           </Link>
         ) : null}
         <button type="button" className={ITEM} disabled={pending} onClick={onSignOut}>

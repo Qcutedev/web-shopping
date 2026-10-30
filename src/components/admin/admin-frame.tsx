@@ -1,8 +1,9 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 import { th } from "@/i18n/th";
 import { cn } from "@/lib/utils";
 import { AdminNoticeRegion } from "./action-button";
+import { AdminNavBadge } from "./nav-badge";
 import { ADMIN_ROUTES } from "./routes";
 
 export type AdminPage =
@@ -53,6 +54,11 @@ export function AdminNav({ current }: { current?: AdminPage }) {
               )}
             >
               {th.admin.nav[page]}
+              {page === "applications" || page === "products" ? (
+                <Suspense fallback={null}>
+                  <AdminNavBadge kind={page} />
+                </Suspense>
+              ) : null}
             </Link>
           </li>
         ))}
