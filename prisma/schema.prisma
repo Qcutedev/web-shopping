@@ -3,7 +3,8 @@
 //
 // Not expressible here, and therefore hand-written in the migration (DATA_MODEL.md section 13):
 // every CHECK constraint, the three partial unique indexes, the sequence behind
-// `Order.orderNumber`, and the single `MarketplaceSettings` row. Since the migration
+// `Order.orderNumber`, the single `MarketplaceSettings` row, and (since the migration
+// `maintenance_status`) the single `MaintenanceStatus` row and its id check. Since the migration
 // `store_name_key` (section 21.7) also the function "store_name_key" and the generated column
 // `Store.nameKey`; the schema declares that column only so that the client can read it.
 //
@@ -507,6 +508,20 @@ model MarketplaceSettings {
   updatedById           String?
   updatedBy             User?    @relation(fields: [updatedById], references: [id], onDelete: Restrict)
   updatedAt             DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+}
+
+// Liveness of the scheduled maintenance run (SECURITY.md SEC-100 remediation (b); DATA_MODEL.md
+// section 6.19). Single row, id 1 (CHECK "MaintenanceStatus_id_check" in raw SQL), inserted by the
+// migration with every time NULL, which reads as "never ran" and not as a failure. No personal
+// data and no foreign key. `lastRunAt` and `lastRunOk` describe the latest run; `lastSuccessAt` is
+// the latest run in which all three jobs (payment timeout sweep, upload cleanup, session purge)
+// succeeded. No `createdAt`, as for `MarketplaceSettings`: the row's creation time means nothing.
+model MaintenanceStatus {
+  id            Int       @id
+  lastSuccessAt DateTime? @db.Timestamptz(3)
+  lastRunAt     DateTime? @db.Timestamptz(3)
+  lastRunOk     Boolean?
+  updatedAt     DateTime  @default(now()) @updatedAt @db.Timestamptz(3)
 }
 
 model AuditLog {

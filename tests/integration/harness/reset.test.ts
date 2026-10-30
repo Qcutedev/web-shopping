@@ -20,8 +20,10 @@ import {
 import {
   assertDatabaseIsReset,
   findResetLeftovers,
+  INITIAL_MAINTENANCE_STATUS,
   INITIAL_SETTINGS,
   listApplicationTables,
+  MIGRATION_ROW_TABLES,
   listSequences,
   resetDatabase,
 } from "../../helpers/reset";
@@ -57,6 +59,11 @@ async function dirtyTheDatabase(): Promise<string[]> {
   await db.marketplaceSettings.update({
     where: { id: 1 },
     data: { flatShippingFeeSatang: 9_900, commissionRateBps: 1_000, updatedById: admin.id },
+  });
+  const ranAt = new Date();
+  await db.maintenanceStatus.update({
+    where: { id: 1 },
+    data: { lastRunAt: ranAt, lastRunOk: true, lastSuccessAt: ranAt },
   });
   return [first.order.orderNumber, second.order.orderNumber];
 }
@@ -109,18 +116,28 @@ describe("resetDatabase", () => {
     }
     const leftoverObjects = (await findResetLeftovers()).map((item) => item.object);
     expect(leftoverObjects).toEqual(
-      expect.arrayContaining(["User", "Order", "order_number_seq", "MarketplaceSettings"]),
+      expect.arrayContaining([
+        "User",
+        "Order",
+        "order_number_seq",
+        "MarketplaceSettings",
+        "MaintenanceStatus",
+      ]),
     );
 
     await resetDatabase();
 
     const clean = await countRowsPerTable();
+    const migrationRowTables: readonly string[] = MIGRATION_ROW_TABLES;
     for (const [table, count] of Object.entries(clean)) {
-      expect(count, table).toBe(table === "MarketplaceSettings" ? 1 : 0);
+      expect(count, table).toBe(migrationRowTables.includes(table) ? 1 : 0);
     }
     const settings = await db.marketplaceSettings.findMany();
     expect(settings).toHaveLength(1);
     expect(settings[0]).toMatchObject({ ...INITIAL_SETTINGS, updatedById: null });
+    const maintenance = await db.maintenanceStatus.findMany();
+    expect(maintenance).toHaveLength(1);
+    expect(maintenance[0]).toMatchObject(INITIAL_MAINTENANCE_STATUS);
     expect(await findResetLeftovers()).toEqual([]);
     await expect(assertDatabaseIsReset()).resolves.toBeUndefined();
 
@@ -186,6 +203,34 @@ describe("findResetLeftovers names what is not in the reset state", () => {
 
     expect(await findResetLeftovers()).toEqual([
       { object: "MarketplaceSettings", found: "0 row(s), not the single initial row" },
+    ]);
+  });
+
+  it.each([
+    ["the last run time", { lastRunAt: new Date() }],
+    ["the last run result", { lastRunOk: false }],
+    ["the last success time", { lastSuccessAt: new Date() }],
+  ])("reports a changed maintenance status: %s", async (_label, data) => {
+    await resetDatabase();
+    await db.maintenanceStatus.update({ where: { id: 1 }, data });
+
+    expect(await findResetLeftovers()).toEqual([
+      { object: "MaintenanceStatus", found: "1 row(s), not the single initial row" },
+    ]);
+  });
+
+  it("reports a missing maintenance status row, and the reset puts it back", async () => {
+    await resetDatabase();
+    await db.maintenanceStatus.delete({ where: { id: 1 } });
+
+    expect(await findResetLeftovers()).toEqual([
+      { object: "MaintenanceStatus", found: "0 row(s), not the single initial row" },
+    ]);
+
+    await resetDatabase();
+
+    expect(await db.maintenanceStatus.findMany()).toEqual([
+      expect.objectContaining(INITIAL_MAINTENANCE_STATUS),
     ]);
   });
 });

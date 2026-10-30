@@ -9,7 +9,7 @@
 import { describeConnectionTarget } from "@/server/db/connection-target";
 import { db } from "@/server/db";
 import { createCategory, createProduct, createStore } from "../helpers/factories";
-import { INITIAL_SETTINGS, listApplicationTables, listSequences } from "../helpers/reset";
+import { listApplicationTables, listSequences, restoreMigrationRowsSql } from "../helpers/reset";
 import { quoteIdentifier } from "../helpers/sql";
 import {
   assertConnectedToTestDatabase,
@@ -48,8 +48,9 @@ async function checkServer(): Promise<void> {
 
 /**
  * Empties every application table and restarts every sequence in one transaction, then puts the
- * settings row back as the first migration has it. Table and sequence lists, quoting, and the
- * initial settings are the integration reset helper's (CR-129).
+ * rows that migrations insert back as the migrations have them (the settings row and the
+ * maintenance status row). Table and sequence lists, quoting, and those rows are the integration
+ * reset helper's (CR-129).
  */
 async function empty(): Promise<void> {
   const tables = await listApplicationTables();
@@ -59,10 +60,7 @@ async function empty(): Promise<void> {
     ...sequences.map((name) =>
       db.$executeRawUnsafe(`ALTER SEQUENCE ${quoteIdentifier(name)} RESTART`),
     ),
-    db.$executeRawUnsafe(
-      `INSERT INTO "MarketplaceSettings" ("id", "flatShippingFeeSatang", "commissionRateBps", "updatedById", "updatedAt")
-       VALUES (${INITIAL_SETTINGS.id}, ${INITIAL_SETTINGS.flatShippingFeeSatang}, ${INITIAL_SETTINGS.commissionRateBps}, NULL, CURRENT_TIMESTAMP)`,
-    ),
+    ...restoreMigrationRowsSql().map((sql) => db.$executeRawUnsafe(sql)),
   ]);
 }
 

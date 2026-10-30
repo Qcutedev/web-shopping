@@ -1,7 +1,7 @@
 /**
- * The 35 named CHECK constraints of the schema (DATA_MODEL.md sections 21.3, 21.8 and 21.9;
- * migrations 20261011121529_init_schema_v1, 20261028163543_review_admin_hide and
- * 20261028183507_user_rate_limit_window).
+ * The 36 named CHECK constraints of the schema (DATA_MODEL.md sections 21.3, 21.8, 21.9 and
+ * 21.11; migrations 20261011121529_init_schema_v1, 20261028163543_review_admin_hide,
+ * 20261028183507_user_rate_limit_window and 20261030120000_maintenance_status).
  *
  * For each constraint: writes that it must reject, each matched on the PostgreSQL code 23514
  * and on the constraint's name, and writes at its edges that it must accept, so that a
@@ -666,6 +666,37 @@ const CHECK_CONSTRAINTS: Record<string, Cases> = {
     },
   },
 
+  // DATA_MODEL.md 6.19 and 21.11 (migration 20261030120000_maintenance_status). Same pattern as
+  // MarketplaceSettings_id_check: a single row, inserted by the migration with every time NULL.
+  MaintenanceStatus_id_check: {
+    rejects: {
+      "a second row with id 2": () => db.maintenanceStatus.create({ data: { id: 2 } }),
+      "a second row with id 0": () => db.maintenanceStatus.create({ data: { id: 0 } }),
+      "a second row with id -1 in raw SQL": () =>
+        db.$executeRaw`INSERT INTO "MaintenanceStatus" ("id", "updatedAt") VALUES (-1, now())`,
+      "moving the row to id 2": () =>
+        db.maintenanceStatus.update({ where: { id: 1 }, data: { id: 2 } }),
+    },
+    // The delete and the insert are one transaction: no other session ever sees the table
+    // without its single row.
+    accepts: {
+      "an insert of the row with id 1, in the transaction that deleted it": () =>
+        db.$transaction([
+          db.maintenanceStatus.delete({ where: { id: 1 } }),
+          db.maintenanceStatus.create({ data: { id: 1 } }),
+        ]),
+      "an update of the row with id 1 that records a successful run": () => {
+        const at = new Date();
+        return db.maintenanceStatus.update({
+          where: { id: 1 },
+          data: { lastRunAt: at, lastRunOk: true, lastSuccessAt: at },
+        });
+      },
+      "an update that writes id 1 again": () =>
+        db.maintenanceStatus.update({ where: { id: 1 }, data: { id: 1 } }),
+    },
+  },
+
   // DATA_MODEL.md 6.18 and 21.9 (migration 20261028183507_user_rate_limit_window).
   UserRateLimitWindow_count_check: {
     rejects: {
@@ -771,6 +802,16 @@ describe("a rejected write changes nothing (T-013 acceptance: negative stock and
 
     expect(await db.marketplaceSettings.count()).toBe(1);
   });
+
+  // Earlier cases of this file write the row, so it is compared with itself, not with NULLs.
+  it("keeps the single maintenance status row unchanged when a second one is refused", async () => {
+    const before = await db.maintenanceStatus.findMany();
+    expect(before).toHaveLength(1);
+
+    await captureViolation(() => db.maintenanceStatus.create({ data: { id: 2 } }));
+
+    expect(await db.maintenanceStatus.findMany()).toEqual(before);
+  });
 });
 
 describe("every CHECK constraint of the database has cases in this file", () => {
@@ -783,7 +824,7 @@ describe("every CHECK constraint of the database has cases in this file", () => 
       ORDER BY c.conname`;
     const inDatabase = rows.map((row) => row.name).sort();
 
-    expect(inDatabase).toHaveLength(35);
+    expect(inDatabase).toHaveLength(36);
     expect(Object.keys(CHECK_CONSTRAINTS).sort()).toEqual(inDatabase);
   });
 

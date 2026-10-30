@@ -9,6 +9,8 @@
  * - no row in any application table (the four auth tables included);
  * - the single `MarketplaceSettings` row back at its initial values. `TRUNCATE ... CASCADE`
  *   empties that table as well, because it has a foreign key to `User`, so the row is put back;
+ * - the single `MaintenanceStatus` row back as its migration inserts it (every time NULL, "never
+ *   ran"). The table is in the truncated list like any other, so the row is put back too;
  * - every sequence restarted, so the first order of a file gets sequence value 1.
  *
  * The tables and sequences are read from the catalogue, not listed here, so a table added by a
@@ -25,6 +27,33 @@ export const INITIAL_SETTINGS = {
   flatShippingFeeSatang: 4000,
   commissionRateBps: 500,
 } as const;
+
+/** The maintenance status row as migration `20261030120000_maintenance_status` inserts it. */
+export const INITIAL_MAINTENANCE_STATUS = {
+  id: 1,
+  lastSuccessAt: null,
+  lastRunAt: null,
+  lastRunOk: null,
+} as const;
+
+/**
+ * Tables whose rows are inserted by a migration and put back by a reset, so a reset leaves them
+ * with exactly those rows instead of none.
+ */
+export const MIGRATION_ROW_TABLES = ["MarketplaceSettings", "MaintenanceStatus"] as const;
+
+/**
+ * The statements that put the migration-inserted rows back after a `TRUNCATE`, in the order of
+ * `MIGRATION_ROW_TABLES`. Shared with the end-to-end setup (tests/e2e-support/database.ts).
+ */
+export function restoreMigrationRowsSql(): string[] {
+  return [
+    `INSERT INTO "MarketplaceSettings" ("id", "flatShippingFeeSatang", "commissionRateBps", "updatedById", "updatedAt")
+     VALUES (${INITIAL_SETTINGS.id}, ${INITIAL_SETTINGS.flatShippingFeeSatang}, ${INITIAL_SETTINGS.commissionRateBps}, NULL, CURRENT_TIMESTAMP)`,
+    `INSERT INTO "MaintenanceStatus" ("id", "lastSuccessAt", "lastRunAt", "lastRunOk", "updatedAt")
+     VALUES (${INITIAL_MAINTENANCE_STATUS.id}, NULL, NULL, NULL, CURRENT_TIMESTAMP)`,
+  ];
+}
 
 const MIGRATIONS_TABLE = "_prisma_migrations";
 
@@ -81,10 +110,7 @@ export async function resetDatabase(): Promise<void> {
     ...sequences.map((name) =>
       db.$executeRawUnsafe(`ALTER SEQUENCE ${quoteIdentifier(name)} RESTART`),
     ),
-    db.$executeRawUnsafe(
-      `INSERT INTO "MarketplaceSettings" ("id", "flatShippingFeeSatang", "commissionRateBps", "updatedById", "updatedAt")
-       VALUES (${INITIAL_SETTINGS.id}, ${INITIAL_SETTINGS.flatShippingFeeSatang}, ${INITIAL_SETTINGS.commissionRateBps}, NULL, CURRENT_TIMESTAMP)`,
-    ),
+    ...restoreMigrationRowsSql().map((sql) => db.$executeRawUnsafe(sql)),
   ]);
 }
 
@@ -95,14 +121,17 @@ export type ResetLeftover = { object: string; found: string };
  * One round trip.
  */
 export async function findResetLeftovers(): Promise<ResetLeftover[]> {
-  const tables = (await listApplicationTables()).filter((name) => name !== "MarketplaceSettings");
+  const migrationRowTables: readonly string[] = MIGRATION_ROW_TABLES;
+  const tables = (await listApplicationTables()).filter(
+    (name) => !migrationRowTables.includes(name),
+  );
   const counts = tables
     .map(
       (name) =>
         `SELECT ${quoteLiteral(name)} AS object, count(*)::int AS n FROM ${quoteIdentifier(name)}`,
     )
     .join(" UNION ALL ");
-  const [tableRows, sequenceRows, settingsRows] = await db.$transaction([
+  const [tableRows, sequenceRows, settingsRows, maintenanceRows] = await db.$transaction([
     db.$queryRawUnsafe<{ object: string; n: number }[]>(counts),
     db.$queryRawUnsafe<{ object: string; last: string | null }[]>(
       "SELECT sequencename AS object, last_value::text AS last FROM pg_sequences WHERE schemaname = 'public'",
@@ -116,6 +145,16 @@ export async function findResetLeftovers(): Promise<ResetLeftover[]> {
       }[]
     >(
       'SELECT "id", "flatShippingFeeSatang", "commissionRateBps", "updatedById" FROM "MarketplaceSettings" ORDER BY "id"',
+    ),
+    db.$queryRawUnsafe<
+      {
+        id: number;
+        lastSuccessAt: Date | null;
+        lastRunAt: Date | null;
+        lastRunOk: boolean | null;
+      }[]
+    >(
+      'SELECT "id", "lastSuccessAt", "lastRunAt", "lastRunOk" FROM "MaintenanceStatus" ORDER BY "id"',
     ),
   ]);
 
@@ -146,6 +185,20 @@ export async function findResetLeftovers(): Promise<ResetLeftover[]> {
     leftovers.push({
       object: "MarketplaceSettings",
       found: `${settingsRows.length} row(s), not the single initial row`,
+    });
+  }
+  const maintenance = maintenanceRows[0];
+  const maintenanceIsInitial =
+    maintenanceRows.length === 1 &&
+    maintenance !== undefined &&
+    maintenance.id === INITIAL_MAINTENANCE_STATUS.id &&
+    maintenance.lastSuccessAt === null &&
+    maintenance.lastRunAt === null &&
+    maintenance.lastRunOk === null;
+  if (!maintenanceIsInitial) {
+    leftovers.push({
+      object: "MaintenanceStatus",
+      found: `${maintenanceRows.length} row(s), not the single initial row`,
     });
   }
   return leftovers;

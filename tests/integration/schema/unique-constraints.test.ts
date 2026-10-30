@@ -503,6 +503,11 @@ const PRIMARY_KEYS: Record<string, () => Promise<Write>> = {
         data: { id: row.id, flatShippingFeeSatang: 4_000, commissionRateBps: 500 },
       });
   },
+  // Same as MarketplaceSettings: the migration's single row is the one duplicated.
+  MaintenanceStatus_pkey: async () => {
+    const row = await db.maintenanceStatus.findUniqueOrThrow({ where: { id: 1 } });
+    return () => db.maintenanceStatus.create({ data: { id: row.id } });
+  },
   AuditLog_pkey: async () => {
     const row = await createAuditLog();
     return () => createAuditLog({ id: row.id });
