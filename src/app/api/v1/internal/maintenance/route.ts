@@ -11,18 +11,26 @@
  * not apply): the bearer header, which a browser cannot send cross-site without a CORS preflight
  * this application never answers, is the CSRF control. The body is never read.
  *
+ * SEC-099: a refused request is counted per client address (rule `maintenance-refused`,
+ * src/modules/maintenance/refusal-limit.ts). Within the rule it is `401` and one
+ * `security("warn", ...)` line, which `LOG_LEVEL` does not filter; past it, `429 RATE_LIMITED`
+ * with `Retry-After` and no line. A request with the right secret never consumes the rule.
+ *
  * `200` with counts when every job succeeded; `500 INTERNAL_ERROR` (fixed text, nothing else)
  * when at least one failed, so a scheduler that fails on a non-2xx status reports it. The jobs
  * that succeeded have done their work either way; each job's own log line says which failed.
  */
 import {
+  countMaintenanceRefusal,
   isAuthorizedMaintenanceRequest,
   type MaintenanceReport,
   runMaintenanceOnce,
 } from "@/modules/maintenance";
+import { getClientAddress } from "@/server/client-address";
 import { getEnv } from "@/server/env";
-import { internalError, unauthenticated } from "@/server/errors";
+import { internalError, rateLimited, unauthenticated } from "@/server/errors";
 import { ok } from "@/server/http";
+import { logger } from "@/server/logger";
 import { createMaintenanceJobs } from "@/server/maintenance-jobs";
 import { handleRequest } from "@/server/request-frame";
 
@@ -33,8 +41,12 @@ export async function POST(request: Request): Promise<Response> {
   return handleRequest(request, async ({ requestId, log }) => {
     const env = getEnv();
     if (!isAuthorizedMaintenanceRequest(request.headers, env.cronSecret)) {
+      const refusal = await countMaintenanceRefusal(getClientAddress(request, env.trustedProxy));
+      if (!refusal.allowed) throw rateLimited(refusal.retryAfterSeconds);
       // Nothing of the request is logged: not the header, not whether it was present.
-      log.warn("Maintenance request refused", { component: "maintenance" });
+      logger
+        .child({ requestId })
+        .security("warn", "Maintenance request refused", { component: "maintenance" });
       throw unauthenticated();
     }
     const report: MaintenanceReport = await runMaintenanceOnce(

@@ -8,5 +8,10 @@ export {
   isAuthorizedMaintenanceRequest,
   MAX_AUTHORIZATION_HEADER_LENGTH,
 } from "./authorization";
+export {
+  countMaintenanceRefusal,
+  MAINTENANCE_REFUSED_RULE,
+  type MaintenanceRefusal,
+} from "./refusal-limit";
 export * from "./schema";
 export { type MaintenanceJobs, runMaintenance, runMaintenanceOnce } from "./service";

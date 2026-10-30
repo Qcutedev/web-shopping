@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { POST } from "@/app/api/v1/internal/maintenance/route";
+import { MAINTENANCE_REFUSED_RULE } from "@/modules/maintenance";
 import { generateStorageKey, UPLOAD_ROOT_MARKER } from "@/modules/uploads";
 import { db } from "@/server/db";
 
@@ -40,8 +41,16 @@ afterAll(async () => {
   await rm(uploadDir, { recursive: true, force: true });
 });
 
+/** The process-wide count of refused requests (SEC-099, src/modules/maintenance/refusal-limit.ts). */
+function resetRefusalLimiter(): void {
+  delete (globalThis as Record<symbol, unknown>)[
+    Symbol.for("marketplace.maintenance.refusalLimiter")
+  ];
+}
+
 beforeEach(async () => {
   resetProcessRateLimiter();
+  resetRefusalLimiter();
   // The SEC-073 marker: a root without it is "not ready" and the cleanup deletes nothing.
   await writeFile(join(uploadDir, UPLOAD_ROOT_MARKER), "");
 });
@@ -117,6 +126,25 @@ describe("POST /api/v1/internal/maintenance", () => {
     await expect401(await POST(maintenance({ authorization: `Bearer ${CRON_SECRET}x` })));
     await expect401(await POST(maintenance({ authorization: "Bearer " })));
     expect(diffSnapshots(before, await snapshotDatabase())).toEqual([]);
+  });
+
+  it("answers 429 past the refusal rule, changes nothing, and still serves the right secret (SEC-099)", async () => {
+    const { order } = await staleState();
+    const before = await snapshotDatabase();
+    for (let index = 0; index < MAINTENANCE_REFUSED_RULE.limit; index += 1) {
+      await expect401(await POST(maintenance({ authorization: "Bearer wrong" })));
+    }
+    const limited = await POST(maintenance({ authorization: "Bearer wrong" }));
+    expect(limited.status).toBe(429);
+    expect(Number(limited.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
+    const body = (await limited.json()) as { error: Record<string, unknown> };
+    expect(body.error).toMatchObject({ code: "RATE_LIMITED", details: {} });
+    expect(diffSnapshots(before, await snapshotDatabase())).toEqual([]);
+
+    const response = await POST(maintenance(AUTHORIZED));
+    expect(response.status).toBe(200);
+    const after = await db.order.findUniqueOrThrow({ where: { id: order.id } });
+    expect(after.paymentStatus).toBe("FAILED");
   });
 
   it("ignores a real session: an admin's or a customer's cookie never authorizes it", async () => {

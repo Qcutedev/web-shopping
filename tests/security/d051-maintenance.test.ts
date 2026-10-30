@@ -83,6 +83,10 @@ beforeEach(() => {
     return true;
   });
   config.cronSecret = SECRET;
+  // SEC-099: each case starts with no refusal counted.
+  delete (globalThis as Record<symbol, unknown>)[
+    Symbol.for("marketplace.maintenance.refusalLimiter")
+  ];
   createJobsMock.mockReset();
   createJobsMock.mockImplementation(() => stubJobs());
 });
@@ -198,26 +202,22 @@ describe("SEC-098 the workflow retries a POST that reached the server (FIXED in 
 });
 
 describe("SEC-099 refused requests are not rate limited and their line obeys LOG_LEVEL", () => {
-  it.fails(
-    "a burst of refused requests is cut off by a rate limit (429) or a bounded log",
-    async () => {
-      const statuses: number[] = [];
-      for (let i = 0; i < 200; i += 1) {
-        const response = await POST(post({ authorization: "Bearer wrong" }));
-        statuses.push(response.status);
-      }
-      const refusedLines = lines.filter((l) => l.includes("Maintenance request refused")).length;
-      expect(statuses.includes(429) || refusedLines < 200).toBe(true);
-    },
-  );
+  // Fixed: refusals count against `maintenance-refused` (429 past it) and the line goes through
+  // security().
+  it("a burst of refused requests is cut off by a rate limit (429) or a bounded log", async () => {
+    const statuses: number[] = [];
+    for (let i = 0; i < 200; i += 1) {
+      const response = await POST(post({ authorization: "Bearer wrong" }));
+      statuses.push(response.status);
+    }
+    const refusedLines = lines.filter((l) => l.includes("Maintenance request refused")).length;
+    expect(statuses.includes(429) || refusedLines < 200).toBe(true);
+  });
 
-  it.fails(
-    "the refusal line is written through security(), which LOG_LEVEL does not filter",
-    () => {
-      const source = read("src/app/api/v1/internal/maintenance/route.ts");
-      expect(source).toMatch(/\.security\(\s*"warn",\s*"Maintenance request refused"/);
-    },
-  );
+  it("the refusal line is written through security(), which LOG_LEVEL does not filter", () => {
+    const source = read("src/app/api/v1/internal/maintenance/route.ts");
+    expect(source).toMatch(/\.security\(\s*"warn",\s*"Maintenance request refused"/);
+  });
 });
 
 describe("SEC-100 a scheduler that stops calling goes unnoticed", () => {
