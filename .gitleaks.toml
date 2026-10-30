@@ -106,3 +106,14 @@ paths = [
   '''^tests/security/t019-server-utilities\.test\.ts$''',
 ]
 regexes = ['''api\.token\.v1:12345SECRETPW''']
+
+# Made-up BLOB_READ_WRITE_TOKEN secret part, assembled at run time in the env test (D-051).
+[[allowlists]]
+description = "BLOB token canary part in the env test"
+condition = "AND"
+targetRules = ["generic-api-key"]
+regexTarget = "line"
+paths = [
+  '''^src/server/env\.test\.ts$''',
+]
+regexes = ['''Zq7canaryBlobSecret0123''']

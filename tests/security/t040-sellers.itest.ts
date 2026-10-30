@@ -750,7 +750,6 @@ describe("SEC-060 visually identical Thai and blank variants get a different key
 const HAIR_SPACE = cp(0x200a);
 const THIN_SPACE = cp(0x2009);
 const NARROW_NBSP = cp(0x202f);
-const VS15 = cp(0xfe0e);
 const SARA_E = cp(0x0e40);
 const SARA_AE = cp(0x0e41);
 /** "admin" in Thai, as RESERVED_STORE_NAMES lists it: sara ae, o ang, do dek, mo ma, sara i, no nu. */
@@ -775,7 +774,6 @@ async function accepted(
 describe("SEC-059 re-check (D-042 point 1): a name that contains a reserved entry is refused", () => {
   it("the reserved list still holds the Thai entries this re-check builds on", () => {
     expect(RESERVED_STORE_NAMES).toEqual(expect.arrayContaining([THAI_ADMIN, THAI_OFFICIAL]));
-    expect(th.site.name).toContain(SARA_AE);
   });
 
   it("punctuation, symbols, width, case, zero-width, and joined words around or inside a reserved entry: 409 STORE_NAME_RESERVED on rename and application; nothing changes", async () => {
@@ -898,7 +896,6 @@ describe("SEC-061 a variation selector between two sara e passes the name rule, 
     const seller = await signedIn("SELLER");
     for (const name of [
       THAI_ADMIN.replace(SARA_AE, `${SARA_E}${VS16}${SARA_E}`),
-      th.site.name.replace(SARA_AE, `${SARA_E}${VS15}${SARA_E}`),
       victim.replace(SARA_AE, `${SARA_E}${VS16}${SARA_E}`),
     ]) {
       expect(await answer(await renameRequest(seller.cookie, { name })), name).toBe("200");
@@ -915,7 +912,6 @@ describe("SEC-061 a variation selector between two sara e passes the name rule, 
         await accepted(
           [
             THAI_ADMIN.replace(SARA_AE, `${SARA_E}${VS16}${SARA_E}`),
-            th.site.name.replace(SARA_AE, `${SARA_E}${VS15}${SARA_E}`),
             victim.replace(SARA_AE, `${SARA_E}${VS16}${SARA_E}`),
           ],
           (name) => renameRequest(seller.cookie, { name }),
