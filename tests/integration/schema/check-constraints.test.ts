@@ -163,11 +163,11 @@ const CHECK_CONSTRAINTS: Record<string, Cases> = {
     rejects: {
       "zero bytes": () => createUpload({ sizeBytes: 0 }),
       "a negative size": () => createUpload({ sizeBytes: -1 }),
-      "one byte over 5 MB": () => createUpload({ sizeBytes: 5_242_881 }),
+      "one byte over 4 MiB": () => createUpload({ sizeBytes: 4_194_305 }),
     },
     accepts: {
       "one byte": () => createUpload({ sizeBytes: 1 }),
-      "exactly 5 MB": () => createUpload({ sizeBytes: 5_242_880 }),
+      "exactly 4 MiB": () => createUpload({ sizeBytes: 4_194_304 }),
     },
   },
 

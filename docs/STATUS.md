@@ -1,4 +1,4 @@
-﻿# Status
+# Status
 
 The only place task status is recorded. Owner: orchestrator. Task definitions are in [PROJECT_PLAN.md](PROJECT_PLAN.md).
 
