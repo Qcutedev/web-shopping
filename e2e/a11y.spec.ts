@@ -39,7 +39,19 @@ async function ready(page: Page): Promise<void> {
 
 async function scan(page: Page, label: string, width: number): Promise<void> {
   await ready(page);
-  const result = await new AxeBuilder({ page }).withTags(TAGS).analyze();
+  // A cold dev server can reload the page while it compiles; axe then fails with "Execution
+  // context was destroyed". Retry on that error only; any violation still fails the test.
+  let result: Awaited<ReturnType<AxeBuilder["analyze"]>> | undefined;
+  for (let attempt = 1; !result; attempt++) {
+    try {
+      await page.waitForLoadState("load");
+      result = await new AxeBuilder({ page }).withTags(TAGS).analyze();
+    } catch (error) {
+      const retryable = /Execution context was destroyed|navigation/i.test(String(error));
+      if (!retryable || attempt >= 4) throw error;
+      await ready(page);
+    }
+  }
   const lines = result.violations.flatMap((violation) =>
     violation.nodes.map(
       (node) => `${violation.id} [${violation.impact ?? "n/a"}] ${node.target.join(" ")}`,
