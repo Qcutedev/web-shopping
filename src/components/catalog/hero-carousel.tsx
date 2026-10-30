@@ -238,54 +238,57 @@ export function HeroCarousel({
         />
       ) : null}
 
-      <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-3 px-4 pb-4 md:px-8">
-        <div className="flex items-center gap-1">
-          {slides.map((slide, i) => (
+      <div className="absolute inset-x-0 bottom-0 pb-4">
+        <div className="mx-auto flex max-w-[90rem] items-center justify-between gap-3 px-6 @xl:px-14">
+          {/* -ml-1.5 cancels the 6px padding around the first dot, so it lines up with the text. */}
+          <div className="-ml-1.5 flex items-center gap-1">
+            {slides.map((slide, i) => (
+              <button
+                key={slide.kicker}
+                type="button"
+                aria-label={labels.goTo.replace("{number}", String(i + 1))}
+                aria-current={i === index ? "true" : undefined}
+                onClick={() => go(i)}
+                className="focus-ring group flex size-11 items-center justify-center rounded-full"
+              >
+                <span
+                  className={cn(
+                    "bg-ink block h-2 rounded-full transition-all duration-300",
+                    i === index ? "w-8" : "w-2 opacity-40 group-hover:opacity-70",
+                  )}
+                />
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1">
             <button
-              key={slide.kicker}
               type="button"
-              aria-label={labels.goTo.replace("{number}", String(i + 1))}
-              aria-current={i === index ? "true" : undefined}
-              onClick={() => go(i)}
-              className="focus-ring group flex size-11 items-center justify-center rounded-full"
+              aria-label={labels.previous}
+              onClick={() => go(index - 1)}
+              className={ROUND_BUTTON}
             >
-              <span
-                className={cn(
-                  "bg-ink block h-2 rounded-full transition-all duration-300",
-                  i === index ? "w-8" : "w-2 opacity-40 group-hover:opacity-70",
-                )}
-              />
+              <ChevronLeftIcon />
             </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            aria-label={labels.previous}
-            onClick={() => go(index - 1)}
-            className={ROUND_BUTTON}
-          >
-            <ChevronLeftIcon />
-          </button>
-          <button
-            type="button"
-            aria-label={labels.next}
-            onClick={() => go(index + 1)}
-            className={ROUND_BUTTON}
-          >
-            <ChevronRightIcon />
-          </button>
-          <button
-            type="button"
-            aria-label={playing ? labels.pause : labels.play}
-            aria-pressed={!playing}
-            onClick={() => setPlaying((value) => !value)}
-            className={ROUND_BUTTON}
-          >
-            <svg viewBox="0 0 20 20" className="size-5" fill="currentColor" aria-hidden="true">
-              {playing ? <path d="M6 4h3v12H6zM11 4h3v12h-3z" /> : <path d="M6 4l10 6-10 6z" />}
-            </svg>
-          </button>
+            <button
+              type="button"
+              aria-label={labels.next}
+              onClick={() => go(index + 1)}
+              className={ROUND_BUTTON}
+            >
+              <ChevronRightIcon />
+            </button>
+            <button
+              type="button"
+              aria-label={playing ? labels.pause : labels.play}
+              aria-pressed={!playing}
+              onClick={() => setPlaying((value) => !value)}
+              className={ROUND_BUTTON}
+            >
+              <svg viewBox="0 0 20 20" className="size-5" fill="currentColor" aria-hidden="true">
+                {playing ? <path d="M6 4h3v12H6zM11 4h3v12h-3z" /> : <path d="M6 4l10 6-10 6z" />}
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
     </section>
