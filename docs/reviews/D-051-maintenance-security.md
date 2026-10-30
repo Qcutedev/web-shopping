@@ -2,7 +2,7 @@
 
 Reviewer: security agent. Date: 2026-10-30. Range: `4c460df..bc3717a` (the brief named `4c460df..HEAD`; HEAD moved from `4e38a16` to `bc3717a` during the review, and that commit is included).
 
-Findings continue the numbering of [../SECURITY.md](../SECURITY.md): SEC-097 to SEC-101. They are not yet copied into the SECURITY.md register; the orchestrator decides when this file is merged into it.
+Findings continue the numbering of [../SECURITY.md](../SECURITY.md): SEC-097 to SEC-101. They are copied into the SECURITY.md register, which holds the current status of each; the `Status:` lines below are as of the review and are not updated.
 
 Reproductions: `tests/security/d051-maintenance.test.ts` (no database, no server). `it` cases are controls that hold; `it.fails` cases demonstrate an open finding. Each `it.fails` case was flipped to `it` in a temporary copy and failed on its flaw assertion (output below).
 

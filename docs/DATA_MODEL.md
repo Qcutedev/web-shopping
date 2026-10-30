@@ -1537,4 +1537,4 @@ Added 2026-10-30 by migration `20261030090000_upload_size_cap_4mib`. D-051 lower
 
 **Before a shared database.** Run `SELECT count(*) FROM "Upload" WHERE "sizeBytes" > 4194304;` first. If it is not 0, the migration stops with `upload_size_cap_4mib: N Upload row(s) exceed 4194304 bytes` and changes nothing. Such rows are files accepted before D-051; the owner decides what happens to them (an order may reference them through `OrderItem.productImageUploadId`, so they cannot simply be deleted). No shared or production database exists yet.
 
-**Tests that state the old cap.** `tests/integration/schema/check-constraints.test.ts` (`Upload_sizeBytes_check`: "one byte over 5 MB" rejected, "exactly 5 MB" accepted) and the `it.fails` case for SEC-101 in `tests/security/d051-maintenance.test.ts` describe the old cap. They belong to qa and security and are updated by them, not here.
+**Tests.** `tests/integration/schema/check-constraints.test.ts` (`Upload_sizeBytes_check`) and the SEC-101 case in `tests/security/d051-maintenance.test.ts` use the 4 MiB cap (commits 926f237 and 4075a26).
