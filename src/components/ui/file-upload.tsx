@@ -28,7 +28,7 @@ export interface FileUploadProps {
   dropText: ReactNode;
   /** Label of the choose-files button. */
   buttonLabel: string;
-  /** The limits: type, size, count, for example "JPEG, PNG, WebP ไม่เกิน 5 MB ไม่เกิน 8 ไฟล์". Always show them. */
+  /** The limits: type, size, count, for example "JPEG, PNG, WebP ไม่เกิน 4 MiB ไม่เกิน 8 ไฟล์". Always show them. */
   limitsText: ReactNode;
   /** Error that concerns the whole control (too many files, wrong type). Per-file errors go on the item. */
   errorText?: ReactNode;

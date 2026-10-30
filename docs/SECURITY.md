@@ -133,6 +133,8 @@ Decisions on the implementation (security owner, 2026-10-11, after reviewing `sr
 
 **Capacity split changed for SEC-050 (owner ruling D-038 option (a), built 2026-10-14 in commit 212a70d, re-checked by security 2026-10-14).** `sign-in-account` holds 50,000 windows, taken from the four signed-in rules (20,000 to 10,000 each). The total was unchanged (200,000). No limit or window a client sees changed. The split meets D-038's test (filling `sign-in-account` costs clearly more than 33 new emails a second); the signed-in half of the trade is SEC-052.
 
+**Separate limiter outside this budget (SEC-099, 2026-10-30).** The rule `maintenance-refused` (refused requests to `POST /api/v1/internal/maintenance`, per client address, 10 per 60 s) has its own limiter and its own in-process store of 1,000 windows (`src/modules/maintenance/refusal-limit.ts`). It is not one of the rules of `RATE_LIMITS`, so it takes nothing from the 180,000 windows below and the split below is unchanged. It fails closed at its cap (`429`, saturation line once a minute, as item 4). Counts are per instance. Only refusals are counted; a request with the right secret never consumes it.
+
 **Capacity split changed for SEC-052 (option (a), f3cedda; option (b), fcc692b; owner decision of 2026-10-29 recorded here): in force.** Option (a) added `signed-in-address` (5,000 windows, taken from `uploads`, 10,000 to 5,000). Option (b) moved `seller-application` and `review-create` out of the in-process table into the database (`UserRateLimitWindow`, one row per user and rule, no capacity; `USER_RATE_LIMITS` in `src/server/rate-limit.ts`). **Owner decision 2026-10-29: `MAX_TOTAL_WINDOWS` is lowered from 200,000 to 180,000, by exactly the 20,000 windows the two moved rules held; every other capacity is unchanged.** The in-process rules still use the whole budget, so a new in-process rule still needs a new split recorded here. Re-checked by security 2026-10-29 (`tests/security/sec050-recheck.test.ts` pins 180,000 and every capacity). As in force:
 
 | Rule | Subject | Limit | Window | maxKeys | New subjects per second to keep it full | Distinct networks to keep it full |
@@ -264,7 +266,7 @@ State today: the saturation warning uses `security("warn", ...)` (SEC-031 fixed)
    | 10 | In the service: every other outcome | `409`, `422` | | **Approved**, on the condition that it never comes before step 9 for a resource named by an id |
 
    **Store status (steps 4 and 8): the one rule.** `requireActor` loads the user's active flag, the role, the store id, and the store status from the database on every request (TM-26; that is what "the first check" in DATA_MODEL.md section 7.7 means: the first read, at step 3). What is refused with them is decided by the access level of the endpoint, and it is decided at step 4, before the rate limit and before the body. For the access level `seller` that includes the store status; for `seller (any store status)` it is the role alone. The role is judged first, so a customer on a seller endpoint is still `403 FORBIDDEN`. The handler does this with pure helpers on the `Actor` (D-022): the role helper stays a role-only check, which is what backend-api asked for, and a second helper judges the store status; an endpoint of access level `seller` calls both. The service repeats the check and the write carries the condition itself, because a suspension can commit between step 4 and the write; a refusal there has the same code. The early check is a refusal made sooner, never the control. Reasons:
-   - D-031 point 4 states the principle: the server does not read a body for a caller it will refuse. Whether a suspended seller will be refused on a `seller` endpoint is known at step 3 from data that was already read. Section 1.8 as first written read the body anyway, and for `POST /seller/uploads` that is a multipart body of up to 5 MB from the one kind of account an admin has just sanctioned (TM-17, TM-33).
+   - D-031 point 4 states the principle: the server does not read a body for a caller it will refuse. Whether a suspended seller will be refused on a `seller` endpoint is known at step 3 from data that was already read. Section 1.8 as first written read the body anyway, and for `POST /seller/uploads` that is a multipart body of up to 4 MiB from the one kind of account an admin has just sanctioned (TM-17, TM-33).
    - Nothing of an upload may reach storage before the caller is known to be allowed. With the store status at step 8, the handler has to hold or store the file before the service refuses it; with it at step 4 the question does not arise.
    - The access table of section 1.8 already defines `seller` as "role `SELLER` and the store `APPROVED`". A step named after the access level that checks half of it is how a handler ends up with the wrong half.
    - One order for every `seller` endpoint, JSON or multipart. The security need is the upload; the rule is general because two orders for one access level is a mistake waiting for the next endpoint. The visible difference: a suspended seller who sends an invalid body to a `seller` endpoint is answered `403 SELLER_NOT_APPROVED`, not `400`.
@@ -289,7 +291,7 @@ State today: the saturation warning uses `security("warn", ...)` (SEC-031 fixed)
    - The cart (section 5.4): `PATCH /cart/items/{itemId}` answers `409 PRODUCT_UNAVAILABLE` with `reason: "NOT_AVAILABLE"` only for the caller's own line, after the ownership check; another user's line is `404` whatever its product. The caller already reads `unbuyableReason: "NOT_AVAILABLE"` for that line from `GET /cart`, so the `409` says nothing new, and it must stay that way: no price, no stock, no reason beyond that one value, and the same answer when the hidden product is also out of stock. `POST /cart/items` names a product, not a line, and stays `404` for a hidden product, so a caller without a line cannot tell a hidden product from one that never existed. The two answers are consistent and are approved.
 
    Not part of the order and still open for T-015: that sign-in answers a deactivated account, an unknown email, and a wrong password identically, and what sign-up answers for an email that is already registered (TM-03).
-6. Uploads keep the limits of "Upload policy" (5 MB per file, 8 files), enforced in the same streaming way by the upload task; the total accepted for one upload request is at most 41 MiB.
+6. Uploads keep the limits of "Upload policy" (4 MiB per file, 8 files), enforced in the same streaming way by the upload task; the total accepted for one upload request is at most 41 MiB.
 7. A body limit at the reverse proxy is welcome as an outer layer (devops, `docs/DEPLOYMENT.md`) but is not the control: the application must be safe when reached directly, as in local development and tests.
 8. (Added 2026-10-11 after the re-check, SEC-020.) The memory a helper holds while it reads must be in proportion to the limit, not to the number of chunks the body arrives in. The bytes are copied into one buffer that never grows past the limit; the chunk objects themselves are not kept. A chunk with no bytes is not kept either. A chunk that is not bytes (anything other than a `Uint8Array`) is refused as a server fault at once, because it cannot be counted. The refusal of an oversized body does not wait for the source to confirm the cancellation. The same holds for the upload reader when it is written.
 9. (Added 2026-10-11 after the re-check of the SEC-020 fix, SEC-021; reworded the same day at the re-check of the SEC-021 fix, when the number was decided.) A read must end.
@@ -471,7 +473,7 @@ See the table in [API_CONTRACTS.md](API_CONTRACTS.md). "Per IP" there means per 
 
 ## Upload policy
 
-JPEG, PNG, WebP. Maximum 5 MB per file, 8 images per product. Content verified by magic bytes. Stored under generated keys. Product images are public by design; no private documents are uploaded in the MVP. The upload endpoint is the only one that accepts `multipart/form-data`, and it is covered by the same `Origin` check as every other mutation (TM-16).
+JPEG, PNG, WebP. Maximum 4 MiB per file, 8 images per product. Content verified by magic bytes. Stored under generated keys. Product images are public by design; no private documents are uploaded in the MVP. The upload endpoint is the only one that accepts `multipart/form-data`, and it is covered by the same `Origin` check as every other mutation (TM-16).
 
 ## Privacy and data retention
 
@@ -1988,6 +1990,54 @@ Re-check evidence (security, 2026-10-29, HEAD 1140024, independent):
 - Negative control: a scratch tree from `git archive 1140024` with `src/modules/admin/repository.ts` replaced by `git show 1140024~1:src/modules/admin/repository.ts` (blob `d6f0b03`, checked with `git hash-object`), `prisma/generated` copied, `node_modules` as a junction (removed first, then the tree deleted). `node node_modules/vitest/vitest.mjs run --config vitest.integration.config.mts tests/security/sec095-recheck.itest.ts tests/security/sec094-recheck.itest.ts tests/security/sec088-recheck.itest.ts`: 1 failed, 8 passed; the failure is the SEC-096 case, `AssertionError: expected { deadlocks: 1, other: +0 } to deeply equal { deadlocks: +0, other: +0 }`. So the test detects the defect.
 - New case in `tests/security/sec095-recheck.itest.ts` for the fix's new path (reactivating an inactive admin C, id(C) < id(B), while two admin deactivations scan the admin rows, one targeting C; forced through `pg_stat_activity`): no deadlock, the reactivation completes. A regression guard only; the pre-fix order would also pass it. The stale "OPEN (SEC-096)" comment in that file was corrected.
 - `pnpm exec vitest run --config vitest.integration.config.mts tests/security/sec095-recheck.itest.ts tests/security/sec094-recheck.itest.ts tests/security/sec088-recheck.itest.ts`, three runs: 3 files, 10 passed each time. `pnpm exec vitest run --config vitest.integration.config.mts tests/security`: see the summary of this re-check. `pnpm exec prettier --check` and `pnpm exec eslint` on the test file, `pnpm typecheck`: exit 0.
+
+### SEC-097 CRON_SECRET may hold characters that the workflow's curl config string alters
+Severity: Low
+Status: FIXED (commit 2a9a4bc; not re-checked by security)
+Owner: backend-api (`src/server/env.ts`)
+Location: .github/workflows/maintenance.yml (curl config read from stdin); src/server/env.ts (`CRON_SECRET_PATTERN`)
+Description: the workflow writes `header = "Authorization: Bearer %s"` into a curl config. Inside double quotes curl ends the value at `"` and treats `\` as an escape, and the env rule accepted both, so an operator-chosen secret containing them would be sent altered and every scheduled call would get `401`. Availability of the SEC-055 control, not exposure. Full entry and reproduction: [reviews/D-051-maintenance-security.md](reviews/D-051-maintenance-security.md).
+Fix: `CRON_SECRET_PATTERN = /^[A-Za-z0-9+/=_-]+$/` (base64/base64url alphabet, also the alphabet of the logger's Bearer mask). `openssl rand -base64 48` fits. The `it.fails` case of `tests/security/d051-maintenance.test.ts` describe "SEC-097" is flipped to `it`.
+Re-check evidence: none from security yet.
+
+### SEC-098 The workflow re-sent the maintenance POST on 5xx and on timeout
+Severity: Low
+Status: FIXED (re-checked 2026-10-30, commit bc3717a)
+Owner: devops
+Location: .github/workflows/maintenance.yml
+Description: `curl --retry 2` re-sent the POST on a timeout and on 408, 429, 500, 502, 503, 504, so a persistent job failure re-ran all three jobs three times per tick, and `--max-time 60` equal to `maxDuration = 60` could abort the client while the server run continued. Impact was load and noise (overlap is designed to be safe).
+Fix: `--retry` removed; `--max-time 75`, above `maxDuration`. Re-check evidence: [reviews/D-051-maintenance-security.md](reviews/D-051-maintenance-security.md), SEC-098.
+
+### SEC-099 Refused maintenance requests are not rate limited, and their log line obeys LOG_LEVEL
+Severity: Low
+Status: FIXED (commit ea0a0d5; not re-checked by security)
+Owner: backend-api
+Location: src/app/api/v1/internal/maintenance/route.ts; src/modules/maintenance/refusal-limit.ts
+Description: any client could POST to the endpoint without limit; each refusal wrote one `warn` line that `LOG_LEVEL=error` hid, which breaks SR-04 rule 4 (a client-causable security event is bounded by the rate limit that counts it, not by `LOG_LEVEL`).
+Fix: refusals are counted per client address in the separate limiter `maintenance-refused` (10 per 60 s, 1,000 windows, per instance, outside the SR-02 budget). Within the rule: `401` and one `security("warn", ...)` line. Past it: `429 RATE_LIMITED` with `Retry-After` and no line. A request with the right secret never consumes the rule. See SR-02 and [API_CONTRACTS.md section 5.11](API_CONTRACTS.md#511-internal-scheduled-maintenance).
+Residual: with no trusted proxy every client shares the address `unknown`, so the bound is global (it still never blocks the right secret). Counts are per instance.
+Re-check evidence: none from security yet.
+
+### SEC-100 A scheduler that stops calling the endpoint goes unnoticed, and the workflow passes when its secrets are missing
+Severity: Medium
+Status: PARTIAL (workflow part done in e255136; app-side signal and external alert still open)
+Owner: devops (workflow, monitoring) with backend-api (a liveness signal)
+Location: .github/workflows/maintenance.yml; .github/workflows/maintenance-watchdog.yml; src/server/health.ts (no maintenance signal)
+Description: with `MAINTENANCE_VIA_HTTP=true` the payment timeout sweep (SEC-055), upload cleanup, and session purge run only when the scheduler calls the endpoint. A deleted or never-set secret, a schedule that GitHub disables after 60 days without repository activity, or delayed or skipped runs stopped it with nothing turning red.
+Done (commit e255136): `maintenance.yml` now fails (red) when `MAINTENANCE_URL` or `CRON_SECRET` is missing, unless the repository variable `MAINTENANCE_NOT_DEPLOYED` is `true` (remediation (a)). `maintenance-watchdog.yml` runs hourly and fails when the last successful maintenance run is older than 45 minutes or there never was one (a form of remediation (c), inside GitHub). `MAINTENANCE_NOT_DEPLOYED` is not set in the repository as of 2026-10-30; it must be set to `true` while nothing is deployed, or both workflows fail.
+Open: (b) the application records no time of the last successful run, so `src/server/health.ts` and the logs cannot show it; (c) the watchdog is itself scheduled, so if GitHub disables schedules both stop and nothing turns red, and an alert outside GitHub does not exist. Neither is built; DEPLOYMENT.md "Scheduled work" asks for manual checks meanwhile.
+Re-check evidence: none from security yet.
+
+### SEC-101 The database still allows 5 MiB uploads after the application limit became 4 MiB
+Severity: Low
+Status: FIXED (commit 200fac8, migration `20261030090000_upload_size_cap_4mib`; not re-checked by security)
+Owner: database
+Location: prisma/migrations (the `Upload_sizeBytes_check` constraint); DATA_MODEL.md section 21.10
+Description: `MAX_UPLOAD_FILE_BYTES` was lowered to 4,194,304 but the constraint still accepted up to 5,242,880. Not exploitable (the reader, schema, and seller UI enforce the limit); the constraint is the second line for a code path that skips the reader.
+Fix: the check is now `BETWEEN 1 AND 4194304`; `tests/integration/schema/check-constraints.test.ts` uses 4 MiB (commit 926f237) and the `it.fails` case of `tests/security/d051-maintenance.test.ts` is flipped to `it` (commit 4075a26). The Thai copy says "4 MB" for 4 MiB, so files from 4,000,001 to 4,194,304 bytes are accepted (lenient direction, no security impact).
+Re-check evidence: none from security yet.
+
+Source of SEC-097 to SEC-101: [reviews/D-051-maintenance-security.md](reviews/D-051-maintenance-security.md) (security, 2026-10-30). The register now holds 101 findings (SEC-001 to SEC-101); the statuses above are as recorded by the fix commits, and only SEC-098 has been re-checked.
 
 ## Scans and reviews performed
 

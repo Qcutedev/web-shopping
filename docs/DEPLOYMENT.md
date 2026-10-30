@@ -200,7 +200,7 @@ Built in T-011 and exercised on the developer machine on 2026-10-12. `src/server
 | `UPLOAD_DIR` | An absolute directory path (T-041): where the local disk upload adapter keeps files. Refused when relative or blank, in every `NODE_ENV`. See "Uploaded files" below | Outside production: no value, and the upload and file endpoints answer `500` until it or `BLOB_READ_WRITE_TOKEN` is set. Production: refused unless `BLOB_READ_WRITE_TOKEN` is set | no |
 | `BLOB_READ_WRITE_TOKEN` | A Vercel Blob read-write token, `vercel_blob_rw_<store id>_<secret>` (store id letters and digits; secret printable ASCII without blanks). Selects the Vercel Blob upload adapter with private objects (D-051). Refused together with `UPLOAD_DIR`, in every `NODE_ENV`. See "Deploying to Vercel" below | The local disk adapter (`UPLOAD_DIR`) is used | yes |
 | `MAINTENANCE_VIA_HTTP` | Exactly `true` or `false` (`1`, `yes`, `TRUE` are refused). `true` means the scheduled work is triggered through `POST /api/v1/internal/maintenance` instead of the in-process timers of `src/instrumentation.ts` (D-051). See "Scheduled work" below | `false` | no |
-| `CRON_SECRET` | 32 to 256 printable ASCII characters without blanks; must differ from `AUTH_SECRET`. The bearer secret of the maintenance endpoint. Unset means the endpoint refuses every request | No value | yes |
+| `CRON_SECRET` | 32 to 256 characters of the base64/base64url alphabet `[A-Za-z0-9+/=_-]` (SEC-097; `openssl rand -base64 48` fits); must differ from `AUTH_SECRET`. The bearer secret of the maintenance endpoint. Unset means the endpoint refuses every request | No value | yes |
 
 How the rules are applied:
 

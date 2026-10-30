@@ -186,7 +186,7 @@ For `POST /seller/uploads` (kind K5) and the file-serving route (kind K1). Fixtu
 | Wrong type (GIF, SVG, PDF, HTML) | `415 UNSUPPORTED_MEDIA_TYPE`; nothing stored |
 | Mismatched content (HTML or script bytes named `.jpg` with an image content type) | Rejected on content, not extension (`415`); nothing stored |
 | A request that is not `multipart/form-data` | `415`; nothing stored |
-| Oversize (one byte over 5 MB) and a file of exactly 5 MB | Over: `413 PAYLOAD_TOO_LARGE`, nothing stored. Exact: accepted |
+| Oversize (one byte over 4 MiB) and a file of exactly 4 MiB | Over: `413 PAYLOAD_TOO_LARGE`, nothing stored. Exact: accepted |
 | Path-traversal and odd filenames (`../../x.jpg`, absolute path, backslashes, null byte, very long name) | Never used as a path; no file appears outside the storage directory |
 | Ninth image on one product (`imageKeys` with nine keys) | `400 VALIDATION_ERROR`; the product keeps eight |
 | Anonymous, customer, seller of a suspended store | 401, `403 FORBIDDEN`, `403 SELLER_NOT_APPROVED`; nothing stored |

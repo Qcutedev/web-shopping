@@ -327,7 +327,7 @@ Each component defines default, hover, focus-visible, active, disabled, and wher
 | ErrorState | Message and a retry button. |
 | Breadcrumb | Storefront category and product pages. |
 | StatCard | Dashboard metric: label, value, optional period note. No trend arrows without real comparison data. |
-| FileUpload | Drop zone and button, per-file progress, per-file error, shows limits (type, 5 MB, 8 files). |
+| FileUpload | Drop zone and button, per-file progress, per-file error, shows limits (type, 4 MiB, 8 files). |
 | NoticeLabel | Small persistent pill label, `--warning` text on `--warning-soft`, for "ข้อมูลตัวอย่าง", "การชำระเงินจำลอง", "การจัดส่งจำลอง". Mandatory wherever sample data, mock payment, or simulated shipping is shown. |
 
 Focus-visible on every interactive component: a 2px `--focus-ring` ring with a 2px offset; on `--ink` surfaces use `--focus-ring-on-ink`.
