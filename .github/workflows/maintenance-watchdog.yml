@@ -1,0 +1,55 @@
+# Watchdog for the Maintenance workflow (SEC-100, D-051). Fails (red, GitHub notifies the
+# repository owner) when the last successful run of maintenance.yml is older than 45 minutes
+# (it is scheduled every 10 minutes), or when there has never been one. It catches a broken
+# endpoint, rotated secrets, and skipped or delayed schedules.
+#
+# Limits: this workflow is also scheduled, so if GitHub disables schedules after 60 days without
+# repository activity, both stop and nothing turns red. Keep the repository active or add an
+# external alert (docs/DEPLOYMENT.md, "Scheduled work"). With the repository variable
+# MAINTENANCE_NOT_DEPLOYED set to "true" the check is skipped.
+
+name: Maintenance watchdog
+
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: maintenance-watchdog
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    steps:
+      - name: Check age of the last successful maintenance run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NOT_DEPLOYED: ${{ vars.MAINTENANCE_NOT_DEPLOYED }}
+          MAX_AGE_SECONDS: "2700"
+        run: |
+          set -euo pipefail
+          if [ "${NOT_DEPLOYED}" = "true" ]; then
+            echo "::notice::MAINTENANCE_NOT_DEPLOYED is true; skipping (nothing deployed yet)."
+            exit 0
+          fi
+          last="$(gh api "repos/${REPO}/actions/workflows/maintenance.yml/runs?status=success&per_page=1" \
+            --jq '.workflow_runs[0].updated_at // empty')"
+          if [ -z "${last}" ]; then
+            echo "::error::No successful maintenance run found. It never succeeded, or run history was removed."
+            exit 1
+          fi
+          age=$(( $(date +%s) - $(date -d "${last}" +%s) ))
+          echo "Last successful maintenance run finished ${age} s ago (limit ${MAX_AGE_SECONDS} s)."
+          if [ "${age}" -gt "${MAX_AGE_SECONDS}" ]; then
+            echo "::error::Last successful maintenance run was ${age} s ago; limit is ${MAX_AGE_SECONDS} s."
+            exit 1
+          fi
