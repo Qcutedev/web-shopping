@@ -221,7 +221,9 @@ describe("SEC-099 refused requests are not rate limited and their line obeys LOG
 });
 
 describe("SEC-100 a scheduler that stops calling goes unnoticed", () => {
-  it.fails("the workflow fails, not passes, when MAINTENANCE_URL or CRON_SECRET is missing", () => {
+  // Fixed in e255136 (devops): the skip branch fails unless a repository variable says nothing
+  // is deployed.
+  it("the workflow fails, not passes, when MAINTENANCE_URL or CRON_SECRET is missing", () => {
     const workflow = read(".github/workflows/maintenance.yml");
     const branch = workflow.slice(
       workflow.indexOf('if [ -z "${MAINTENANCE_URL}" ]'),
@@ -237,7 +239,8 @@ describe("SEC-100 a scheduler that stops calling goes unnoticed", () => {
 });
 
 describe("SEC-101 the database still allows 5 MiB uploads after the limit became 4 MiB", () => {
-  it.fails("a migration bounds Upload.sizeBytes by MAX_UPLOAD_FILE_BYTES", () => {
+  // Fixed in 200fac8 (database): migration 20261030090000_upload_size_cap_4mib.
+  it("a migration bounds Upload.sizeBytes by MAX_UPLOAD_FILE_BYTES", () => {
     const dir = join(ROOT, "prisma", "migrations");
     const sql = readdirSync(dir, { withFileTypes: true })
       .filter((e) => e.isDirectory())
