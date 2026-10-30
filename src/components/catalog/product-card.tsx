@@ -27,7 +27,7 @@ export function ProductCard({
       href={productHref(product.slug)}
       className="group focus-ring flex h-full flex-col gap-2 rounded-lg"
     >
-      <div className="relative">
+      <div className="relative overflow-hidden rounded-lg transition-transform duration-300 group-hover:-translate-y-1 group-hover:shadow-lg">
         <ProductImage
           image={product.image}
           alt=""

@@ -1,35 +1,50 @@
 import Link from "next/link";
 import { Suspense } from "react";
-import { CategoryChips, CategoryChipsSkeleton } from "@/components/catalog/category-chips";
+import { CategoryTiles, CategoryTilesSkeleton } from "@/components/catalog/category-tiles";
+import { HeroSection, HeroSkeleton } from "@/components/catalog/hero-section";
+import { HomeHighlights } from "@/components/catalog/home-highlights";
 import { listHref } from "@/components/catalog/list-href";
 import { ProductGridSkeleton } from "@/components/catalog/product-grid";
 import { ProductListSection } from "@/components/catalog/product-list-section";
-import { buttonVariants } from "@/components/ui/button";
+import { ChevronRightIcon } from "@/components/ui/icons";
 import { th } from "@/i18n/th";
 import { ROUTES } from "@/lib/routes";
 import { listProducts } from "@/modules/catalog";
 import { DEFAULT_PAGE_SIZE } from "@/modules/catalog/schema";
 
-// The product list and the categories read the catalog at request time, behind Suspense; the
-// headings and skeletons are in the static shell.
+const SEE_ALL =
+  "type-label text-foreground hover:text-primary focus-ring inline-flex min-h-11 items-center gap-1 rounded-sm";
+
+// The poster, the category cards and the product list read the catalog at request time, behind
+// Suspense; the headings and skeletons are in the static shell.
 export default function HomePage() {
   return (
-    <div className="container-page flex flex-col gap-8 py-8">
-      <section aria-labelledby="home-categories" className="flex flex-col gap-3">
-        <h2 id="home-categories" className="type-section-title">
-          {th.catalog.home.categoriesTitle}
-        </h2>
-        <Suspense fallback={<CategoryChipsSkeleton />}>
-          <CategoryChips />
+    <div className="container-page flex flex-col gap-10 py-6 md:py-8">
+      <Suspense fallback={<HeroSkeleton />}>
+        <HeroSection />
+      </Suspense>
+      <section aria-labelledby="home-categories" className="page-rise flex flex-col gap-4">
+        <div className="flex items-center justify-between gap-3">
+          <h2 id="home-categories" className="type-section-title">
+            {th.catalog.home.categoriesTitle}
+          </h2>
+          <Link href={ROUTES.search} className={SEE_ALL}>
+            {th.catalog.home.viewAllArrow}
+            <ChevronRightIcon />
+          </Link>
+        </div>
+        <Suspense fallback={<CategoryTilesSkeleton />}>
+          <CategoryTiles />
         </Suspense>
       </section>
-      <section aria-labelledby="home-newest" className="flex flex-col gap-4">
+      <section aria-labelledby="home-newest" className="page-rise flex flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 id="home-newest" className="type-page-title">
+          <h1 id="home-newest" className="type-section-title">
             {th.catalog.home.newestTitle}
           </h1>
-          <Link href={ROUTES.search} className={buttonVariants({ variant: "secondary" })}>
+          <Link href={ROUTES.search} className={SEE_ALL}>
             {th.catalog.home.viewAll}
+            <ChevronRightIcon />
           </Link>
         </div>
         <Suspense fallback={<ProductGridSkeleton />}>
@@ -45,6 +60,7 @@ export default function HomePage() {
           />
         </Suspense>
       </section>
+      <HomeHighlights />
     </div>
   );
 }

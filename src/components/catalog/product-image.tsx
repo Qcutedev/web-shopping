@@ -38,7 +38,7 @@ export function ProductImage({
           sizes={sizes}
           unoptimized
           priority={priority}
-          className="object-cover"
+          className="object-cover mix-blend-multiply"
         />
       )}
     </div>

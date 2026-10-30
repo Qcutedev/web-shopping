@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { th } from "@/i18n/th";
+import { AnnouncementBar } from "./announcement-bar";
 import { SiteFooter } from "./site-footer";
 import { SiteHeader } from "./site-header";
 
@@ -24,6 +25,7 @@ export function AppShell({
       >
         {th.shell.skipToContent}
       </a>
+      <AnnouncementBar />
       <SiteHeader session={headerSession} />
       {/* tabIndex -1 lets the skip link move focus here, not only scroll. The element is not
           interactive, so the focus outline is removed. */}

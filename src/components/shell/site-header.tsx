@@ -4,6 +4,7 @@ import { SearchField } from "@/components/ui/search-field";
 import { MAX_SEARCH_TEXT_LENGTH } from "@/modules/catalog/schema";
 import { th } from "@/i18n/th";
 import { ROUTES, SEARCH_QUERY_PARAM } from "@/lib/routes";
+import { cn } from "@/lib/utils";
 import { CartLink } from "./cart-link";
 import { NAV_LINK } from "./nav-link";
 
@@ -19,20 +20,43 @@ import { NAV_LINK } from "./nav-link";
  */
 export function SiteHeader({ session = <CartLink /> }: { session?: ReactNode }) {
   return (
-    <header className="border-border bg-background border-b">
+    <header className="border-border bg-background/95 sticky top-0 z-40 border-b backdrop-blur">
       <div className="container-page flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
         {/* DOM order is the visual order below 768 px: brand, nav, then the search row. From
             768 px the search sits between brand and nav through `md:order-*`. */}
         <Link
           href={ROUTES.home}
-          className="type-panel-title text-foreground focus-ring order-1 inline-flex min-h-11 items-center rounded-sm"
+          className="type-panel-title text-foreground focus-ring order-1 inline-flex min-h-11 items-center gap-2 rounded-sm"
         >
+          <span
+            aria-hidden="true"
+            className="bg-primary text-on-primary flex size-9 items-center justify-center rounded-md"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.9}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="size-5"
+            >
+              <path d="M5 8h14l-1 12H6L5 8z" />
+              <path d="M9 8V7a3 3 0 016 0v1" />
+            </svg>
+          </span>
           {th.site.name}
         </Link>
         <nav
           aria-label={th.shell.header.navLabel}
           className="order-2 ml-auto flex items-center gap-1 md:order-3"
         >
+          <Link href={ROUTES.home} className={cn(NAV_LINK, "hidden lg:inline-flex")}>
+            {th.shell.header.home}
+          </Link>
+          <Link href={ROUTES.search} className={cn(NAV_LINK, "hidden lg:inline-flex")}>
+            {th.shell.footer.allProducts}
+          </Link>
           <Link href={ROUTES.openStore} className={NAV_LINK}>
             {th.shell.header.openStore}
           </Link>

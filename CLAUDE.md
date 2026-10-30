@@ -100,7 +100,8 @@ A session can end on the usage limit while a task is half done. [docs/STATUS.md]
    - If it is broken or far from complete, summarise it for the owner in Thai and ask whether to keep or discard it. Do not delete or overwrite it without that answer.
 3. Do not start a new task, or relaunch an agent on the same task, on top of uncommitted work that has not been inspected. A relaunched agent is told which files already exist and to continue from them.
 4. Before launching an agent, record in "Resume here" which task is starting, which agent runs it, and which paths it will touch, and commit that.
-5. During a long task, commit each finished part that passes its checks instead of holding everything for one final commit, so an interruption loses only the last part.
+5. After every finished task, update "Resume here" in [docs/STATUS.md](docs/STATUS.md) (keep it short, current state only) and commit the code and the STATUS change together. Owner order, 2026-10-30. Do not wait to be asked.
+6. During a long task, commit each finished part that passes its checks instead of holding everything for one final commit, so an interruption loses only the last part.
 
 ## Verification before claiming anything
 

@@ -23,6 +23,8 @@ export const th = {
         label: "ค้นหาสินค้า",
         submit: "ค้นหา",
       },
+      // proposal (session 137): nav link shown from 1024 px
+      home: "หน้าแรก",
       // approved
       openStore: "เปิดร้านค้า",
       signIn: "เข้าสู่ระบบ",
@@ -52,6 +54,24 @@ export const th = {
       navLabel: "ลิงก์ท้ายเว็บไซต์",
       // {name} is th.site.name. No year: reading the current date would make the footer dynamic.
       copyright: "© {name}",
+      // proposal (footer columns, session 137)
+      shopTitle: "ช้อปปิ้ง",
+      allProducts: "สินค้าทั้งหมด",
+      sellerTitle: "สำหรับผู้ขาย",
+      accountTitle: "บัญชีของคุณ",
+      signUp: "สมัครสมาชิก",
+      myOrders: "คำสั่งซื้อของฉัน",
+      cart: "ตะกร้าสินค้า",
+    },
+    // proposal: the bar above the header. Every line is true of the system (payment and shipping are
+    // simulated, REQ notices), none is a promotion.
+    announcement: {
+      label: "ประกาศ",
+      items: [
+        "สินค้าจากหลายร้านค้า รวมไว้ในที่เดียว",
+        "ระบบชำระเงินจำลอง ไม่มีการเก็บเงินจริง",
+        "การจัดส่งเป็นการจำลอง ไม่มีพัสดุจริง",
+      ],
     },
   },
   // Not-found page (CR-67). Proposal: wording written by the frontend agent, not yet approved.
@@ -366,6 +386,49 @@ export const th = {
       viewAll: "ดูสินค้าทั้งหมด",
       emptyTitle: "ยังไม่มีสินค้าในขณะนี้",
       emptyDescription: "กรุณากลับมาดูใหม่อีกครั้งภายหลัง",
+      // proposal: the "all" link beside a section title
+      viewAllArrow: "ดูทั้งหมด",
+      highlights: {
+        label: "จุดเด่นของเว็บไซต์",
+        items: [
+          { title: "หลายร้านค้า", description: "เลือกซื้อจากร้านค้าหลากหลายในที่เดียว" },
+          { title: "ค้นหาง่าย", description: "กรองตามหมวดหมู่ ราคา และเรียงลำดับได้" },
+          { title: "รีวิวจากผู้ซื้อ", description: "อ่านความเห็นก่อนตัดสินใจซื้อ" },
+          { title: "เปิดร้านของคุณ", description: "สมัครเป็นผู้ขายและลงสินค้าได้เอง" },
+        ],
+      },
+      hero: {
+        badge: "มาใหม่",
+        presenterAlt: "",
+        label: "โปสเตอร์แนะนำ",
+        previous: "โปสเตอร์ก่อนหน้า",
+        next: "โปสเตอร์ถัดไป",
+        pause: "หยุดเลื่อนอัตโนมัติ",
+        play: "เลื่อนอัตโนมัติ",
+        goTo: "ไปที่โปสเตอร์ที่ {number}",
+        slideOf: "โปสเตอร์ที่ {number} จาก {total}",
+        slides: [
+          {
+            kicker: "สินค้ามาใหม่",
+            title: "เจอของถูกใจ จากร้านค้าหลากหลาย",
+            description:
+              "รวมสินค้าจากร้านค้าหลายร้านไว้ในที่เดียว เลือกดู เปรียบเทียบ และสั่งซื้อได้ทันที",
+            cta: "เริ่มช้อป",
+          },
+          {
+            kicker: "ค้นหาง่าย",
+            title: "พิมพ์ชื่อสินค้า แล้วเลือกได้เลย",
+            description: "ค้นหาตามชื่อ กรองตามหมวดหมู่และราคา เรียงตามมาใหม่หรือราคา",
+            cta: "ค้นหาสินค้า",
+          },
+          {
+            kicker: "สำหรับผู้ขาย",
+            title: "เปิดร้านของคุณเอง วันนี้",
+            description: "สมัครเปิดร้าน ลงสินค้า และจัดการคำสั่งซื้อผ่านหน้าร้านของคุณ",
+            cta: "เปิดร้านค้า",
+          },
+        ],
+      },
     },
     categories: {
       label: "หมวดหมู่",
