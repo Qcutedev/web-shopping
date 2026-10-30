@@ -347,23 +347,29 @@ describe("SEC-056: the mock provider pays any order in a production server", () 
     expect(getPaymentProvider().isSimulated).toBe(true);
   });
 
-  // Pins remediation (a) of SEC-056 as the owner decided it on 2026-10-22: no switch. Flipped from
-  // `it.fails` after the re-check of 3e2f4d1 (SEC-056 FIXED).
-  it("in production the mock provider is always refused", () => {
+  // Pins SEC-056: refused in production unless the owner set ALLOW_MOCK_PAYMENT=1 (D-052, which
+  // amends the 2026-10-22 decision of no switch). Flipped from `it.fails` after the re-check of 3e2f4d1.
+  it("in production the mock provider is refused without the owner's switch", () => {
     vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("ALLOW_MOCK_PAYMENT", "");
     expect(() => getPaymentProvider()).toThrow();
   });
 
-  it("no environment variable switches the mock back on in production", () => {
+  it("only ALLOW_MOCK_PAYMENT=1 switches the mock back on in production (D-052)", () => {
     const source = read("src/modules/payments/provider.ts");
-    // The only environment value the provider reads is NODE_ENV.
+    // The only environment values the provider reads are NODE_ENV and ALLOW_MOCK_PAYMENT.
     const envReads = source.match(/process\.env(?:\.[A-Za-z_]+|\[[^\]]*\])/g) ?? [];
-    expect([...new Set(envReads)]).toEqual(["process.env.NODE_ENV"]);
+    expect([...new Set(envReads)].sort()).toEqual([
+      "process.env.ALLOW_MOCK_PAYMENT",
+      "process.env.NODE_ENV",
+    ]);
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("MOCK_PAYMENT_ENABLED", "true");
-    vi.stubEnv("ALLOW_MOCK_PAYMENT", "1");
     vi.stubEnv("PAYMENT_PROVIDER", "MOCK");
+    vi.stubEnv("ALLOW_MOCK_PAYMENT", "true");
     expect(() => getPaymentProvider()).toThrow();
+    vi.stubEnv("ALLOW_MOCK_PAYMENT", "1");
+    expect(() => getPaymentProvider()).not.toThrow();
   });
 
   it("checkout resolves the provider before it opens its transaction", () => {

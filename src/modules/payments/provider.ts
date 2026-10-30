@@ -74,9 +74,10 @@ export const mockPaymentProvider: PaymentProvider = Object.freeze({
 });
 
 /**
- * Thrown by `getPaymentProvider` in a production server (SEC-056; owner decision 2026-10-22). The
- * message is fixed and names no value; the route answers it as `500 INTERNAL_ERROR` and logs the
- * class name only (docs/API_CONTRACTS.md sections 2.2 and 5.5.5).
+ * Thrown by `getPaymentProvider` in a production server that has not switched the mock on
+ * (SEC-056; owner decision 2026-10-22, amended 2026-10-30, D-052). The message is fixed and names
+ * no value; the route answers it as `500 INTERNAL_ERROR` and logs the class name only
+ * (docs/API_CONTRACTS.md sections 2.2 and 5.5.5).
  */
 export class MockPaymentProviderInProductionError extends Error {
   constructor() {
@@ -86,19 +87,22 @@ export class MockPaymentProviderInProductionError extends Error {
 }
 
 /**
- * The provider checkout uses. Only the mock exists in the MVP, and it is refused when
- * `NODE_ENV` is `production` (SEC-056; owner decision 2026-10-22): a production server has no
- * payment provider until a real one is added, so no order can be placed there. There is no
- * setting that switches the mock back on in production.
+ * The provider checkout uses. Only the mock exists in the MVP. In a production server it is
+ * refused (SEC-056) unless the owner sets `ALLOW_MOCK_PAYMENT=1` for a demo deployment (owner
+ * decision 2026-10-30, D-052): no money moves, and the UI and records still label it simulated.
+ * Only the exact value `1` switches it on; any other value, and every other variable, is ignored.
  *
- * `nodeEnv` defaults to `process.env.NODE_ENV`, read on every call (Next.js inlines it in a
+ * Both values default to `process.env`, read on every call (Next.js inlines `NODE_ENV` in a
  * production build). Checkout calls this before it opens its transaction, so a refusal takes no
  * lock, no stock, and creates no order.
  */
 export function getPaymentProvider(
   nodeEnv: string | undefined = process.env.NODE_ENV,
+  allowMock: string | undefined = process.env.ALLOW_MOCK_PAYMENT,
 ): PaymentProvider {
-  if (nodeEnv === "production") throw new MockPaymentProviderInProductionError();
+  if (nodeEnv === "production" && allowMock !== "1") {
+    throw new MockPaymentProviderInProductionError();
+  }
   return mockPaymentProvider;
 }
 

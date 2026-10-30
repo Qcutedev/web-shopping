@@ -775,7 +775,7 @@ The first four rows are in the order of [section 1.8](#18-access-levels-and-404-
 | `addressId` not the caller's | `404 NOT_FOUND` |
 | No cart, or no lines (finding M11). This is also what the second of two checkouts of one cart with different keys receives | `409 CART_EMPTY` |
 | More than 50 lines in the cart (SEC-053) | `409 CONFLICT`, `details` `{ "reason": "CART_LINE_LIMIT" }`; no stock statement runs |
-| `NODE_ENV=production` (the mock provider is refused, SEC-056) | `500 INTERNAL_ERROR`; nothing locked or written |
+| `NODE_ENV=production` without `ALLOW_MOCK_PAYMENT=1` (the mock provider is refused, SEC-056, D-052) | `500 INTERNAL_ERROR`; nothing locked or written |
 | A line cannot be bought (BR-22) | `409 PRODUCT_UNAVAILABLE` or `409 INSUFFICIENT_STOCK`, [section 5.5.3](#553-checkout-refused-because-a-line-cannot-be-bought) |
 | Grand total above 2,000,000,000 satang (BR-04) | `422 ORDER_LIMIT_EXCEEDED` |
 

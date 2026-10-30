@@ -425,3 +425,13 @@ Context: the owner chose a free-tier deployment (STATUS.md "Resume here", 2026-1
 6. **Not solved by this decision** (DEPLOYMENT.md, "Deploying to Vercel"): scheduled work on a serverless platform, the per-instance rate limiter, the platform's request body limit against the 5 MiB upload limit, the client address configuration (SR-01), backups, and the `zod` audit finding under `@vercel/blob`. Free-tier limits change; check each provider's pricing page.
 
 Status: PROPOSED. Not deployed. Deploying and production migrations need the owner's approval.
+
+### D-052 Owner switch `ALLOW_MOCK_PAYMENT=1` for a demo deployment (2026-10-30)
+
+Amends SEC-056 (owner decision 2026-10-22: no switch). Context: the Vercel preview ran with `NODE_ENV=production`, so every checkout answered `500` (`MockPaymentProviderInProductionError`) and no order could be placed.
+
+Decision (owner, 2026-10-30): `getPaymentProvider` in `src/modules/payments/provider.ts` accepts the mock in production only when `ALLOW_MOCK_PAYMENT` is exactly `1`. Any other value (`true`, `yes`, blank, padded), and every other variable, is ignored. The variable is read on every call and is not in `src/server/env.ts`. No money moves; UI, docs, and records keep the mock labelled simulated. Not for a real deployment: leave it unset there.
+
+Risk the owner accepts for the demo: any signed-in account can place PAID simulated orders for any stock (SEC-056 description). Remediations (b) to (d) of SEC-056 stay open.
+
+Status: ACCEPTED by the owner. Tests: `src/modules/payments/provider.test.ts`, `tests/security/t032-checkout.test.ts`.

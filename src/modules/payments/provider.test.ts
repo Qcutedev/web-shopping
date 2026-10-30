@@ -49,6 +49,15 @@ describe("mock payment provider (REQ-C-12, REQ-N-09)", () => {
     expect(() => getPaymentProvider("production")).toThrow(MockPaymentProviderInProductionError);
   });
 
+  it("is allowed in production only when ALLOW_MOCK_PAYMENT is exactly 1 (D-052)", () => {
+    expect(getPaymentProvider("production", "1")).toBe(mockPaymentProvider);
+    for (const value of [undefined, "", "0", "true", "yes", " 1", "1 "]) {
+      expect(() => getPaymentProvider("production", value)).toThrow(
+        MockPaymentProviderInProductionError,
+      );
+    }
+  });
+
   describe("reads NODE_ENV of the process on every call (SEC-056)", () => {
     afterEach(() => {
       vi.unstubAllEnvs();
