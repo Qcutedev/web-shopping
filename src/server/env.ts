@@ -115,12 +115,20 @@ export const AUTH_SECRET_MIN_LENGTH = 32;
 export const CRON_SECRET_MIN_LENGTH = 32;
 
 /**
- * `CRON_SECRET` travels in an `Authorization` header, so it is printable ASCII without blanks
- * (U+0021 to U+007E), at most 256 characters. The maintenance endpoint bounds the header it
- * compares by the same length (src/modules/maintenance/authorization.ts).
+ * `CRON_SECRET` travels in an `Authorization` header, at most 256 characters. The maintenance
+ * endpoint bounds the header it compares by the same length
+ * (src/modules/maintenance/authorization.ts).
+ *
+ * SEC-097: only the base64 and base64url alphabet (`A-Z`, `a-z`, `0-9`, `+`, `/`, `=`, `-`, `_`).
+ * The scheduler writes the secret into a double-quoted curl config value, where `"` ends the value
+ * and `\` starts an escape, so a secret holding either would be sent altered and every scheduled
+ * call would get `401`. The alphabet is a subset of the logger's `Bearer` mask
+ * (`[A-Za-z0-9._~+/=-]`, src/server/logger.ts), so a secret that ever reached a log line after
+ * `Bearer ` would be masked whole. The documented generators
+ * (`openssl rand -base64 48`, `randomBytes(...).toString("base64url")`) emit only these characters.
  */
 export const CRON_SECRET_MAX_LENGTH = 256;
-export const CRON_SECRET_PATTERN = /^[!-~]+$/;
+export const CRON_SECRET_PATTERN = /^[A-Za-z0-9+/=_-]+$/;
 
 /**
  * The marker every throwaway value of `.env.example` carries (SEC-009). An `AUTH_SECRET` that
@@ -246,7 +254,7 @@ export const ENV_RULES = {
   signUpRateLimit: `must be an integer from 1 to ${MAX_SIGN_UP_RATE_LIMIT}`,
   signUpRateLimitInProduction: "must not be set when NODE_ENV=production",
   maintenanceViaHttp: "must be true or false",
-  cronSecret: `must be ${CRON_SECRET_MIN_LENGTH} to ${CRON_SECRET_MAX_LENGTH} printable ASCII characters without blanks`,
+  cronSecret: `must be ${CRON_SECRET_MIN_LENGTH} to ${CRON_SECRET_MAX_LENGTH} characters of the base64 or base64url alphabet (A-Z a-z 0-9 + / = - _)`,
   cronSecretRequired: "must be set when NODE_ENV=production and MAINTENANCE_VIA_HTTP=true",
   cronSecretPlaceholder: "must not be a placeholder from .env.example when NODE_ENV=production",
   cronSecretWeak:

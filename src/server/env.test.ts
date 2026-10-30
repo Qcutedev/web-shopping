@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +9,7 @@ import {
   AUTH_SECRET_MIN_DISTINCT_CHARACTERS,
   AUTH_SECRET_MIN_LENGTH,
   BLOB_LIBRARY_VARIABLES,
+  CRON_SECRET_PATTERN,
   DEFAULT_PAYMENT_TIMEOUT_MINUTES,
   DEFAULT_SIGN_UP_RATE_LIMIT,
   ENV_RULES,
@@ -1049,6 +1051,53 @@ describe("parseEnv: MAINTENANCE_VIA_HTTP and CRON_SECRET (D-051)", () => {
       expect(issuesOf(production({ NODE_ENV: nodeEnv, CRON_SECRET: value }))).toEqual([
         { variable: "CRON_SECRET", rule: ENV_RULES.cronSecret },
       ]);
+    }
+  });
+
+  // SEC-097: the scheduler puts the secret into a double-quoted curl config value, where `"` ends
+  // the value and a backslash starts an escape; only the base64 and base64url alphabet is accepted.
+  it.each([
+    ["a double quote", String.fromCodePoint(0x22)],
+    ["a backslash", String.fromCodePoint(0x5c)],
+    ["a single quote", "'"],
+    ["a dollar sign", "$"],
+    ["a percent sign", "%"],
+    ["a dot", "."],
+    ["a tilde", "~"],
+    ["an exclamation mark", "!"],
+    ["a hash", "#"],
+    ["a colon", ":"],
+  ])("refuses a value with %s in every NODE_ENV (SEC-097)", (_label, character) => {
+    const value = `${CRON_SECRET.slice(0, 20)}${character}${CRON_SECRET.slice(20)}`;
+    expect(CRON_SECRET_PATTERN.test(value)).toBe(false);
+    for (const nodeEnv of ["development", "test", "production"]) {
+      expect(issuesOf(production({ NODE_ENV: nodeEnv, CRON_SECRET: value }))).toEqual([
+        { variable: "CRON_SECRET", rule: ENV_RULES.cronSecret },
+      ]);
+    }
+  });
+
+  it("accepts every character of the base64 and base64url alphabets (SEC-097)", () => {
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=-_";
+    expect(CRON_SECRET_PATTERN.test(alphabet)).toBe(true);
+    for (const character of alphabet) {
+      const value = `${CRON_SECRET}${character}`;
+      expect(parseEnv(source({ CRON_SECRET: value })).cronSecret).toBe(value);
+    }
+  });
+
+  it("accepts in production the values the documented generators emit (SEC-097)", () => {
+    // `openssl rand -base64 48` is base64 of 48 random bytes (64 characters, `+` and `/`
+    // included); the integration tests use base64url of 32 bytes.
+    for (let index = 0; index < 200; index += 1) {
+      for (const value of [
+        randomBytes(48).toString("base64"),
+        randomBytes(32).toString("base64url"),
+      ]) {
+        expect(CRON_SECRET_PATTERN.test(value)).toBe(true);
+        const env = parseEnv(production({ MAINTENANCE_VIA_HTTP: "true", CRON_SECRET: value }));
+        expect(env.cronSecret).toBe(value);
+      }
     }
   });
 

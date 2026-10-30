@@ -167,8 +167,8 @@ describe("D-051 controls that hold", () => {
 describe("SEC-097 CRON_SECRET may hold characters the workflow's curl config string alters", () => {
   // The workflow writes `header = "Authorization: Bearer %s"` into a curl config file. Inside
   // double quotes curl ends the value at `"` and reads `\` as an escape, so the header sent is
-  // not the secret. The env rule accepts both characters.
-  it.fails("the env rule refuses a double quote and a backslash in CRON_SECRET", () => {
+  // not the secret. Fixed: the env rule accepts the base64 and base64url alphabet only.
+  it("the env rule refuses a double quote and a backslash in CRON_SECRET", () => {
     const quote = String.fromCodePoint(0x22);
     const backslash = String.fromCodePoint(0x5c);
     expect(CRON_SECRET_PATTERN.test(`${"A".repeat(32)}${quote}`)).toBe(false);
