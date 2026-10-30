@@ -50,7 +50,7 @@ jobs:
           url="${MAINTENANCE_URL%/}/api/v1/internal/maintenance"
           # The secret goes in a header read from stdin so it is not in the process arguments.
           printf 'header = "Authorization: Bearer %s"\n' "${CRON_SECRET}" | curl --silent --show-error \
-            --fail-with-body --max-time 60 --retry 2 -X POST \
+            --fail-with-body --max-time 75 -X POST \
             --config - "${url}"
           echo
           echo "Maintenance call finished."
