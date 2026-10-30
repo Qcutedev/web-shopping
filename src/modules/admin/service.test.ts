@@ -10,7 +10,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FULFILMENT_STATUSES, PAYMENT_STATUSES } from "@/modules/orders";
 import type { Actor } from "@/server/auth/actor";
-import { AppError } from "@/server/errors";
+import { Prisma } from "@/server/db";
+import { AppError, unauthenticated } from "@/server/errors";
 
 const repo = vi.hoisted(() => ({
   listUsers: vi.fn(),
@@ -186,6 +187,29 @@ describe("applications and stores", () => {
     await service.rejectApplication(ADMIN, "a1", { reason: "r" });
     expect(sellers.approveApplication).toHaveBeenCalledWith(ADMIN, "a1");
     expect(sellers.rejectApplication).toHaveBeenCalledWith(ADMIN, "a1", { reason: "r" });
+  });
+
+  // SEC-096 remediation (b): the decision is one transaction that starts with the acting-admin
+  // check, so a deadlock runs the whole decision again; anything else is not retried.
+  it("a decision aborted by a deadlock is run again as a whole", async () => {
+    const deadlock = new Prisma.PrismaClientKnownRequestError("failed", {
+      code: "P2010",
+      clientVersion: "test",
+      meta: { driverAdapterError: { cause: { originalCode: "40P01" } } },
+    });
+    const decided = { application: {}, store: null };
+    sellers.approveApplication.mockRejectedValueOnce(deadlock).mockResolvedValueOnce(decided);
+    sellers.rejectApplication.mockRejectedValueOnce(deadlock).mockResolvedValueOnce(decided);
+    expect(await service.approveApplication(ADMIN, "a1")).toBe(decided);
+    expect(await service.rejectApplication(ADMIN, "a1", { reason: "r" })).toBe(decided);
+    expect(sellers.approveApplication).toHaveBeenCalledTimes(2);
+    expect(sellers.rejectApplication).toHaveBeenCalledTimes(2);
+  });
+
+  it("a decision refused with an AppError is not run again", async () => {
+    sellers.approveApplication.mockRejectedValueOnce(unauthenticated());
+    expect(await codeOf(service.approveApplication(ADMIN, "a1"))).toBe("UNAUTHENTICATED");
+    expect(sellers.approveApplication).toHaveBeenCalledTimes(1);
   });
 
   it("suspend and reinstate pass the target status and the reason; outcomes map to 404 and 409", async () => {

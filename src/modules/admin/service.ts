@@ -78,6 +78,7 @@ import {
   type UpdateSettingsBody,
 } from "./schema";
 import { judgeModerationDecision, type ModerationDecision } from "./state";
+import { retryTransientConflict } from "./transient-retry";
 
 /** 403 FORBIDDEN unless the actor is an admin; returns the admin's id. */
 function adminId(actor: Actor): string {
@@ -156,23 +157,27 @@ export async function listApplications(
   return pageOf(await repo.listApplications(filter, query), query, toAdminApplicationDto);
 }
 
-/** POST /admin/applications/{id}/approve: the sellers module's decision (T-040). */
+/**
+ * POST /admin/applications/{id}/approve: the sellers module's decision (T-040). The decision is
+ * one transaction that starts with the acting-admin check; when PostgreSQL aborts it for a
+ * deadlock it is run again as a whole (SEC-096 remediation (b); transient-retry.ts).
+ */
 export async function approveApplication(
   actor: Actor,
   applicationId: string,
 ): Promise<ApplicationDecisionDto> {
   adminId(actor);
-  return approveApplicationAsAdmin(actor, applicationId);
+  return retryTransientConflict(() => approveApplicationAsAdmin(actor, applicationId));
 }
 
-/** POST /admin/applications/{id}/reject: the sellers module's decision (T-040). */
+/** POST /admin/applications/{id}/reject: the sellers module's decision (T-040), retried as above. */
 export async function rejectApplication(
   actor: Actor,
   applicationId: string,
   body: RejectApplicationBody,
 ): Promise<ApplicationDecisionDto> {
   adminId(actor);
-  return rejectApplicationAsAdmin(actor, applicationId, body);
+  return retryTransientConflict(() => rejectApplicationAsAdmin(actor, applicationId, body));
 }
 
 /** GET /admin/stores: paginated, newest first, hidden stores included. */

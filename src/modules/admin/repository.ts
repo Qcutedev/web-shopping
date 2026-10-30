@@ -9,7 +9,9 @@
  * Transactions (CLAUDE.md rule 5). Every write runs in one interactive transaction that also
  * writes its `AuditLog` row (REQ-A-10; DATA_MODEL.md 6.17: append-only, same transaction). A
  * refused write writes no audit row: the refusal returns before the audit insert, or rolls the
- * whole transaction back. Inside a transaction every `tx` statement selects scalar fields only and
+ * whole transaction back. A write that PostgreSQL aborted for a deadlock (`40P01`) or a
+ * serialization failure is run again as a whole new transaction, at most three times in all
+ * (`adminWrite`; SEC-096 remediation (b)). Inside a transaction every `tx` statement selects scalar fields only and
  * statements are awaited one after the other (DATA_MODEL.md 7.8). Every status column changes only
  * through a guarded statement whose `WHERE` names the expected current value (DATA_MODEL.md 7.6),
  * and zero affected rows is a refusal, never a silent success.
@@ -74,6 +76,7 @@ import {
   reviewVisibilityMove,
   reviewVisibilityOf,
 } from "./state";
+import { retryTransientConflict } from "./transient-retry";
 
 /** Interactive transaction limits of an admin write. */
 export const ADMIN_TRANSACTION_OPTIONS = { maxWait: 5_000, timeout: 10_000 } as const;
@@ -121,6 +124,17 @@ async function snapshot<T>(read: (tx: DbTransaction) => Promise<T>): Promise<T> 
     await tx.$executeRaw`SET TRANSACTION READ ONLY`;
     return read(tx);
   }, READ_TRANSACTION_OPTIONS);
+}
+
+/**
+ * Runs one admin write in its own interactive transaction (ADMIN_TRANSACTION_OPTIONS), and runs
+ * the whole transaction again when PostgreSQL aborted it for a deadlock or a serialization failure,
+ * at most ADMIN_WRITE_ATTEMPTS times (SECURITY.md SEC-096 remediation (b); transient-retry.ts).
+ * Each attempt is a new transaction that starts with the acting-admin check again, so a retry
+ * skips no rule. `write` must not do anything outside its transaction.
+ */
+function adminWrite<T>(write: (tx: DbTransaction) => Promise<T>): Promise<T> {
+  return retryTransientConflict(() => db.$transaction(write, ADMIN_TRANSACTION_OPTIONS));
 }
 
 /** The foreign key of `Product.categoryId` (Restrict), named by the first migration. */
@@ -364,7 +378,7 @@ interface LockedUser {
  */
 export async function deactivateUser(userId: string, adminId: string): Promise<ActivationOutcome> {
   const move = activationMove("deactivate");
-  return db.$transaction(async (tx) => {
+  return adminWrite(async (tx) => {
     const target = await tx.user.findUnique({ where: { id: userId }, select: { role: true } });
     // An admin target is checked against the admin rows locked below instead: a FOR SHARE on the
     // acting admin's row before that FOR UPDATE would deadlock two admins removing each other.
@@ -415,7 +429,7 @@ export async function deactivateUser(userId: string, adminId: string): Promise<A
       },
     });
     return { kind: "done", row: await readUser(tx, userId) } as const;
-  }, ADMIN_TRANSACTION_OPTIONS);
+  });
 }
 
 /**
@@ -449,7 +463,7 @@ export async function deactivateUser(userId: string, adminId: string): Promise<A
  */
 export async function reactivateUser(userId: string, adminId: string): Promise<ActivationOutcome> {
   const move = activationMove("reactivate");
-  return db.$transaction(async (tx) => {
+  return adminWrite(async (tx) => {
     await assertActingAdmin(tx, adminId);
     const target = await tx.user.findUnique({
       where: { id: userId },
@@ -483,7 +497,7 @@ export async function reactivateUser(userId: string, adminId: string): Promise<A
       },
     });
     return { kind: "done", row: await readUser(tx, userId) } as const;
-  }, ADMIN_TRANSACTION_OPTIONS);
+  });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -639,7 +653,7 @@ export async function moveStoreStatus(
   adminId: string,
 ): Promise<StoreMoveOutcome> {
   const sources = STORE_TRANSITIONS.filter((row) => row.to === to).map((row) => row.from);
-  return db.$transaction(async (tx) => {
+  return adminWrite(async (tx) => {
     await assertActingAdmin(tx, adminId);
     const rows = await tx.$queryRaw<{ status: StoreStatusValue }[]>`
       SELECT "status"::text AS "status" FROM "Store" WHERE "id" = ${storeId} FOR NO KEY UPDATE`;
@@ -665,7 +679,7 @@ export async function moveStoreStatus(
     const [hydrated] = await hydrateStores(tx, [row]);
     if (hydrated === undefined) throw new Error("admin: a store read back is missing.");
     return { kind: "done", row: hydrated } as const;
-  }, ADMIN_TRANSACTION_OPTIONS);
+  });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -849,7 +863,7 @@ export async function decideProduct(
   judge: (current: LockedProductState) => "ok" | "stale-revision" | "invalid-state",
 ): Promise<DecisionOutcome> {
   const rule = moderationRule(decision);
-  return db.$transaction(async (tx) => {
+  return adminWrite(async (tx) => {
     await assertActingAdmin(tx, adminId);
     const rows = await tx.$queryRaw<LockedProductState[]>`
       SELECT "storeId", "status"::text AS "status", "moderationStatus"::text AS "moderationStatus",
@@ -893,7 +907,7 @@ export async function decideProduct(
     const row = await findProductIn(tx, productId);
     if (row === null) throw new Error("admin: a product decided in this transaction is gone.");
     return { kind: "done", row } as const;
-  }, ADMIN_TRANSACTION_OPTIONS);
+  });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -941,7 +955,7 @@ export async function createCategory(
 ): Promise<CategoryRow> {
   for (let attempt = 1; ; attempt += 1) {
     try {
-      return await db.$transaction(async (tx) => {
+      return await adminWrite(async (tx) => {
         await assertActingAdmin(tx, adminId);
         let sortOrder = input.sortOrder;
         if (sortOrder === undefined) {
@@ -962,7 +976,7 @@ export async function createCategory(
           },
         });
         return row;
-      }, ADMIN_TRANSACTION_OPTIONS);
+      });
     } catch (error) {
       if (isUniqueIndexViolation(error, CATEGORY_SLUG_INDEX) && attempt < CATEGORY_SLUG_ATTEMPTS) {
         continue;
@@ -996,7 +1010,7 @@ export async function updateCategory(
   change: { name?: string; sortOrder?: number; isActive?: boolean },
   adminId: string,
 ): Promise<CategoryUpdateOutcome> {
-  return db.$transaction(async (tx) => {
+  return adminWrite(async (tx) => {
     await assertActingAdmin(tx, adminId);
     const rows = await tx.$queryRaw<LockedCategory[]>`
       SELECT "name", "slug", "sortOrder", "isActive" FROM "Category" WHERE "id" = ${categoryId}
@@ -1040,7 +1054,7 @@ export async function updateCategory(
       select: CATEGORY_SELECT,
     });
     return { kind: "done", row } as const;
-  }, ADMIN_TRANSACTION_OPTIONS);
+  });
 }
 
 /**
@@ -1056,7 +1070,7 @@ export async function deleteCategory(
   adminId: string,
 ): Promise<CategoryDeleteOutcome> {
   try {
-    return await db.$transaction(async (tx) => {
+    return await adminWrite(async (tx) => {
       await assertActingAdmin(tx, adminId);
       const rows = await tx.$queryRaw<LockedCategory[]>`
         SELECT "name", "slug", "sortOrder", "isActive" FROM "Category" WHERE "id" = ${categoryId}
@@ -1084,7 +1098,7 @@ export async function deleteCategory(
         },
       });
       return { kind: "deleted" } as const;
-    }, ADMIN_TRANSACTION_OPTIONS);
+    });
   } catch (error) {
     if (isProductCategoryForeignKeyViolation(error)) return { kind: "has-products" };
     throw error;
@@ -1268,7 +1282,7 @@ export async function moveSellerOrderAsAdmin(
 ): Promise<SellerOrderMoveOutcome> {
   const sources = fulfilmentSourceStates(to, "ADMIN");
   if (sources.length === 0) throw new Error("admin: a fulfilment move with no source state.");
-  return db.$transaction(async (tx) => {
+  return adminWrite(async (tx) => {
     await assertActingAdmin(tx, adminId);
     const rows = await tx.$queryRaw<LockedSellerOrder[]>`
       SELECT so."orderId", so."storeId", so."fulfilmentStatus"::text AS "fulfilmentStatus",
@@ -1315,7 +1329,7 @@ export async function moveSellerOrderAsAdmin(
       },
     });
     return { kind: "done", orderId: current.orderId } as const;
-  }, ADMIN_TRANSACTION_OPTIONS);
+  });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1352,7 +1366,7 @@ export async function updateSettings(
   change: { flatShippingFeeSatang?: number; commissionRateBps?: number },
   adminId: string,
 ): Promise<SettingsRow> {
-  return db.$transaction(async (tx) => {
+  return adminWrite(async (tx) => {
     await assertActingAdmin(tx, adminId);
     const rows = await tx.$queryRaw<{ flatShippingFeeSatang: number; commissionRateBps: number }[]>`
       SELECT "flatShippingFeeSatang", "commissionRateBps" FROM "MarketplaceSettings"
@@ -1398,7 +1412,7 @@ export async function updateSettings(
       where: { id: SETTINGS_ROW_ID },
       select: SETTINGS_SELECT,
     });
-  }, ADMIN_TRANSACTION_OPTIONS);
+  });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1588,7 +1602,7 @@ export async function moveReviewVisibility(
   adminId: string,
 ): Promise<ReviewVisibilityOutcome> {
   const move = reviewVisibilityMove(action);
-  return db.$transaction(async (tx) => {
+  return adminWrite(async (tx) => {
     await assertActingAdmin(tx, adminId);
     const rows = await tx.$queryRaw<{ hiddenAt: Date | null; productId: string }[]>`
       SELECT "hiddenAt", "productId" FROM "Review" WHERE "id" = ${reviewId} FOR NO KEY UPDATE`;
@@ -1629,5 +1643,5 @@ export async function moveReviewVisibility(
     const [hydrated] = await hydrateReviews(tx, [row]);
     if (hydrated === undefined) throw new Error("admin: a review read back is missing.");
     return { kind: "done", row: hydrated } as const;
-  }, ADMIN_TRANSACTION_OPTIONS);
+  });
 }
