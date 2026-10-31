@@ -195,7 +195,9 @@ describe("SEC-046 re-check: every library variable is refused by name, for that 
     const version = (dir: string) =>
       (JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as { version: string }).version;
     // A library update must re-list the names (SEC-046 remediation); this pin makes it fail here.
-    expect(roots.map(version)).toEqual(["1.7.7", "1.7.7", "1.7.7"]);
+    // Moved from 1.7.7 to 1.7.14 on 2026-10-31 (Dependabot PR #2) after the names were re-listed:
+    // the same seven plus the same four inert ones, asserted below unchanged.
+    expect(roots.map(version)).toEqual(["1.7.14", "1.7.14", "1.7.14"]);
 
     const files: string[] = [];
     const walk = (dir: string) => {
