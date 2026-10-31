@@ -41,7 +41,8 @@ async function ready(page: Page): Promise<void> {
  * Axe reads the colour of the frame it happens to catch. The home poster (fade-in, shine sweep) and
  * the reveal and chip transitions made it report contrast for half-faded text. This finishes every
  * animation and transition at once, the way the base reduced-motion rule does, so the settled colours
- * are scanned. No element is excluded and no rule is disabled.
+ * are scanned. Scroll-reveal sections (data-reveal) are shown in their final state too: a slow CI
+ * machine caught `#home-stores` half faded in. No element is excluded and no rule is disabled.
  */
 const SETTLE_MOTION = `*, *::before, *::after {
   animation-duration: 0.01ms !important;
@@ -49,6 +50,10 @@ const SETTLE_MOTION = `*, *::before, *::after {
   animation-iteration-count: 1 !important;
   transition-duration: 0.01ms !important;
   transition-delay: 0s !important;
+}
+[data-reveal] {
+  opacity: 1 !important;
+  transform: none !important;
 }`;
 
 async function scan(page: Page, label: string, width: number): Promise<void> {
