@@ -75,7 +75,8 @@ async function scan(page: Page, label: string, width: number): Promise<void> {
   }
   const lines = result.violations.flatMap((violation) =>
     violation.nodes.map(
-      (node) => `${violation.id} [${violation.impact ?? "n/a"}] ${node.target.join(" ")}`,
+      (node) =>
+        `${violation.id} [${violation.impact ?? "n/a"}] ${node.target.join(" ")} :: ${node.any.map((check) => JSON.stringify(check.data)).join(" ")}`,
     ),
   );
   expect.soft(lines, `${label} at ${width} px: axe violations`).toEqual([]);

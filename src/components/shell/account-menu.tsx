@@ -97,10 +97,12 @@ export function AccountMenu({
   }
 
   const visible = name ?? th.shell.header.account.fallbackName;
-  const label =
+  const baseLabel =
     name === null
       ? th.shell.header.account.fallbackName
       : fill(th.shell.header.account.buttonLabel, { name });
+  // WCAG 2.5.3 (axe label-content-name-mismatch): the red bubble is visible text, so the name ends with it.
+  const label = total > 0 ? `${baseLabel} ${total > 99 ? "99+" : total}` : baseLabel;
 
   return (
     <div ref={root} className="relative">
