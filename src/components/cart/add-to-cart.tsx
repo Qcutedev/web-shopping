@@ -11,6 +11,7 @@ import { fill } from "@/i18n/fill";
 import { th } from "@/i18n/th";
 import { addCartItem } from "@/lib/api-client/cart";
 import { apiErrorMessage } from "@/lib/api-client/error-copy";
+import { flyToCart } from "@/lib/fly-to-cart";
 import type { ApiFailure } from "@/lib/api-client/http";
 import { productHref, ROUTES } from "@/lib/routes";
 import { MAX_LINE_QUANTITY } from "@/modules/cart/schema";
@@ -74,6 +75,7 @@ export function AddToCart({ productId, slug, stock, soldOut }: AddToCartProps) {
     setPending(false);
     if (response.ok) {
       setAdded(true);
+      flyToCart();
       // Re-reads the header so the red cart badge shows the new count.
       router.refresh();
       return;

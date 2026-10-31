@@ -42,6 +42,7 @@ export function ProductDetailView({ product }: { product: ProductDetailDto }) {
               {images.map((image, index) => (
                 <li
                   key={image.key}
+                  data-fly-source={index === 0 ? "" : undefined}
                   className={index === 0 ? "col-span-2 sm:col-span-3 lg:col-span-2" : ""}
                 >
                   <ProductImage

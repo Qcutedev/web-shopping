@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { th } from "@/i18n/th";
+import { BackToTop } from "./back-to-top";
 import { SiteFooter } from "./site-footer";
 import { SiteHeader } from "./site-header";
 
@@ -33,6 +34,7 @@ export function AppShell({
         {children}
       </main>
       <SiteFooter />
+      <BackToTop />
     </>
   );
 }

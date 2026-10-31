@@ -178,9 +178,9 @@
    * being placed, so it keeps turning (slowly, see the reduced-motion rule at .order-spinner).
    */
   @media (prefers-reduced-motion: reduce) {
-    :not(.hero-motion, .hero-motion *, .order-spinner),
-    :not(.hero-motion, .hero-motion *, .order-spinner)::before,
-    :not(.hero-motion, .hero-motion *, .order-spinner)::after {
+    :not(.hero-motion, .hero-motion *, .ticker, .ticker *, .skeleton-pulse, .order-spinner),
+    :not(.hero-motion, .hero-motion *, .ticker, .ticker *, .skeleton-pulse, .order-spinner)::before,
+    :not(.hero-motion, .hero-motion *, .ticker, .ticker *, .skeleton-pulse, .order-spinner)::after {
       transition-duration: 0.01ms !important;
       animation-duration: 0.01ms !important;
       animation-iteration-count: 1 !important;
@@ -821,23 +821,82 @@
   rotate: -6deg;
 }
 
-/* Strip of site facts that scrolls under the poster. Two copies, so -50% loops without a jump. */
+/*
+ * Strip under the poster: one message at a time slides up, rests, and slides out (4 messages,
+ * 4 s each). It keeps moving when the visitor asked for reduced motion (owner choice, as for the
+ * poster; it is excluded in the reduced-motion rule above). Hover or touch hold pauses it.
+ */
 .ticker {
+  display: grid;
   overflow: hidden;
-  mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+  text-align: center;
 }
-.ticker-track {
+.ticker-item {
+  grid-area: 1 / 1;
   display: flex;
-  width: max-content;
-  animation: ticker 32s linear infinite;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  opacity: 0;
+  animation: ticker-swap 16s ease-in-out infinite both;
 }
-.ticker:hover .ticker-track {
+.ticker-item:nth-child(2) {
+  animation-delay: 4s;
+}
+.ticker-item:nth-child(3) {
+  animation-delay: 8s;
+}
+.ticker-item:nth-child(4) {
+  animation-delay: 12s;
+}
+.ticker:hover .ticker-item {
   animation-play-state: paused;
 }
-@keyframes ticker {
-  to {
-    transform: translateX(-50%);
+@keyframes ticker-swap {
+  0% {
+    opacity: 0;
+    transform: translateY(100%);
   }
+  4%,
+  21% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  25%,
+  100% {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+}
+
+/* Loading placeholders breathe (opacity only, no moving highlight, so nothing sweeps across the eye). */
+.skeleton-pulse {
+  animation: skeleton-pulse 1.6s ease-in-out infinite;
+}
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* Back-to-top button: fades and rises in once the page was scrolled. */
+.back-to-top {
+  opacity: 0;
+  transform: translateY(12px);
+  pointer-events: none;
+  transition:
+    opacity 250ms ease,
+    transform 250ms ease,
+    background-color 150ms;
+}
+.back-to-top[data-visible="true"] {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
 }
 
 /* Sideways product rows (home page): no visible scrollbar, the arrows and touch do the work. */

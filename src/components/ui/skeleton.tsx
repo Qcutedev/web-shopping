@@ -4,12 +4,16 @@ import { cn } from "@/lib/utils";
 /**
  * Placeholder block for content that is loading. Size it with class names so it matches the shape
  * of what it replaces (for example `aspect-square w-full rounded-lg` for a product image).
- * It is static (no shimmer) and hidden from assistive technology: put `aria-busy="true"` on the
+ * It breathes softly (`.skeleton-pulse`, opacity only, no sweep) and is hidden from assistive technology: put `aria-busy="true"` on the
  * region that is loading and give that region a visually hidden loading text from th.ts.
  */
 export function Skeleton({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
   return (
-    <div aria-hidden="true" className={cn("bg-surface-muted rounded-sm", className)} {...props} />
+    <div
+      aria-hidden="true"
+      className={cn("skeleton-pulse bg-surface-muted rounded-sm", className)}
+      {...props}
+    />
   );
 }
 
@@ -27,7 +31,7 @@ export function SkeletonText({ lines = 2, className, ...props }: SkeletonTextPro
         <div key={index} className="type-body flex h-[1.65em] items-center">
           <div
             className={cn(
-              "bg-surface-muted h-[0.8em] rounded-full",
+              "skeleton-pulse bg-surface-muted h-[0.8em] rounded-full",
               index === count - 1 && count > 1 ? "w-2/3" : "w-full",
             )}
           />

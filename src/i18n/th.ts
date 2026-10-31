@@ -15,6 +15,7 @@ export const th = {
   shell: {
     // proposal
     skipToContent: "ข้ามไปยังเนื้อหาหลัก",
+    backToTop: "กลับขึ้นด้านบน",
     header: {
       // proposal: accessible names of landmarks
       navLabel: "เมนูหลัก",
@@ -431,8 +432,13 @@ export const th = {
           { title: "เปิดร้านของคุณ", description: "สมัครเป็นผู้ขายและลงสินค้าได้เอง" },
         ],
       },
-      // Decorative strip under the poster; the same four facts as `highlights`, short.
-      ticker: ["หลายร้านค้า", "ค้นหาง่าย", "รีวิวจากผู้ซื้อ", "เปิดร้านของคุณ"],
+      // Decorative strip under the poster, one line at a time; true of the system, no promotion.
+      ticker: [
+        "เลือกซื้อจากร้านค้าหลากหลายในที่เดียว",
+        "ค้นหาตามชื่อ กรองตามหมวดหมู่และราคา",
+        "อ่านรีวิวจากผู้ซื้อก่อนตัดสินใจ",
+        "สมัครเป็นผู้ขายและลงสินค้าได้เอง",
+      ],
       hero: {
         badge: "มาใหม่",
         presenterAlt: "",
