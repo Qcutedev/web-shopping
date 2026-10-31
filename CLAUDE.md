@@ -114,6 +114,8 @@ A session can end on the usage limit while a task is half done. [docs/STATUS.md]
 
 Production deployment, production migrations, destructive data or git operations, real payment operations, DNS changes, adding paid services, and anything requiring credentials that are not already provided.
 
+Order of work for any release: code to GitHub, CI green, owner merges, then deploy that `main` commit. See "Order of work" in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). Never claim the website is current without comparing the newest Vercel deployment commit with `origin/main`.
+
 ## Subagents
 
 Definitions live in [.claude/agents/](.claude/agents/). The main Claude Code session is the orchestrator; subagents cannot launch other subagents. Each agent edits only the paths it owns and ends with the report format in [docs/AGENT_WORKFLOW.md](docs/AGENT_WORKFLOW.md).

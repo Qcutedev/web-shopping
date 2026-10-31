@@ -424,6 +424,22 @@ Open before a Vercel deployment can work correctly (none is solved by D-051):
 5. **Backups.** Neon's backups and the Blob objects must be backed up together ("Uploaded files", Backup). Not set up.
 6. **Dependency audit.** `pnpm audit --prod` reports GHSA-mrhx-c7xc-m3w5 (high) in `zod` 4.1.11, pinned by `@vercel/cli-config` under `@vercel/blob` > `@vercel/oidc`. The adapter always passes the token, so that path (OIDC token lookup) is not used, but the CI audit job fails until a pnpm override (the D-034 pattern) or an upstream fix lands.
 
+### Order of work: code to GitHub first, then deploy (owner order, 2026-10-31)
+
+GitHub is the source. A deployment must come from a commit that is already on `main` and whose CI is green. Never deploy local, uncommitted, or unpushed files. Follow this order:
+
+1. Change the code and run `pnpm verify` locally.
+2. Commit, push to a branch, and open a pull request (or push to `main` when the owner has said so).
+3. Wait for CI on GitHub: all 5 jobs must be green (`gh pr checks <number>`). Fix a red job before anything else.
+4. The owner merges into `main` (`gh pr merge` is denied to the agent).
+5. Deploy that `main` commit to Vercel. Production, production migrations, and any deployment that changes what the public sees need the owner's approval first (CLAUDE.md, "Needs human approval").
+6. After the deployment: re-run `vercel alias set <new url> web-shopping-qdev1.vercel.app` (a new deployment has a new URL), then check `/api/health`.
+7. Record the deployed commit in "Resume here" in [STATUS.md](STATUS.md).
+
+Before saying "the website is up to date", compare the commit of the newest Vercel deployment (`githubCommitSha` in the deployment list) with `git rev-parse origin/main`. A redeploy of an old commit can make the newest deployment older than `main`: this happened on 2026-10-31 (newest deployment was `c15537e`, `main` was 23 commits ahead). Do not assume `main` equals the website.
+
+Not checked: whether Vercel deploys `main` automatically. No deployment of a commit after `c15537e` exists, so automatic deployment may be off. Check the project's Git settings before relying on it.
+
 ## CI pipeline (T-070)
 
 **Status: the workflow ran on GitHub (public repository `Qcutedev/web-shopping`). Run 40889555775 on commit `3bf29ed` (2026-10-29) finished with all five jobs successful: verify, integration, e2e, audit, secret-scan. Earlier runs failed on four causes that were fixed in `530cd3b`, `608cc21`, `4197e1d`, `3bf29ed`.** Everything below describes what the file does.
