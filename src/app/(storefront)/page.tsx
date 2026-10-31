@@ -6,6 +6,7 @@ import { PromoBanners } from "@/components/catalog/home-banners";
 import { HeroSection, HeroSkeleton } from "@/components/catalog/hero-section";
 import { CategoryShelves, CheapestShelf } from "@/components/catalog/product-shelf";
 import { Reveal } from "@/components/reveal";
+import { HomeTicker } from "@/components/catalog/home-ticker";
 import { HomeHighlights } from "@/components/catalog/home-highlights";
 import { listHref } from "@/components/catalog/list-href";
 import { ProductGridSkeleton } from "@/components/catalog/product-grid";
@@ -27,6 +28,7 @@ export default function HomePage() {
       <Suspense fallback={<HeroSkeleton />}>
         <HeroSection />
       </Suspense>
+      <HomeTicker />
       <div className="container-page flex flex-col gap-10">
         <Reveal>
           <HomeHighlights />

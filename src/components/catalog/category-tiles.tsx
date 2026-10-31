@@ -16,7 +16,7 @@ export function CategoryTilesView({ categories }: { categories: readonly Categor
   if (categories.length === 0) return null;
   return (
     <nav aria-label={th.catalog.categories.label}>
-      <ul className={TILE_LIST}>
+      <ul className={`${TILE_LIST} stagger-in`}>
         {categories.map((category, i) => (
           <li key={category.id}>
             <Link

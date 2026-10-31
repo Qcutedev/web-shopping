@@ -239,7 +239,9 @@ export function HeroCarousel({
               >
                 <span
                   className={cn(
-                    "bg-ink block h-2 rounded-full transition-all duration-300",
+                    // Width is not animated: on iPad Safari the shrinking pill left a stale dark
+                    // smear around the new dot. Only opacity fades.
+                    "bg-ink block h-2 rounded-full transition-opacity duration-300",
                     i === index ? "w-8" : "w-2 opacity-40 group-hover:opacity-70",
                   )}
                 />

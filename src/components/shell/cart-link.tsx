@@ -50,7 +50,7 @@ export function CartLink({ count = 0, className }: CartLinkProps) {
       className={cn(buttonVariants({ variant: "secondary" }), "rounded-full", className)}
     >
       <CartIcon />
-      {hasItems ? <NotifyBadge count={count} /> : null}
+      {hasItems ? <NotifyBadge key={count} count={count} className="badge-pop" /> : null}
     </Link>
   );
 }

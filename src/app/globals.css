@@ -369,10 +369,31 @@
   position: absolute;
   bottom: 0;
   left: 50%;
-  width: min(48%, 17rem);
-  height: 92%;
+  width: min(56%, 20rem);
+  height: 96%;
   transform: translateX(-50%);
   animation: hero-presenter-in 900ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+/* A soft light disc behind the presenter, and a slow sway so the picture is not static. */
+.hero-presenter::before {
+  content: "";
+  position: absolute;
+  inset: 18% -8% 0;
+  border-radius: 9999px 9999px 0 0;
+  background: radial-gradient(circle at 50% 35%, rgb(255 255 255 / 0.9), rgb(255 255 255 / 0));
+}
+.hero-presenter img {
+  filter: drop-shadow(0 16px 22px rgb(0 0 0 / 0.2));
+  animation: hero-sway 9s ease-in-out infinite;
+}
+@keyframes hero-sway {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-8px) rotate(0.6deg);
+  }
 }
 
 /* Product cards: position and size per slot, with and without a presenter. */
@@ -700,6 +721,25 @@
 .group:focus-visible .product-card-media img {
   transform: scale(1.07);
 }
+/* A light streak crosses the picture once on hover. */
+.product-card-media::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    transparent 40%,
+    rgb(255 255 255 / 0.45) 50%,
+    transparent 60%
+  );
+  transform: translateX(-120%);
+}
+.group:hover .product-card-media::after,
+.group:focus-visible .product-card-media::after {
+  transform: translateX(120%);
+  transition: transform 700ms ease;
+}
 .product-card-cta {
   position: absolute;
   inset-inline: 0.5rem;
@@ -738,6 +778,65 @@
   .group:hover .product-card-media img,
   .group:focus-visible .product-card-media img {
     transform: none;
+  }
+}
+
+/* Cart count bubble: pops when it appears or the number changes (the badge is re-keyed by count). */
+.badge-pop {
+  animation: badge-pop 450ms cubic-bezier(0.2, 0.9, 0.3, 1.5) both;
+}
+@keyframes badge-pop {
+  0% {
+    transform: scale(0.3);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Children rise one after another (category cards). */
+.stagger-in > * {
+  animation: hero-rise 500ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.stagger-in > :nth-child(2) {
+  animation-delay: 50ms;
+}
+.stagger-in > :nth-child(3) {
+  animation-delay: 100ms;
+}
+.stagger-in > :nth-child(4) {
+  animation-delay: 150ms;
+}
+.stagger-in > :nth-child(5) {
+  animation-delay: 200ms;
+}
+.stagger-in > :nth-child(6) {
+  animation-delay: 250ms;
+}
+.stagger-in > :nth-child(n + 7) {
+  animation-delay: 300ms;
+}
+.category-disc:hover svg,
+.group:hover .category-disc svg {
+  rotate: -6deg;
+}
+
+/* Strip of site facts that scrolls under the poster. Two copies, so -50% loops without a jump. */
+.ticker {
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+}
+.ticker-track {
+  display: flex;
+  width: max-content;
+  animation: ticker 32s linear infinite;
+}
+.ticker:hover .ticker-track {
+  animation-play-state: paused;
+}
+@keyframes ticker {
+  to {
+    transform: translateX(-50%);
   }
 }
 

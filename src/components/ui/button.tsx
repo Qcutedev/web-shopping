@@ -7,7 +7,7 @@ export type ButtonSize = "sm" | "md" | "lg";
 
 const BASE =
   "relative inline-flex shrink-0 items-center justify-center gap-2 border border-transparent type-label select-none " +
-  "transition-colors duration-150 focus-ring";
+  "transition-[color,background-color,border-color,transform] duration-150 focus-ring active:scale-[0.97]";
 
 // Tailwind emits disabled: and aria-disabled: rules after hover: and active:, so these win over
 // the variant's hover and active fills. aria-disabled covers links styled as buttons.
