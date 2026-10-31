@@ -4,6 +4,8 @@
  * Commits reviewed:
  *   949285f  SIGN_UP_RATE_LIMIT, an e2e-only override of the sign-up limit (5 per address per hour).
  *   2bd6ded  The storefront header reads the session (account menu, real cart count).
+ *   S138     (re-pinned 2026-10-31, owner decision) The account menu also gets `isAdmin`,
+ *            `isSeller`, and the badge counts of `getNavCounts`, scoped by the session's actor.
  *
  * This file holds no character outside printable ASCII and no backslash-u escape (SEC-040).
  * Pure: no database, no network. The configuration is stubbed per case. The one open finding (SEC-093) is reproduced by `it.fails` in
@@ -295,9 +297,70 @@ async function loadHeaderSession(actor: unknown, profile: unknown, cart: unknown
     getCart: () => Promise.resolve(cart),
     countCartLines: () => Promise.resolve(lines ?? 0),
   }));
+  // Session 138: the real notifications service runs; only its COUNT statements are replaced, so
+  // the role and store scoping of `getNavCounts` is what is tested here, not a stub of it.
+  vi.doMock("@/modules/notifications/repository", () => countRepository);
   const { HeaderSession } = await import("@/components/shell/header-session");
   return HeaderSession;
 }
+
+/** Recording stand-ins for the four COUNT statements, each with a distinct value. */
+const countCalls: { name: string; args: unknown[] }[] = [];
+const countRepository = {
+  countShippedForCustomer: (...args: unknown[]) => {
+    countCalls.push({ name: "countShippedForCustomer", args });
+    return Promise.resolve(7);
+  },
+  countToShipForStore: (...args: unknown[]) => {
+    countCalls.push({ name: "countToShipForStore", args });
+    return Promise.resolve(11);
+  },
+  countPendingApplications: (...args: unknown[]) => {
+    countCalls.push({ name: "countPendingApplications", args });
+    return Promise.resolve(13);
+  },
+  countPendingProducts: (...args: unknown[]) => {
+    countCalls.push({ name: "countPendingProducts", args });
+    return Promise.resolve(17);
+  },
+};
+
+/** What each role may see and which counts may be read for it (owner decision 2026-10-31). */
+const EXPECTED_BY_ROLE: Record<
+  string,
+  {
+    isAdmin: boolean;
+    isSeller: boolean;
+    counts: Record<string, number>;
+    calls: { name: string; args: unknown[] }[];
+  }
+> = {
+  ADMIN: {
+    isAdmin: true,
+    isSeller: false,
+    counts: { ordersOnTheWay: 7, sellerToShip: 0, pendingApplications: 13, pendingProducts: 17 },
+    calls: [
+      { name: "countShippedForCustomer", args: [CANARY_USER] },
+      { name: "countPendingApplications", args: [] },
+      { name: "countPendingProducts", args: [] },
+    ],
+  },
+  SELLER: {
+    isAdmin: false,
+    isSeller: true,
+    counts: { ordersOnTheWay: 7, sellerToShip: 11, pendingApplications: 0, pendingProducts: 0 },
+    calls: [
+      { name: "countShippedForCustomer", args: [CANARY_USER] },
+      { name: "countToShipForStore", args: [CANARY_STORE] },
+    ],
+  },
+  CUSTOMER: {
+    isAdmin: false,
+    isSeller: false,
+    counts: { ordersOnTheWay: 7, sellerToShip: 0, pendingApplications: 0, pendingProducts: 0 },
+    calls: [{ name: "countShippedForCustomer", args: [CANARY_USER] }],
+  },
+};
 
 describe("2bd6ded: the header session part", () => {
   afterEach(() => {
@@ -307,13 +370,18 @@ describe("2bd6ded: the header session part", () => {
       "@/server/auth/session",
       "@/modules/profile",
       "@/modules/cart",
+      "@/modules/notifications/repository",
     ]) {
       vi.doUnmock(name);
     }
   });
 
+  beforeEach(() => {
+    countCalls.length = 0;
+  });
+
   it.each(["ADMIN", "SELLER", "CUSTOMER"])(
-    "%s: only the display name and a line count cross to the client; no id, role, store, email, phone, or token",
+    "%s: only the name, two booleans, the badge counts, and a line count cross to the client; no id, role, store, email, phone, or token",
     async (role) => {
       const actor = Object.freeze({
         userId: CANARY_USER,
@@ -341,17 +409,66 @@ describe("2bd6ded: the header session part", () => {
       const HeaderSession = await loadHeaderSession(actor, profile, cart);
       const seen = elements(await HeaderSession());
       const named = seen.filter((each) => each.type === "AccountMenu" || each.type === "CartLink");
+      const expected = EXPECTED_BY_ROLE[role];
+      // Exact contract: toEqual fails on any extra key (id, email, role string, storeId, ...).
       expect(named).toEqual([
-        { type: "AccountMenu", props: { name: "Somchai" } },
+        {
+          type: "AccountMenu",
+          props: {
+            name: "Somchai",
+            isAdmin: expected?.isAdmin,
+            isSeller: expected?.isSeller,
+            counts: expected?.counts,
+          },
+        },
         { type: "CartLink", props: { count: 1 } },
       ]);
+      expect(Object.keys(named[0]?.props ?? {})).toEqual(["name", "isAdmin", "isSeller", "counts"]);
+      // Counts are read for this actor only: the user's own orders, the session's store for a
+      // seller, the admin queues for an admin. Nothing else is queried.
+      expect(countCalls).toEqual(expected?.calls);
       const text = JSON.stringify(seen);
       for (const canary of [CANARY_EMAIL, CANARY_PHONE, CANARY_USER, CANARY_STORE, CANARY_TOKEN]) {
         expect(text, canary).not.toContain(canary);
       }
-      expect(text).not.toMatch(/ADMIN|SELLER|12300|12_300/);
+      expect(text).not.toMatch(/ADMIN|SELLER|CUSTOMER|12300|12_300/);
     },
   );
+
+  it("an actor whose role is not SELLER never reads a store count, even holding a store id", async () => {
+    for (const role of ["CUSTOMER", "ADMIN"]) {
+      countCalls.length = 0;
+      vi.resetModules();
+      const actor = Object.freeze({
+        userId: CANARY_USER,
+        role,
+        storeId: CANARY_STORE,
+        storeStatus: "APPROVED",
+      });
+      const HeaderSession = await loadHeaderSession(actor, { name: "x" }, undefined);
+      const menu = elements(await HeaderSession()).find((each) => each.type === "AccountMenu");
+      expect(menu?.props.isSeller, role).toBe(false);
+      expect((menu?.props.counts as { sellerToShip: number }).sellerToShip, role).toBe(0);
+      expect(
+        countCalls.map((call) => call.name),
+        role,
+      ).not.toContain("countToShipForStore");
+    }
+  });
+
+  it("a SELLER without a store gets no seller link and no store count", async () => {
+    const actor = Object.freeze({
+      userId: CANARY_USER,
+      role: "SELLER",
+      storeId: null,
+      storeStatus: null,
+    });
+    const HeaderSession = await loadHeaderSession(actor, { name: "x" }, undefined);
+    const menu = elements(await HeaderSession()).find((each) => each.type === "AccountMenu");
+    expect(menu?.props.isSeller).toBe(false);
+    expect(menu?.props.isAdmin).toBe(false);
+    expect(countCalls.map((call) => call.name)).toEqual(["countShippedForCustomer"]);
+  });
 
   it("a visitor or a deactivated user (getActor null) gets the signed-out links and nothing read", async () => {
     const HeaderSession = await loadHeaderSession(null, undefined, undefined);
@@ -359,22 +476,48 @@ describe("2bd6ded: the header session part", () => {
     expect(seen.map((each) => each.type)).toEqual(["SignedOutNav"]);
   });
 
-  it("the client component imports nothing from the server or the modules, and links to no admin or seller page", () => {
+  it("the client component imports no module code, and links to the admin and seller pages only behind their flags", () => {
     const menu = read("src/components/shell/account-menu.tsx");
     expect(menu.startsWith('"use client";')).toBe(true);
-    expect(menu).not.toMatch(/from "@\/(server|modules)/);
-    expect(menu).not.toMatch(/ROUTES\.(admin|seller)/i);
-    expect(menu).toMatch(/export function AccountMenu\(\{ name \}: \{ name: string \| null \}\)/);
+    // The one allowed mention of src/modules is a type-only import (erased at compile time).
+    const serverImports = menu
+      .split(/\r?\n/)
+      .filter((line) => /from "@\/(server|modules)/.test(line));
+    expect(serverImports).toEqual(['import type { NavCounts } from "@/modules/notifications";']);
+    // ROUTES.admin once, inside `{isAdmin ? (`; ROUTES.seller once, inside `{isSeller ? (`.
+    expect(menu.match(/ROUTES\.admin\b/g)).toEqual(["ROUTES.admin"]);
+    expect(menu.match(/ROUTES\.seller\w*/g)).toEqual(["ROUTES.seller"]);
+    expect(menu).toMatch(/\{isAdmin \? \(\s*<Link\s+href=\{ROUTES\.admin\}/);
+    expect(menu).toMatch(/\{isSeller \? \(\s*<Link\s+href=\{ROUTES\.seller\}/);
+    // Exact props: a name, two booleans that default to false, and the counts. Nothing else.
+    expect(menu).toMatch(
+      /export function AccountMenu\(\{\s*name,\s*isAdmin = false,\s*isSeller = false,\s*counts,\s*\}: \{\s*name: string \| null;\s*isAdmin\?: boolean;\s*isSeller\?: boolean;\s*counts\?: NavCounts;\s*\}\)/,
+    );
     expect(menu).not.toContain("dangerouslySetInnerHTML");
   });
 
-  it("the server part is not a client module and passes only name and count", () => {
+  it("NavCounts holds the four counts only", () => {
+    const service = read("src/modules/notifications/service.ts");
+    const body = /export interface NavCounts \{([\s\S]*?)\n\}/.exec(service)?.[1] ?? "";
+    const fields = [...body.matchAll(/^\s*(\w+)\??:\s*([^;]+);/gm)].map((m) => `${m[1]}: ${m[2]}`);
+    expect(fields).toEqual([
+      "ordersOnTheWay: number",
+      "sellerToShip: number",
+      "pendingApplications: number",
+      "pendingProducts: number",
+    ]);
+  });
+
+  it("the server part is not a client module and passes only name, two role booleans, counts, and count", () => {
     const source = read("src/components/shell/header-session.tsx");
     expect(source).not.toMatch(/^\s*["']use client["']/m);
-    expect(source).toContain("<AccountMenu name={name} />");
-    expect(source).toContain("<CartLink count={count} />");
-    expect(source.match(/<AccountMenu[^>]*>/g)).toEqual(["<AccountMenu name={name} />"]);
-    expect(source.match(/<CartLink[^>]*>/g)).toEqual(["<CartLink count={count} />"]);
+    const tags = (pattern: RegExp) =>
+      (source.match(pattern) ?? []).map((tag) => tag.replace(/\s+/g, " "));
+    expect(tags(/<AccountMenu[^>]*>/g)).toEqual([
+      '<AccountMenu name={name} isAdmin={actor.role === "ADMIN"} isSeller={actor.role === "SELLER" && actor.storeId !== null} counts={counts} />',
+    ]);
+    expect(tags(/<CartLink[^>]*>/g)).toEqual(["<CartLink count={count} />"]);
+    expect(source).toContain("getNavCounts(actor)");
   });
 
   it("no cache directive anywhere in src, so no per-user render can be stored and served to another user", () => {

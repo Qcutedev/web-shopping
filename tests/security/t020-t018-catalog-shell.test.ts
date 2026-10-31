@@ -867,6 +867,21 @@ describe("T-018 review: the shell links only inside the site and injects no mark
     );
   });
 
+  /**
+   * Hrefs that are not a bare `ROUTES.x`, allowed in one file each, reviewed 2026-10-31 (session
+   * 138 home page and category drawer). Each is a same-site path: a fixed query on ROUTES.search,
+   * a slug percent-encoded into one path segment under a fixed prefix (`categoryHref`, checked
+   * below), or the `href` prop of the footer's own `FooterLink`, whose every caller in that file
+   * passes `ROUTES.x` (checked below). Any other href form in any file still fails.
+   */
+  const EXTRA_HREFS: Record<string, string[]> = {
+    "src/components/shell/category-drawer.tsx": [
+      "{`${ROUTES.search}?sort=price_asc`}",
+      "{categoryHref(category.slug)}",
+    ],
+    "src/components/shell/site-footer.tsx": ["{href}"],
+  };
+
   for (const path of files) {
     it(`${posix(path)}: no raw HTML, no new window, no absolute URL, no href from data`, () => {
       const source = readFileSync(path, "utf8");
@@ -874,14 +889,42 @@ describe("T-018 review: the shell links only inside the site and injects no mark
       expect(source).not.toMatch(/target=/);
       expect(source).not.toMatch(/https?:\/\//);
       expect(source).not.toMatch(/javascript:/i);
+      const extras = [...(EXTRA_HREFS[posix(path)] ?? [])];
       for (const match of source.matchAll(/href=/g)) {
         const after = source.slice((match.index ?? 0) + "href=".length);
-        const allowed =
-          /^\{ROUTES\.\w+\}/.test(after) || after.startsWith("{`#${MAIN_CONTENT_ID}`}");
-        expect(allowed, after.slice(0, 40)).toBe(true);
+        if (/^\{ROUTES\.\w+\}/.test(after) || after.startsWith("{`#${MAIN_CONTENT_ID}`}")) {
+          continue;
+        }
+        const extra = extras.findIndex((allowed) => after.startsWith(allowed));
+        expect(extra, after.slice(0, 40)).toBeGreaterThanOrEqual(0);
+        extras.splice(extra, 1);
       }
+      // Each allowance is used exactly once, so a stale one cannot cover a new link.
+      expect(extras, posix(path)).toEqual([]);
     });
   }
+
+  it("the footer's FooterLink receives ROUTES.x only, and is the only use of its href prop", () => {
+    const source = readFileSync(
+      join(ROOT, "src", "components", "shell", "site-footer.tsx"),
+      "utf8",
+    );
+    const calls = [...source.matchAll(/<FooterLink\s+href=(\{[^}]*\})/g)].map((m) => m[1]);
+    expect(calls.length).toBeGreaterThan(0);
+    for (const value of calls) expect(value).toMatch(/^\{ROUTES\.\w+\}$/);
+    expect(source.match(/<FooterLink\b/g)?.length).toBe(calls.length);
+    expect(source).toMatch(/function FooterLink\(\{ href, children \}: \{ href: string;/);
+    expect(source.match(/\{href\}/g)).toEqual(["{href}"]);
+  });
+
+  it("categoryHref keeps any slug inside one path segment under /categories/", async () => {
+    const { categoryHref } = await import("@/lib/routes");
+    for (const slug of ["tea", "../admin", "//evil.example", "a/b?c#d", "javascript:alert(1)"]) {
+      const href = categoryHref(slug);
+      expect(href.startsWith("/categories/"), slug).toBe(true);
+      expect(href.slice("/categories/".length), slug).not.toMatch(/[/?#]/);
+    }
+  });
 
   it("ROUTES holds same-site paths only", async () => {
     const { ROUTES: paths } = await import("@/lib/routes");

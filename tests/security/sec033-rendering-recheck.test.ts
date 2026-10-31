@@ -14,7 +14,15 @@ import { join, relative, sep } from "node:path";
 import { createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import * as ts from "typescript";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// ProductDetailView renders AddToCart, a client component that calls useRouter. Outside Next.js
+// there is no mounted app router, so the hook is stubbed; nothing here navigates.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: () => undefined, replace: () => undefined, refresh: () => undefined }),
+}));
+
+import { HeroCarousel } from "@/components/catalog/hero-carousel";
 import { ProductCard } from "@/components/catalog/product-card";
 import { ProductDetailView } from "@/components/catalog/product-detail-view";
 import { ReviewsView } from "@/components/catalog/reviews-view";
@@ -617,6 +625,44 @@ const TITLE_READ_EXCLUSIONS: Record<string, { reads: string[]; reason: string }>
       "`values.title` is the value of the seller's own title input (a form control, not text in " +
       "a sentence); `errors.title` is a validation message from th.ts.",
   },
+  // Session 138 home page and footer, reviewed 2026-10-31.
+  "src/components/catalog/featured-stores.tsx": {
+    reads: ["copy.title"],
+    reason: "`copy` is th.catalog.home.stores (destructured from th): the section heading.",
+  },
+  "src/components/catalog/home-banners.tsx": {
+    reads: ["item.title", "item.title"],
+    reason:
+      "BannerList items: its only caller, PromoBanners, passes th.catalog.home.promoBanners.items " +
+      "(React key and heading).",
+  },
+  "src/components/catalog/home-highlights.tsx": {
+    reads: ["item.title", "item.title"],
+    reason: "th.catalog.home.highlights.items (React key and label).",
+  },
+  "src/components/catalog/product-shelf.tsx": {
+    reads: ["title", "title"],
+    reason:
+      "Shelf heading and ScrollRow label. Callers pass th.catalog.home.cheapestTitle or " +
+      "fill(th.catalog.home.categoryShelf, { name: category.name }): an admin-written category " +
+      "name, which the admin schema refuses bidi controls in (oneLineText, NAME_ALLOWED_TEXT). " +
+      "No product title.",
+  },
+  "src/components/shell/site-footer.tsx": { reads: ["title"], reason: STATIC_TITLE_PROP },
+  "src/components/catalog/hero-section.tsx": {
+    reads: ["item.title"],
+    reason:
+      "Copies the product title into the HeroProduct passed to HeroCarousel; renders nothing " +
+      "itself. The rendering is scanned in hero-carousel.tsx.",
+  },
+  "src/components/catalog/hero-carousel.tsx": {
+    reads: ["slide.title", "product.title"],
+    reason:
+      "`slide.title` comes from th.catalog.home.hero.slides (hero-section.tsx spreads them). " +
+      "`product.title` is a seller-written product title used as the whole aria-label of a " +
+      "link, without the FSI/stripIsolateControls/PDI wrap: OPEN SEC-102, reproduced by the " +
+      "`it.fails` in describe 'SEC-102'. Remove from this pin when SEC-102 is fixed.",
+  },
   "src/components/seller/product-form-model.ts": {
     reads: [
       "stored.title",
@@ -909,5 +955,58 @@ describe("SEC-057 second re-check: the alt wrap after stripIsolateControls (b411
     }
     expect(wraps).toBeGreaterThan(0);
     expect(unstripped).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// SEC-102 (2026-10-31): the home page poster (session 138) puts a product title into an
+// aria-label without the SEC-057 attribute treatment.
+// ---------------------------------------------------------------------------------------------
+
+/** The aria-label of the hero product link for `slug`, as the browser would read it. */
+function heroProductLabel(title: string, slug: string): string | null {
+  const html = renderToStaticMarkup(
+    createElement(HeroCarousel, {
+      slides: [
+        {
+          kicker: "k",
+          title: "Slide",
+          description: "d",
+          cta: "c",
+          href: "/search",
+          products: [{ title, href: `/products/${slug}`, imageUrl: "/api/v1/files/x" }],
+        },
+      ],
+      labels: {
+        region: "r",
+        previous: "p",
+        next: "n",
+        pause: "pa",
+        play: "pl",
+        goTo: "{number}",
+        slideOf: "{number}/{total}",
+        badge: "b",
+        presenterAlt: "a",
+      },
+      presenterSrc: null,
+    }),
+  );
+  const tag = new RegExp(`<a[^>]*href="/products/${slug}"[^>]*>`).exec(html)?.[0] ?? "";
+  const label = /aria-label="([^"]*)"/.exec(tag)?.[1];
+  return label === undefined ? null : label.replaceAll("&amp;", "&");
+}
+
+describe("SEC-102: product titles in the home poster's link labels", () => {
+  it("control: the poster link is found and its label carries the title", () => {
+    expect(heroProductLabel("Plain title", "plain")).toContain("Plain title");
+  });
+
+  // OPEN (SEC-102). The secure behaviour, whichever fix is chosen: a bidi override from the title
+  // either does not reach the label, or sits inside an FSI ... PDI that the title cannot close.
+  it.fails("a title holding PDI then RLO cannot leave the label's isolate", () => {
+    const label = heroProductLabel(`Title${PDI}${RLO}Admin`, "hostile") ?? "";
+    const inner = label.startsWith(FSI) && label.endsWith(PDI) ? label.slice(1, -1) : null;
+    const isolated = inner !== null && ![LRI, RLI, FSI, PDI].some((c) => inner.includes(c));
+    expect(isolated || !label.includes(RLO)).toBe(true);
   });
 });

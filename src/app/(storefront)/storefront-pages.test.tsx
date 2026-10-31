@@ -31,6 +31,8 @@ vi.mock("next/navigation", () => ({
     throw NOT_FOUND_SIGNAL;
   },
   unstable_rethrow: () => undefined,
+  // The product page's AddToCart (a client component) calls useRouter; jsdom has no app router.
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
 }));
 vi.mock("next/server", () => ({ connection: () => Promise.resolve() }));
 

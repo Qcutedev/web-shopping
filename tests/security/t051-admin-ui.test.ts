@@ -690,6 +690,13 @@ describe("T-051: seller and customer text renders as isolated, escaped text (TM-
 // 6. Storefront shell
 // ---------------------------------------------------------------------------------------------
 
+// Owner decision 2026-10-31 (session 138 design accepted): the signed-in account menu shows an
+// admin to an admin, and only there. The one exception is pinned exactly: account-menu.tsx may
+// name `/admin` in its doc comment and link to `ROUTES.admin` once, inside `{isAdmin ? (`.
+// `isAdmin` comes from `actor.role` on the server (header-session.tsx, pinned in the S116 tests);
+// every admin page and endpoint checks the role again. No other shell file may name the admin area.
+const ADMIN_MENU_FILE = "src/components/shell/account-menu.tsx";
+
 describe("T-051: the storefront shell links to no admin page", () => {
   it("no file under src/components/shell names /admin or the admin routes", () => {
     const shell = filesUnder(
@@ -699,8 +706,23 @@ describe("T-051: the storefront shell links to no admin page", () => {
     expect(shell.length).toBeGreaterThan(0);
     for (const path of shell) {
       const source = readFileSync(path, "utf8");
-      expect(source, posix(path)).not.toMatch(/["'`]\/admin|ADMIN_ROUTES|components\/admin/);
+      expect(source, posix(path)).not.toMatch(/ADMIN_ROUTES|components\/admin/);
+      if (posix(path) === ADMIN_MENU_FILE) continue;
+      expect(source, posix(path)).not.toMatch(/["'`]\/admin|ROUTES\.admin\b/);
     }
+  });
+
+  it("the account menu names the admin area only in its doc comment and its isAdmin-only link", () => {
+    const source = readFileSync(join(ROOT, ADMIN_MENU_FILE), "utf8");
+    const named = source
+      .split(/\r?\n/)
+      .filter((line) => /["'`]\/admin|ROUTES\.admin\b/.test(line))
+      .map((line) => line.trim());
+    expect(named).toEqual([
+      "* `/admin` (display only; every admin page and endpoint checks the role again on the server).",
+      "href={ROUTES.admin}",
+    ]);
+    expect(source).toMatch(/\{isAdmin \? \(\s*<Link\s+href=\{ROUTES\.admin\}/);
   });
 
   it("no storefront or seller file outside the admin area links to /admin", () => {
@@ -718,7 +740,17 @@ describe("T-051: the storefront shell links to no admin page", () => {
       );
     });
     const hits = files.filter((p) => /["'`]\/admin(\/|["'`?])/.test(readFileSync(p, "utf8")));
-    expect(hits.map(posix)).toEqual([]);
+    // src/lib/routes.ts holds the path once as `admin: "/admin"` (used only by the account menu,
+    // checked above and below); the account menu names it in its doc comment.
+    expect(hits.map(posix)).toEqual([ADMIN_MENU_FILE, "src/lib/routes.ts"]);
+    const routes = readFileSync(join(SRC, "lib", "routes.ts"), "utf8");
+    expect(routes.match(/["'`]\/admin[^"'`]*["'`]/g)).toEqual(['"/admin"']);
+    expect(routes).toMatch(/^\s*admin: "\/admin",$/m);
+    const users = files
+      .filter((p) => /ROUTES\.admin\b/.test(readFileSync(p, "utf8")))
+      .map(posix)
+      .filter((name) => name !== "src/lib/routes.ts");
+    expect(users).toEqual([ADMIN_MENU_FILE]);
   });
 });
 
