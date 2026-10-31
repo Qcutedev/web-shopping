@@ -47,6 +47,7 @@ export function CartLink({ count = 0, className }: CartLinkProps) {
     <Link
       href={ROUTES.cart}
       aria-label={name}
+      data-fly-to=""
       className={cn(buttonVariants({ variant: "secondary" }), "rounded-full", className)}
     >
       <CartIcon />

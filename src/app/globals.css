@@ -178,9 +178,9 @@
    * being placed, so it keeps turning (slowly, see the reduced-motion rule at .order-spinner).
    */
   @media (prefers-reduced-motion: reduce) {
-    :not(.hero-motion, .hero-motion *, .ticker, .ticker *, .order-spinner),
-    :not(.hero-motion, .hero-motion *, .ticker, .ticker *, .order-spinner)::before,
-    :not(.hero-motion, .hero-motion *, .ticker, .ticker *, .order-spinner)::after {
+    :not(.hero-motion, .hero-motion *, .ticker, .ticker *, .skeleton-pulse, .order-spinner),
+    :not(.hero-motion, .hero-motion *, .ticker, .ticker *, .skeleton-pulse, .order-spinner)::before,
+    :not(.hero-motion, .hero-motion *, .ticker, .ticker *, .skeleton-pulse, .order-spinner)::after {
       transition-duration: 0.01ms !important;
       animation-duration: 0.01ms !important;
       animation-iteration-count: 1 !important;
@@ -867,6 +867,36 @@
     opacity: 0;
     transform: translateY(-100%);
   }
+}
+
+/* Loading placeholders breathe (opacity only, no moving highlight, so nothing sweeps across the eye). */
+.skeleton-pulse {
+  animation: skeleton-pulse 1.6s ease-in-out infinite;
+}
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* Back-to-top button: fades and rises in once the page was scrolled. */
+.back-to-top {
+  opacity: 0;
+  transform: translateY(12px);
+  pointer-events: none;
+  transition:
+    opacity 250ms ease,
+    transform 250ms ease,
+    background-color 150ms;
+}
+.back-to-top[data-visible="true"] {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
 }
 
 /* Sideways product rows (home page): no visible scrollbar, the arrows and touch do the work. */

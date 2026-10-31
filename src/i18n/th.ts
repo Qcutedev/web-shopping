@@ -15,6 +15,7 @@ export const th = {
   shell: {
     // proposal
     skipToContent: "ข้ามไปยังเนื้อหาหลัก",
+    backToTop: "กลับขึ้นด้านบน",
     header: {
       // proposal: accessible names of landmarks
       navLabel: "เมนูหลัก",
