@@ -131,7 +131,10 @@ for (const width of [360, 768]) {
       // The filter form narrows by category and price.
       await page.goto("/search");
       await expect.poll(async () => (await titlesOnPage(page)).length).toBeGreaterThanOrEqual(5);
-      const category = await reach(page.getByLabel(th.catalog.filter.category), width);
+      const category = await reach(
+        page.getByLabel(th.catalog.filter.category, { exact: true }),
+        width,
+      );
       await category.selectOption(SEEDED.categoryTwo.slug);
       const minPrice = await reach(page.getByLabel(th.catalog.filter.minPrice), width);
       await minPrice.fill("500");
@@ -182,7 +185,7 @@ for (const width of [360, 768]) {
       const submit = await reach(page.getByRole("button", { name: th.checkout.submit }), width);
       await submit.click();
       await expect(page).toHaveURL(/\/orders\/[^/]+$/);
-      await expect(page.getByText(th.orders.confirmation.paidTitle)).toBeVisible();
+      await expect(page.getByText(th.orders.confirmation.paidTitle, { exact: true })).toBeVisible();
       await expect(page.getByText(SEEDED.storeOne.name).first()).toBeVisible();
       await expect(page.getByText(SEEDED.storeTwo.name).first()).toBeVisible();
       await expect(page.getByText("฿453.45").first()).toBeVisible();

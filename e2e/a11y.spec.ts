@@ -37,8 +37,24 @@ async function ready(page: Page): Promise<void> {
   await expect(page.locator("h1").first()).toBeVisible({ timeout: 60_000 });
 }
 
+/**
+ * Axe reads the colour of the frame it happens to catch. The home poster (fade-in, shine sweep) and
+ * the reveal and chip transitions made it report contrast for half-faded text. This finishes every
+ * animation and transition at once, the way the base reduced-motion rule does, so the settled colours
+ * are scanned. No element is excluded and no rule is disabled.
+ */
+const SETTLE_MOTION = `*, *::before, *::after {
+  animation-duration: 0.01ms !important;
+  animation-delay: 0s !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  transition-delay: 0s !important;
+}`;
+
 async function scan(page: Page, label: string, width: number): Promise<void> {
   await ready(page);
+  await page.addStyleTag({ content: SETTLE_MOTION });
+  await page.waitForTimeout(300);
   // A cold dev server can reload the page while it compiles; axe then fails with "Execution
   // context was destroyed". Retry on that error only; any violation still fails the test.
   let result: Awaited<ReturnType<AxeBuilder["analyze"]>> | undefined;

@@ -155,7 +155,7 @@ test.describe("journeys 3 and 4, keyboard only, 1280 px", () => {
     await pressUntilFocused(page, submit);
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/\/orders\/[^/]+$/);
-    await expect(page.getByText(th.orders.confirmation.paidTitle)).toBeVisible();
+    await expect(page.getByText(th.orders.confirmation.paidTitle, { exact: true })).toBeVisible();
     await expect(page.getByText(SEEDED.storeOne.name).first()).toBeVisible();
     await expect(page.getByText(SEEDED.storeTwo.name).first()).toBeVisible();
     await expect(page.getByText("฿576.90").first()).toBeVisible();

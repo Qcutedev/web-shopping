@@ -40,7 +40,7 @@ test("seller creates a product, an admin approves then takes it down, and the st
   await page.getByLabel(th.seller.products.form.description).fill("รายละเอียดสินค้าสำหรับทดสอบ");
   await page.getByLabel(th.seller.products.form.sku).fill(`E2E-LIFE-${Date.now()}`);
   await page
-    .getByLabel(th.seller.products.form.category)
+    .getByLabel(th.seller.products.form.category, { exact: true })
     .selectOption({ label: SEEDED.categoryTwo.name });
   await page.getByLabel(th.seller.products.form.price).fill("259.50");
   await page.getByLabel(th.seller.products.form.stock).fill("7");

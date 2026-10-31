@@ -51,7 +51,9 @@ test("the filter form narrows the list by category and price", async ({ page }) 
   await page.goto("/search");
   expect((await titlesOnPage(page)).length).toBe(5);
 
-  await page.getByLabel(th.catalog.filter.category).selectOption(SEEDED.categoryTwo.slug);
+  await page
+    .getByLabel(th.catalog.filter.category, { exact: true })
+    .selectOption(SEEDED.categoryTwo.slug);
   await page.getByRole("button", { name: th.catalog.filter.apply }).click();
   await expect(page).toHaveURL(new RegExp(`category=${SEEDED.categoryTwo.slug}`));
   await expect.poll(async () => (await titlesOnPage(page)).length).toBe(2);

@@ -143,7 +143,7 @@ test("a mock checkout creates a paid order that the history and the detail page 
   await expect(page).toHaveURL(/\/orders\/[^/]+$/);
   orderId = new URL(page.url()).pathname.split("/").pop() ?? "";
   expect(orderId).not.toBe("");
-  await expect(page.getByText(th.orders.confirmation.paidTitle)).toBeVisible();
+  await expect(page.getByText(th.orders.confirmation.paidTitle, { exact: true })).toBeVisible();
   await expect(page.getByText(th.orders.confirmation.paidBody)).toBeVisible();
 
   // The persisted order: both stores, quantities, line amounts, and the total.
