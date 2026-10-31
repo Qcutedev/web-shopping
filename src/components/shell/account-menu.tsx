@@ -97,10 +97,12 @@ export function AccountMenu({
   }
 
   const visible = name ?? th.shell.header.account.fallbackName;
-  const label =
+  const baseLabel =
     name === null
       ? th.shell.header.account.fallbackName
       : fill(th.shell.header.account.buttonLabel, { name });
+  // WCAG 2.5.3 (axe label-content-name-mismatch): the red bubble is visible text, so the name ends with it.
+  const label = total > 0 ? `${baseLabel} ${total > 99 ? "99+" : total}` : baseLabel;
 
   return (
     <div ref={root} className="relative">
@@ -116,6 +118,8 @@ export function AccountMenu({
         <span className={cn(USER_NAME_CONTAINER_CLASS, "truncate")}>
           {name === null ? visible : <UserName>{visible}</UserName>}
         </span>
+        {/* A real space: axe joins the visible text as "name3" otherwise, which the label "name 3" does not contain. */}
+        {total > 0 ? " " : null}
         <NotifyBadge count={total} className="ms-2" />
       </button>
       <div

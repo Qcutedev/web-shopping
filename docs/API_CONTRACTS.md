@@ -435,7 +435,7 @@ One definition, from BR-05 and DATA_MODEL.md section 5, used by the catalog, the
 
 ### 5.1 Auth
 
-Implemented in T-015 (2026-10-13). Written into this section by the auth agent; the schemas in `src/modules/auth/schema.ts` are authoritative. The auth library (Better Auth 1.7.7) does the password hashing, the session tokens, and the cookie, but **its own HTTP handler is not mounted**: there is no `/api/auth/*` route. The four routes below are the application's own, under `/api/v1`, and every convention of section 1 applies to them (origin, content type, body size and JSON rules, envelopes, `Cache-Control: no-store`, `X-Request-Id`). The earlier paths `/api/auth/sign-up/email`, `/api/auth/sign-in/email`, `/api/auth/sign-out`, and `/api/auth/get-session` do not exist.
+Implemented in T-015 (2026-10-13). Written into this section by the auth agent; the schemas in `src/modules/auth/schema.ts` are authoritative. The auth library (Better Auth 1.7.14) does the password hashing, the session tokens, and the cookie, but **its own HTTP handler is not mounted**: there is no `/api/auth/*` route. The four routes below are the application's own, under `/api/v1`, and every convention of section 1 applies to them (origin, content type, body size and JSON rules, envelopes, `Cache-Control: no-store`, `X-Request-Id`). The earlier paths `/api/auth/sign-up/email`, `/api/auth/sign-in/email`, `/api/auth/sign-out`, and `/api/auth/get-session` do not exist.
 
 | Method | Path | Access | Notes |
 | --- | --- | --- | --- |

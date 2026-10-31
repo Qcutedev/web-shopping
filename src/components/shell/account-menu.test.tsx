@@ -48,6 +48,21 @@ describe("AccountMenu", () => {
     );
   });
 
+  it("ends the button name with the red count it shows (WCAG 2.5.3)", () => {
+    const counts = {
+      ordersOnTheWay: 3,
+      sellerToShip: 0,
+      pendingApplications: 0,
+      pendingProducts: 0,
+    };
+    const base = fill(copy.buttonLabel, { name: NAME });
+    const { unmount } = render(<AccountMenu name={NAME} counts={counts} />);
+    expect(screen.getByRole("button", { name: `${base} 3` })).toBeTruthy();
+    unmount();
+    render(<AccountMenu name={NAME} counts={{ ...counts, ordersOnTheWay: 120 }} />);
+    expect(screen.getByRole("button", { name: `${base} 99+` })).toBeTruthy();
+  });
+
   it("offers no admin or seller link to a non-admin", async () => {
     await openMenu();
     const hrefs = screen.getAllByRole("link").map((a) => a.getAttribute("href") ?? "");

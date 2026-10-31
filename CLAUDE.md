@@ -31,7 +31,7 @@ Do not duplicate status or requirements into other files. Link instead.
 
 ## Stack (installed; choices in DECISIONS.md)
 
-Next.js (App Router) + TypeScript strict, React, Tailwind CSS, shadcn/ui, PostgreSQL, Prisma, Better Auth, Zod, Vitest, Playwright, GitHub Actions. Exact versions are pinned in `package.json` (Node 24 or later, pnpm 12.11.2, Next.js 16.4.3, React 19.3.0, Prisma 7.10.0, Better Auth 1.7.7). shadcn/ui is not installed (no `components.json`); the primitives in `src/components/ui/` are written in the repository. Several decisions in DECISIONS.md are still `PROPOSED`; the owner has not confirmed them.
+Next.js (App Router) + TypeScript strict, React, Tailwind CSS, shadcn/ui, PostgreSQL, Prisma, Better Auth, Zod, Vitest, Playwright, GitHub Actions. Exact versions are pinned in `package.json` (Node 24 or later, pnpm 12.11.2, Next.js 16.4.3, React 19.3.1, Prisma 7.10.1, Better Auth 1.7.14). shadcn/ui is not installed (no `components.json`); the primitives in `src/components/ui/` are written in the repository. Several decisions in DECISIONS.md are still `PROPOSED`; the owner has not confirmed them.
 
 ## Commands
 
