@@ -174,12 +174,13 @@
   /*
    * Motion is limited to short colour, border, and shadow transitions; remove even those on request.
    * Owner choice (2026-10-31): the home poster (.hero-motion) keeps its motion regardless of this
-   * setting; its pause button stays available.
+   * setting; its pause button stays available. The order spinner is the only sign that the order is
+   * being placed, so it keeps turning (slowly, see the reduced-motion rule at .order-spinner).
    */
   @media (prefers-reduced-motion: reduce) {
-    :not(.hero-motion, .hero-motion *),
-    :not(.hero-motion, .hero-motion *)::before,
-    :not(.hero-motion, .hero-motion *)::after {
+    :not(.hero-motion, .hero-motion *, .order-spinner),
+    :not(.hero-motion, .hero-motion *, .order-spinner)::before,
+    :not(.hero-motion, .hero-motion *, .order-spinner)::after {
       transition-duration: 0.01ms !important;
       animation-duration: 0.01ms !important;
       animation-iteration-count: 1 !important;
