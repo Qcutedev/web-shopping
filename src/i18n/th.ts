@@ -451,7 +451,8 @@ export const th = {
           },
           {
             kicker: "ค้นหาง่าย",
-            title: "พิมพ์ชื่อสินค้า แล้วเลือกได้เลย",
+            // The no-break space (U+00A0) keeps "แล้วเลือกได้เลย" together, so the line breaks before "แล้ว".
+            title: "พิมพ์ชื่อสินค้า แล้ว เลือกได้เลย",
             description: "ค้นหาตามชื่อ กรองตามหมวดหมู่และราคา เรียงตามมาใหม่หรือราคา",
             cta: "ค้นหาสินค้า",
           },
