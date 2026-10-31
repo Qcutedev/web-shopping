@@ -118,6 +118,8 @@ export function AccountMenu({
         <span className={cn(USER_NAME_CONTAINER_CLASS, "truncate")}>
           {name === null ? visible : <UserName>{visible}</UserName>}
         </span>
+        {/* A real space: axe joins the visible text as "name3" otherwise, which the label "name 3" does not contain. */}
+        {total > 0 ? " " : null}
         <NotifyBadge count={total} className="ms-2" />
       </button>
       <div
